@@ -1,4 +1,4 @@
-/* On Target v1.3.0 — club styles */
+/* On Target v1.4.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -295,6 +295,28 @@ button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px s
   .rs-remove { grid-column: 4; grid-row: 1; }
   .rs-member { grid-row: 2; }
 }
+
+/* Add photos: thumbnails */
+.ph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin: 4px 0 8px; }
+.ph-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 12px; overflow: hidden; background: var(--tint); }
+.ph-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-tile.failed { outline: 3px solid var(--accent); outline-offset: -3px; }
+.ph-cover { position: absolute; inset: 0; border-radius: 0; }
+.ph-remove { position: absolute; top: 0; right: 0; width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.ph-remove span { width: 30px; height: 30px; border-radius: 15px; background: rgba(20,8,12,.72); color: #fff; display: flex; align-items: center; justify-content: center; }
+.ph-remove svg { width: 16px; height: 16px; stroke-width: 2.5; }
+.ph-shade { position: absolute; inset: 0; background: rgba(20,8,12,.5); display: flex; align-items: flex-end; padding: 10px; }
+.ph-bar { display: block; width: 100%; height: 8px; border-radius: 4px; background: rgba(255,255,255,.35); overflow: hidden; }
+.ph-bar span { display: block; width: 40%; height: 100%; border-radius: 4px; background: var(--gold); animation: phSlide 1.1s ease-in-out infinite; }
+@keyframes phSlide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .ph-bar span { animation: none; width: 100%; } }
+.ph-mark { position: absolute; left: 6px; bottom: 6px; width: 32px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; box-shadow: 0 0 0 2px #fff; }
+.ph-mark svg { width: 18px; height: 18px; stroke-width: 3; }
+.ph-done { background: var(--green); }
+.ph-failed { position: absolute; left: 0; right: 0; bottom: 0; background: var(--crimson); color: #fff; font: 700 13px Poppins, sans-serif; text-align: center; padding: 4px 2px; }
+.ph-add { aspect-ratio: 1 / 1; border-radius: 12px; border: 2px dashed var(--line); background: none; color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: 600 14px Poppins, sans-serif; padding: 4px; }
+.ph-add.first { grid-column: 1 / -1; aspect-ratio: auto; min-height: 120px; font-size: 16px; }
+#phSubmit[hidden] { display: none; }
 
 /* Tab bar with the Committee tab: tabs share the width by label length so all six stay readable */
 .tabbar a[hidden] { display: none; }

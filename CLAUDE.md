@@ -50,7 +50,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 - clasp is signed in as the club Google account. To sign in again: `clasp login --no-localhost` (the Apps Script API must be On at script.google.com/home/usersettings).
 - The Script ID is not recorded here. It is in the Apps Script editor under Project Settings. To clone again: `clasp clone <Script ID>` inside an empty `backend/`.
 - Files: `Code.js` (server code), `Api.js` (the new app's front door, shows as `Api.gs` in the editor), `Index.html` (the current On Target page), `appsscript.json` (settings).
-- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called: `signIn` and `addEvent` (the existing functions, unchanged), plus `memberNames` and `postResults`, which are new and live in `Api.js`.
+- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called: `signIn`, `addEvent` and `addPhoto` (the existing functions, unchanged), plus `memberNames` and `postResults`, which are new and live in `Api.js`. Photos go up one per request as a JPEG data URL, already shrunk in the browser to 1600px; a cross-origin request can't report upload progress without a CORS preflight, which Apps Script doesn't answer, so the progress bar is a "working" bar.
 - **Member IDs on results:** `postResults` saves a "Member ID" in the last column of the Results tab (it adds the header itself the first time). The public feeds read columns by header name and never output it. Member names from `memberNames` are kept in memory in the app, never saved on the phone or in this repo. Editing a competition in the old On Target app rewrites its rows without the Member IDs.
 - **One member ID per person for life** (from back end version 20): the Members sheet has one row per membership year, and a renewal reuses the ID from the person's oldest row with the same SSAA number. `memberNames` lists each person once, named from their latest row that isn't "Waiting for payment". So an ID can be on several rows: never treat it as a row key.
 - A new deploy can take about a minute before the live address serves it.
@@ -70,7 +70,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.3.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.4.0**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.

@@ -1,10 +1,10 @@
-/* On Target v1.3.0 — app shell with live club data and committee tools
+/* On Target v1.4.0 — app shell with live club data and committee tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -29,6 +29,7 @@ const ICON = {
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   people: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 15c1.5.9 2.5 2.5 3 5"/></svg>',
   key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>',
@@ -292,7 +293,7 @@ const VIEWS = {
       </div></section>`;
     if (sub === 'event') return posted ? eventPosted() : eventForm();
     if (sub === 'results') return posted ? resultsPosted() : resultsForm();
-    const tile = (icon, label) => `<button type="button" class="tile" data-soon><span class="tile-ico">${icon}</span>${label}</button>`;
+    if (sub === 'photos') return posted ? photosAdded() : photosForm();
     const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
     return `
       <div class="page-title"><h1>Committee</h1>
@@ -304,7 +305,7 @@ const VIEWS = {
         <div class="post-tiles">
           <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
           <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
-          ${tile(ICON.camera, 'Photos')}
+          <a class="tile" href="#/committee/photos"><span class="tile-ico">${ICON.camera}</span>Photos</a>
         </div>
       </section>
       <section class="section"><div class="card list">
@@ -323,7 +324,7 @@ const VIEWS = {
 };
 
 const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
-let posted = false; // true while the "Event posted" or "Results posted" message is showing
+let posted = false; // true while the "Event posted", "Results posted" or "Photos added" message is showing
 
 function eventForm() {
   return `
@@ -383,6 +384,18 @@ function shooterOptions() {
   return members.map(m => `<option value="${esc(m.name)}" label="Club member"></option>`).join('') + options(past);
 }
 
+/* Suggestion lists (by datalist id). Kept up to date when fresh club data arrives while a form is open. */
+const SUGGEST = {
+  rsDiscList: () => options(uniq(pastComps().map(c => c.discipline))),
+  rsCompList: () => options(uniq(pastComps().map(c => c.competition))),
+  rsClassList: () => options(uniq(pastComps().flatMap(c => c.rows.map(r => r['class'])))),
+  rsShooterList: shooterOptions,
+  phAlbumList: () => options(uniq(['Around the range', ...photos().map(p => p.album)]))
+};
+function refreshSuggestions() {
+  Object.keys(SUGGEST).forEach(id => { const list = document.getElementById(id); if (list) list.innerHTML = SUGGEST[id](); });
+}
+
 function shooterRow() {
   return `<div class="rs-row" role="group">
     <label class="field-label rs-shooter"><span class="chip rs-place"></span> Shooter
@@ -401,7 +414,6 @@ function resultsForm() {
   sameDay = null;
   resultsStart = start;
   if (!MEMBERS) loadMembers();
-  const comps = pastComps();
   return `
     <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post results</h1></div>
     <section class="section"><form class="card form" id="resultsForm" novalidate>
@@ -409,12 +421,12 @@ function resultsForm() {
       <input class="field" type="date" id="rsDate" value="${esc(start.date)}" required>
       <label class="field-label" for="rsDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
       <input class="field" id="rsDisc" maxlength="40" list="rsDiscList" autocomplete="off" value="${esc(start.discipline)}">
-      <datalist id="rsDiscList">${options(uniq(comps.map(c => c.discipline)))}</datalist>
+      <datalist id="rsDiscList">${SUGGEST.rsDiscList()}</datalist>
       <label class="field-label" for="rsComp">Competition name</label>
       <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" required>
-      <datalist id="rsCompList">${options(uniq(comps.map(c => c.competition)))}</datalist>
-      <datalist id="rsClassList">${options(uniq(comps.flatMap(c => c.rows.map(r => r['class']))))}</datalist>
-      <datalist id="rsShooterList">${shooterOptions()}</datalist>
+      <datalist id="rsCompList">${SUGGEST.rsCompList()}</datalist>
+      <datalist id="rsClassList">${SUGGEST.rsClassList()}</datalist>
+      <datalist id="rsShooterList">${SUGGEST.rsShooterList()}</datalist>
 
       <h2 class="form-head">Shooters</h2>
       <p class="muted" id="rsHint">${membersHint()}</p>
@@ -454,7 +466,7 @@ async function loadMembers() {
   membersLoading = false;
   const form = document.getElementById('resultsForm');
   if (!form) return;
-  form.querySelector('#rsShooterList').innerHTML = shooterOptions();
+  refreshSuggestions();
   form.querySelector('#rsHint').textContent = membersHint();
   tidyRows(form);
 }
@@ -538,6 +550,177 @@ async function postResultsForm(form) {
   }
 }
 
+/* ---------- Add photos ---------- */
+const MAX_PHOTOS = 20, PHOTO_MAX_PX = 1600, PHOTO_QUALITY = 0.85;
+let PICKED = [];             // [{id, blob, thumb, state: 'preparing' | 'ready' | 'uploading' | 'done' | 'failed'}]
+let pickedId = 0, uploading = false, uploadRun = 0, photosNote = '', addedCount = 0;
+
+function clearPicked() {
+  PICKED.forEach(p => { if (p.thumb) URL.revokeObjectURL(p.thumb); });
+  PICKED = []; uploading = false; uploadRun++; photosNote = '';
+}
+
+function photosForm() {
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Add photos</h1></div>
+    <section class="section"><form class="card form" id="photosForm" novalidate>
+      <label class="field-label" for="phAlbum">Album <span class="field-hint">choose one or type a new one</span></label>
+      <input class="field" id="phAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="Around the range">
+      <datalist id="phAlbumList">${SUGGEST.phAlbumList()}</datalist>
+      <label class="field-label" for="phDate">Date</label>
+      <input class="field" type="date" id="phDate" value="${todayIso()}" required>
+      <label class="field-label" for="phCaption">Caption <span class="field-hint">optional, used for every photo here</span></label>
+      <input class="field" id="phCaption" maxlength="200" autocomplete="off">
+      <input type="file" id="phFiles" accept="image/*" multiple hidden>
+
+      <h2 class="form-head">Photos</h2>
+      <p class="muted">Up to ${MAX_PHOTOS} at a time. Big photos are made smaller before they are sent.</p>
+      <div id="phGrid" class="ph-grid"></div>
+      <p class="muted" id="phStatus" role="status"></p>
+      <p class="form-error" id="phError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="phSubmit">Upload photos</button>
+    </form></section>`;
+}
+
+function photosAdded() {
+  return `
+    <div class="page-title"><h1>Add photos</h1></div>
+    <section class="section"><div class="card empty" role="status">
+      <span class="done-ico">${ICON.check}</span>
+      <div class="empty-title">${addedCount} photo${addedCount === 1 ? '' : 's'} added</div>
+      <p class="muted">${addedCount === 1 ? 'It appears' : 'They appear'} in the app and website gallery within about 2 minutes.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary btn-big" data-more-photos>Add more photos</button>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+      </div>
+    </div></section>`;
+}
+
+/* Draws the thumbnails and brings the main button and status line up to date */
+function drawPicked() {
+  const form = document.getElementById('photosForm');
+  if (!form) return;
+  const count = st => PICKED.filter(p => p.state === st).length;
+  const done = count('done'), failed = count('failed'), preparing = count('preparing'), waiting = count('ready') + failed;
+  const total = PICKED.length;
+  form.querySelector('#phGrid').innerHTML = PICKED.map((p, i) => {
+    const n = i + 1;
+    const mark = p.state === 'preparing' ? '<span class="skel ph-cover"></span>'
+      : p.state === 'uploading' ? `<span class="ph-shade"><span class="ph-bar" role="progressbar" aria-label="Uploading photo ${n}"><span></span></span></span>`
+      : p.state === 'done' ? `<span class="ph-mark ph-done" role="img" aria-label="Photo ${n} uploaded">${ICON.check}</span>`
+      : p.state === 'failed' ? `<span class="ph-failed">Not sent</span>` : '';
+    const remove = !uploading && p.state !== 'done' && p.state !== 'preparing'
+      ? `<button type="button" class="ph-remove" data-ph-remove="${p.id}" aria-label="Remove photo ${n}"><span>${ICON.close}</span></button>` : '';
+    return `<div class="ph-tile${p.state === 'failed' ? ' failed' : ''}">${p.thumb ? `<img src="${p.thumb}" alt="Photo ${n}">` : ''}${mark}${remove}</div>`;
+  }).join('') + (!uploading && total < MAX_PHOTOS
+    ? `<button type="button" class="ph-add${total ? '' : ' first'}" data-ph-choose><span class="tile-ico">${total ? ICON.plus : ICON.camera}</span>${total ? 'Add more' : 'Choose photos'}</button>` : '');
+
+  const btn = form.querySelector('#phSubmit'), status = form.querySelector('#phStatus');
+  const s = n => n === 1 ? '' : 's';
+  btn.hidden = !total;
+  btn.disabled = uploading || preparing > 0 || !waiting;
+  btn.textContent = uploading ? `Uploading ${Math.min(done + failed + 1, total)} of ${total}…`
+    : preparing ? 'Getting photos ready…'
+    : failed ? `Retry failed photo${s(failed)}`
+    : `Upload ${waiting} photo${s(waiting)}`;
+  status.textContent = [photosNote, done && !uploading && failed ? `${done} photo${s(done)} uploaded.` : ''].filter(Boolean).join(' ');
+  ['phAlbum', 'phDate', 'phCaption'].forEach(id => { form.querySelector('#' + id).disabled = uploading; });
+}
+
+/* Makes the photo smaller (longest side 1600px) and upright, as a JPEG, plus a small copy for the thumbnail */
+async function shrinkPhoto(file) {
+  let img, w, h, cleanup = () => {};
+  if (window.createImageBitmap) {
+    try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); w = img.width; h = img.height; cleanup = () => img.close(); } catch (e) { img = null; }
+  }
+  if (!img) {
+    const url = URL.createObjectURL(file);
+    img = new Image();
+    await new Promise((ok, bad) => { img.onload = ok; img.onerror = () => bad(new Error('not a photo')); img.src = url; });
+    w = img.naturalWidth; h = img.naturalHeight; cleanup = () => URL.revokeObjectURL(url);
+  }
+  const copy = (max, quality) => new Promise((ok, bad) => {
+    const scale = Math.min(1, max / Math.max(w, h));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * scale)); c.height = Math.max(1, Math.round(h * scale));
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); // see-through areas become white, not black
+    g.drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(b => b ? ok(b) : bad(new Error('could not shrink')), 'image/jpeg', quality);
+  });
+  try {
+    if (!w || !h) throw new Error('not a photo');
+    return { blob: await copy(PHOTO_MAX_PX, PHOTO_QUALITY), thumb: await copy(320, 0.7) };
+  } finally { cleanup(); }
+}
+
+async function choosePhotos(files) {
+  const room = MAX_PHOTOS - PICKED.length, run = uploadRun;
+  const chosen = [...files];
+  let skipped = 0;
+  photosNote = chosen.length > room ? `Only ${MAX_PHOTOS} photos at a time, so ${chosen.length - room} ${chosen.length - room === 1 ? 'was' : 'were'} left out.` : '';
+  const added = chosen.slice(0, room).map(file => ({ id: ++pickedId, file, state: 'preparing' }));
+  PICKED.push(...added);
+  drawPicked();
+  for (const p of added) {           // one at a time, so a phone never holds many full-size photos at once
+    try {
+      const made = await shrinkPhoto(p.file);
+      if (run !== uploadRun) return; // the screen was left or cleared meanwhile
+      p.blob = made.blob; p.thumb = URL.createObjectURL(made.thumb); p.state = 'ready';
+    } catch (e) {
+      if (run !== uploadRun) return;
+      PICKED = PICKED.filter(x => x !== p); skipped++;
+    }
+    delete p.file;
+    drawPicked();
+  }
+  if (skipped) { photosNote = [photosNote, `${skipped} file${skipped === 1 ? ' was' : 's were'} not a photo and ${skipped === 1 ? 'was' : 'were'} left out.`].filter(Boolean).join(' '); drawPicked(); }
+}
+
+const blobToDataUrl = blob => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(blob); });
+
+/* Sends the photos one at a time. Ones already uploaded are never sent again. */
+async function uploadPhotos(form) {
+  const error = form.querySelector('#phError');
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  if (uploading) return;
+  const meta = { album: form.querySelector('#phAlbum').value.trim(), date: form.querySelector('#phDate').value, caption: form.querySelector('#phCaption').value.trim() };
+  if (!meta.date) return fail('Please choose the date.', form.querySelector('#phDate'));
+  const queue = PICKED.filter(p => p.state === 'ready' || p.state === 'failed');
+  if (!queue.length) return;
+  error.hidden = true; photosNote = '';
+  queue.forEach(p => { p.state = 'ready'; });
+  uploading = true;
+  const run = uploadRun;
+  let lastError = '';
+  for (const p of queue) {
+    p.state = 'uploading'; drawPicked();
+    try {
+      await committeeApi('addPhoto', [meta, await blobToDataUrl(p.blob)]);
+      if (run !== uploadRun) return;
+      p.state = 'done';
+    } catch (err) {
+      if (err.signedOut || run !== uploadRun) return;
+      p.state = 'failed'; lastError = err.message;
+    }
+  }
+  uploading = false;
+  const done = PICKED.filter(p => p.state === 'done').length, failed = PICKED.filter(p => p.state === 'failed').length;
+  if (done) { refresh('photos', true); setTimeout(() => refresh('photos', true), REFRESH_AFTER_MS + 10000); } // the feed keeps its old copy for 2 minutes
+  if (!failed) return finishPhotos();
+  drawPicked();
+  fail(`${failed} photo${failed === 1 ? '' : 's'} could not be sent. ${lastError}`);
+}
+
+function finishPhotos() {
+  addedCount = PICKED.filter(p => p.state === 'done').length;
+  clearPicked();
+  posted = true;
+  render();
+  view.focus();
+}
+
 function winnerRow(c) {
   const w = c.rows[0] || {};
   return `<a class="list-row link-row" href="#/results"><span class="list-ico">${ICON.trophy}</span>
@@ -590,10 +773,10 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && (sub === 'event' || sub === 'results') ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
-  if (quiet && page === currentPage && view.querySelector('form')) return;
-  if (page !== currentPage) { posted = false; sameDay = null; }
+  if (quiet && page === currentPage && view.querySelector('form')) return refreshSuggestions();
+  if (page !== currentPage) { posted = false; sameDay = null; clearPicked(); }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
   view.innerHTML = VIEWS[page.split('/')[0]](sub);
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
@@ -604,6 +787,7 @@ function render(quiet) {
   currentPage = page; currentHash = location.hash;
   const rs = document.getElementById('resultsForm');
   if (rs) tidyRows(rs);
+  drawPicked();
   document.querySelectorAll('.tabbar a').forEach(a => {
     if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -622,6 +806,19 @@ view.addEventListener('click', e => {
   if (t.closest('[data-soon]')) openSheet(soonSheet, document.getElementById('soonClose'));
   if (t.closest('[data-another]')) { posted = false; render(); }
   if (t.closest('[data-same-day]')) { posted = false; render(); }
+  if (t.closest('[data-more-photos]')) { posted = false; render(); }
+  if (t.closest('[data-ph-choose]')) document.getElementById('phFiles').click();
+  if (t.closest('[data-ph-remove]')) {
+    const id = Number(t.closest('[data-ph-remove]').dataset.phRemove), p = PICKED.find(x => x.id === id);
+    if (p && !uploading) {
+      if (p.thumb) URL.revokeObjectURL(p.thumb);
+      PICKED = PICKED.filter(x => x !== p);
+      document.getElementById('phError').hidden = true;
+      // Removing the last photo that failed leaves only uploaded ones: that batch is finished
+      if (PICKED.length && PICKED.every(x => x.state === 'done')) finishPhotos();
+      else { drawPicked(); const next = view.querySelector('[data-ph-remove], [data-ph-choose]'); if (next) next.focus(); }
+    }
+  }
   const rs = t.closest('#resultsForm');
   if (rs && t.closest('[data-add-shooter]')) {
     rs.querySelector('#rsRows').insertAdjacentHTML('beforeend', shooterRow());
@@ -640,6 +837,12 @@ view.addEventListener('click', e => {
 view.addEventListener('submit', e => {
   if (e.target.id === 'eventForm') { e.preventDefault(); postEvent(e.target); }
   if (e.target.id === 'resultsForm') { e.preventDefault(); postResultsForm(e.target); }
+  if (e.target.id === 'photosForm') { e.preventDefault(); uploadPhotos(e.target); }
+});
+view.addEventListener('change', e => {
+  if (e.target.id !== 'phFiles') return;
+  if (e.target.files.length) choosePhotos(e.target.files);
+  e.target.value = ''; // so the same photo can be chosen again after removing it
 });
 view.addEventListener('input', e => {
   const form = e.target.form, err = form && form.querySelector('.form-error');
@@ -647,18 +850,25 @@ view.addEventListener('input', e => {
   if (form && form.id === 'resultsForm') tidyRows(form);
 });
 
-/* Leaving a results form with something typed in it: ask first */
+/* Leaving a results form with something typed in it, or while photos are uploading: ask first */
+const LEAVE_TEXT = {
+  results: ['Leave without posting?', 'These results have not been posted yet. If you leave now, what you have typed will be lost.', 'Stay and keep typing', 'Leave without posting'],
+  photos: ['Photos are still uploading', 'If you leave now, the photos that have not been sent yet will not be added.', 'Stay until they finish', 'Leave and stop uploading']
+};
+const leaveReason = () => uploading ? 'photos' : resultsDirty() ? 'results' : '';
 let leavingTo = null;
 window.addEventListener('hashchange', () => {
-  if (location.hash !== currentHash && resultsDirty()) {
+  const why = location.hash !== currentHash && leaveReason();
+  if (why) {
     leavingTo = location.hash;
     history.replaceState(null, '', currentHash);
+    ['leaveTitle', 'leaveText', 'leaveStay', 'leaveGo'].forEach((id, i) => { document.getElementById(id).textContent = LEAVE_TEXT[why][i]; });
     openSheet(leaveSheet, document.getElementById('leaveStay'));
     return;
   }
   render();
 });
-window.addEventListener('beforeunload', e => { if (resultsDirty()) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (leaveReason()) { e.preventDefault(); e.returnValue = ''; } });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
 
 /* ---------- Committee: sign-in and the server ---------- */
@@ -714,6 +924,7 @@ function signOut() {
   MEMBERS = null; membersFailed = false;
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove(); // nothing left to ask about
+  clearPicked();
   showCommitteeTab();
   if (location.hash.indexOf('#/committee') === 0) location.hash = '#/home'; else render(true);
 }
@@ -755,6 +966,7 @@ document.getElementById('leaveGo').addEventListener('click', () => {
   sheetOpener = null; closeSheets();
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove();
+  clearPicked();
   location.hash = to || '#/committee';
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
