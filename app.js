@@ -1,10 +1,10 @@
-/* On Target v1.1.0 — app shell with live club data
+/* On Target v1.2.0 — app shell with live club data and committee sign-in
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -29,6 +29,9 @@ const ICON = {
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  people: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 15c1.5.9 2.5 2.5 3 5"/></svg>',
+  key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   rings: '<svg class="hero-rings" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48"/><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="20"/><circle cx="50" cy="50" r="6" fill="currentColor"/></svg>'
 };
@@ -277,8 +280,83 @@ const VIEWS = {
         <button type="button" class="btn btn-outline" data-refresh>${ICON.refresh}Refresh club data</button>
       </section>
       <p class="muted" style="text-align:center;margin:20px 16px 0">On Target v${APP_VERSION}</p>`;
+  },
+
+  committee(sub) {
+    if (!session) return `
+      <div class="page-title"><h1>Committee</h1></div>
+      <section class="section"><div class="card empty">
+        <div class="empty-title">Please sign in</div>
+        <p class="muted">This part of the app is for committee members.</p>
+        <button type="button" class="btn btn-primary btn-big" data-signin>Committee sign-in</button>
+      </div></section>`;
+    if (sub === 'event') return posted ? eventPosted() : eventForm();
+    const tile = (icon, label) => `<button type="button" class="tile" data-soon><span class="tile-ico">${icon}</span>${label}</button>`;
+    const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
+    return `
+      <div class="page-title"><h1>Committee</h1>
+        <div class="who"><span class="muted">Signed in as ${esc(session.name)}${session.admin ? ' · Admin' : ''}</span>
+          <button type="button" class="btn btn-outline" data-signout>Sign out</button></div>
+      </div>
+      <section class="section">
+        <div class="section-head"><h2>Post to the app and website</h2></div>
+        <div class="post-tiles">
+          <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
+          ${tile(ICON.trophy, 'Results')}
+          ${tile(ICON.camera, 'Photos')}
+        </div>
+      </section>
+      <section class="section"><div class="card list">
+        ${soon(ICON.mail, 'Messages')}
+        ${soon(ICON.doc, 'Manage posts')}
+      </div></section>
+      ${session.admin ? `<section class="section">
+        <div class="section-head"><h2>Admin</h2></div>
+        <div class="card list">
+          ${soon(ICON.fees, 'Payments to confirm')}
+          ${soon(ICON.people, 'Members')}
+          ${soon(ICON.key, 'People and PINs')}
+        </div>
+      </section>` : ''}`;
   }
 };
+
+const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
+let posted = false; // true while the "Event posted" message is showing
+
+function eventForm() {
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post an event</h1></div>
+    <section class="section"><form class="card form" id="eventForm" novalidate>
+      <label class="field-label" for="evDate">Date</label>
+      <input class="field" type="date" id="evDate" required>
+      <label class="field-label" for="evStart">Start time <span class="field-hint">for example 8:30am</span></label>
+      <input class="field" id="evStart" maxlength="30" autocomplete="off">
+      <label class="field-label" for="evTitle">Title</label>
+      <input class="field" id="evTitle" maxlength="80" autocomplete="off" required>
+      <label class="field-label" for="evDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
+      <input class="field" id="evDisc" maxlength="40" list="evDiscList" autocomplete="off">
+      <datalist id="evDiscList">${DISCIPLINES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
+      <label class="field-label" for="evDesc">Description <span class="field-hint">targets, distances, fees, what to bring</span></label>
+      <textarea class="field" id="evDesc" maxlength="400"></textarea>
+      <p class="form-error" id="evError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="evSubmit">Post event</button>
+    </form></section>`;
+}
+
+function eventPosted() {
+  return `
+    <div class="page-title"><h1>Post an event</h1></div>
+    <section class="section"><div class="card empty" role="status">
+      <span class="done-ico">${ICON.check}</span>
+      <div class="empty-title">Event posted</div>
+      <p class="muted">It appears on the website and app within about 2 minutes.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary btn-big" data-another>Post another event</button>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+      </div>
+    </div></section>`;
+}
 
 function winnerRow(c) {
   const w = c.rows[0] || {};
@@ -331,10 +409,13 @@ const view = document.getElementById('view');
 let currentPage = '';
 
 function render(quiet) {
-  const name = (location.hash.replace('#/', '') || 'home').split('/')[0];
-  const page = VIEWS[name] ? name : 'home';
+  const [name, sub] = (location.hash.replace('#/', '') || 'home').split('/');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && sub === 'event' ? '/event' : '');
+  // Fresh club data must not wipe a form someone is filling in
+  if (quiet && page === currentPage && view.querySelector('form')) return;
+  if (page !== 'committee/event') posted = false;
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
-  view.innerHTML = VIEWS[page]();
+  view.innerHTML = VIEWS[page.split('/')[0]](sub);
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
   if (!quiet || page !== currentPage) {
     view.style.animation = 'none'; void view.offsetWidth; view.style.animation = '';
@@ -342,7 +423,7 @@ function render(quiet) {
   }
   currentPage = page;
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -354,18 +435,164 @@ view.addEventListener('click', e => {
   if (ph) openPhoto(Number(ph.dataset.photo));
   if (t.closest('[data-retry]')) { const k = t.closest('[data-retry]').dataset.retry; FAILED[k] = false; render(true); refresh(k, true); }
   if (t.closest('[data-refresh]')) refreshAll(true);
+  if (t.closest('[data-signin]')) openSignIn();
+  if (t.closest('[data-signout]')) signOut();
+  if (t.closest('[data-soon]')) openSheet(soonSheet, document.getElementById('soonClose'));
+  if (t.closest('[data-another]')) { posted = false; render(); }
 });
+view.addEventListener('submit', e => { if (e.target.id === 'eventForm') { e.preventDefault(); postEvent(e.target); } });
+view.addEventListener('input', e => { const err = e.target.form && e.target.form.querySelector('.form-error'); if (err) err.hidden = true; });
 
 window.addEventListener('hashchange', () => render());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
+
+/* ---------- Committee: sign-in and the server ---------- */
+const sessionStore = {
+  get() { try { const s = JSON.parse(localStorage.getItem('ot:committee')); return s && s.pin ? s : null; } catch (e) { return null; } },
+  set(s) { try { if (s) localStorage.setItem('ot:committee', JSON.stringify(s)); else localStorage.removeItem('ot:committee'); } catch (e) { /* storage blocked */ } }
+};
+let session = sessionStore.get(); // {pin, name, admin} while signed in on this device
+
+/* Calls one of the committee functions on the club's server. Gives back the data, or throws an Error with a plain-English message. */
+async function api(fn, pin, args) {
+  let reply;
+  try {
+    const res = await fetch(FEED_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // plain text avoids a CORS preflight
+      body: JSON.stringify({ action: 'api', fn, pin, args: args || [] })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    reply = await res.json();
+  } catch (e) {
+    console.warn('Could not reach the server', e);
+    throw new Error("Can't reach the club right now. Check your signal and try again.");
+  }
+  if (reply.ok) return reply.data;
+  const err = new Error(reply.error || 'Something went wrong. Please try again.');
+  err.badPin = /PIN is not recognised/i.test(err.message);
+  throw err;
+}
+
+/* For someone already signed in: if the server no longer knows their PIN, sign them out and say why. */
+async function committeeApi(fn, args) {
+  try {
+    return await api(fn, session.pin, args);
+  } catch (e) {
+    if (e.badPin) {
+      signOut();
+      openSignIn('You have been signed out because your PIN is no longer recognised. It may have been changed. Please sign in with your new PIN.');
+      e.signedOut = true;
+    }
+    throw e;
+  }
+}
+
+function showCommitteeTab() {
+  document.getElementById('committeeTab').hidden = !session;
+  document.querySelector('.tabbar').classList.toggle('six', !!session);
+  committeeBtn.setAttribute('aria-label', session ? 'Committee' : 'Committee sign-in');
+}
+
+function signOut() {
+  session = null; sessionStore.set(null);
+  showCommitteeTab();
+  if (location.hash.indexOf('#/committee') === 0) location.hash = '#/home'; else render(true);
+}
+
+/* Sheets (simple dialogs) */
+const sheet = document.getElementById('sheet'), soonSheet = document.getElementById('soonSheet');
+const committeeBtn = document.getElementById('committeeBtn');
+const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
+const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
+let sheetOpener = null;
+
+function openSheet(el, focusOn) {
+  sheetOpener = document.activeElement;
+  el.hidden = false;
+  focusOn.focus();
+}
+function closeSheets() {
+  if (sheet.hidden && soonSheet.hidden) return;
+  sheet.hidden = true; soonSheet.hidden = true;
+  if (sheetOpener && document.contains(sheetOpener)) sheetOpener.focus();
+  sheetOpener = null;
+}
+function openSignIn(note) {
+  soonSheet.hidden = true;
+  pinBox.value = ''; signInError.hidden = true;
+  signInNote.textContent = note || ''; signInNote.hidden = !note;
+  openSheet(sheet, pinBox);
+}
+
+document.getElementById('soonLink').href = FEED_URL;
+committeeBtn.addEventListener('click', () => { if (session) location.hash = '#/committee'; else openSignIn(); });
+document.getElementById('sheetClose').addEventListener('click', closeSheets);
+document.getElementById('soonClose').addEventListener('click', closeSheets);
+[sheet, soonSheet].forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
+
+pinBox.addEventListener('input', () => { signInError.hidden = true; });
+document.getElementById('signInForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (signInBtn.disabled) return;
+  const pin = pinBox.value.trim();
+  const fail = msg => { signInError.textContent = msg; signInError.hidden = false; pinBox.focus(); };
+  if (!pin) return fail('Please type your PIN.');
+  signInError.hidden = true;
+  signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
+  try {
+    const me = await api('signIn', pin);
+    session = { pin, name: me.name, admin: !!me.admin };
+    sessionStore.set(session);
+    showCommitteeTab();
+    sheetOpener = null; closeSheets();
+    if (location.hash === '#/committee') render(); else location.hash = '#/committee';
+  } catch (err) {
+    fail(err.message);
+  } finally {
+    signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
+  }
+});
+
+/* Post an event */
+async function postEvent(form) {
+  const btn = form.querySelector('#evSubmit'), error = form.querySelector('#evError');
+  if (btn.disabled) return;
+  const val = id => form.querySelector('#' + id).value.trim();
+  const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector('#' + id).focus(); };
+  const ev = { date: val('evDate'), start: val('evStart'), title: val('evTitle'), discipline: val('evDisc'), description: val('evDesc') };
+  if (!ev.date) return fail('Please choose a date.', 'evDate');
+  if (!ev.title) return fail('Please give the event a title.', 'evTitle');
+  error.hidden = true;
+  btn.disabled = true; btn.textContent = 'Posting…';
+  try {
+    await committeeApi('addEvent', [ev]);
+    posted = true;
+    render();
+    view.focus();
+    refresh('events', true);
+    setTimeout(() => refresh('events', true), REFRESH_AFTER_MS + 10000); // the feed keeps its old copy for 2 minutes
+  } catch (err) {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Post event';
+    fail(err.message);
+  }
+}
+
+showCommitteeTab();
 render();
 refreshAll();
 
-/* ---------- Committee sheet ---------- */
-const sheet = document.getElementById('sheet');
-document.getElementById('committeeBtn').addEventListener('click', () => { sheet.hidden = false; document.getElementById('sheetClose').focus(); });
-document.getElementById('sheetClose').addEventListener('click', () => { sheet.hidden = true; });
-sheet.addEventListener('click', e => { if (e.target === sheet) sheet.hidden = true; });
+/* Check a remembered PIN still works (it may have been changed or removed), and pick up name or admin changes. */
+if (session) {
+  committeeApi('signIn').then(me => {
+    if (!session || (me.name === session.name && !!me.admin === session.admin)) return;
+    session = { pin: session.pin, name: me.name, admin: !!me.admin };
+    sessionStore.set(session);
+    render(true);
+  }).catch(() => { /* no signal, or already signed out above */ });
+}
 
 /* ---------- Splash ---------- */
 window.addEventListener('load', () => {

@@ -44,7 +44,9 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 - **`backend/` is in `.gitignore` and must stay there.** The code contains the club's bank details. Never commit it, and never copy its contents into tracked files or commit messages.
 - clasp is signed in as the club Google account. To sign in again: `clasp login --no-localhost` (the Apps Script API must be On at script.google.com/home/usersettings).
 - The Script ID is not recorded here. It is in the Apps Script editor under Project Settings. To clone again: `clasp clone <Script ID>` inside an empty `backend/`.
-- Files: `Code.js` (server code), `Index.html` (the current On Target page), `appsscript.json` (settings).
+- Files: `Code.js` (server code), `Api.js` (the new app's front door, shows as `Api.gs` in the editor), `Index.html` (the current On Target page), `appsscript.json` (settings).
+- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called (so far `signIn` and `addEvent`); each calls the existing function unchanged.
+- To roll back a bad deploy, redeploy the previous version: add `-V <version number>` to the deploy command below (`clasp versions` lists them).
 - **Run `clasp pull` before any change.** Carl may also edit in the Apps Script editor, and `clasp push` overwrites what is there.
 - **Don't push or deploy without asking.** Tell Carl what changed first, the same as for this repo.
 - **Deploy only to the live deployment**, so the feed address never changes:
@@ -60,7 +62,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.1.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.2.0**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.

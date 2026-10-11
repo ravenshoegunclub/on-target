@@ -1,4 +1,4 @@
-/* On Target v1.1.0 — club styles */
+/* On Target v1.2.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -233,6 +233,48 @@ h1, h2, h3 { font-family: Montserrat, sans-serif; font-weight: 800; margin: 0; }
 .sheet-panel { background: var(--card); width: 100%; max-width: 520px; border-radius: 20px 20px 0 0; padding: 24px 20px calc(24px + var(--safe-b)); display: flex; flex-direction: column; gap: 12px; }
 .sheet-panel h2 { font-size: 20px; color: var(--heading); }
 .sheet-panel p { margin: 0; color: var(--text-2); }
+
+.sheet-panel .btn { flex: 0 0 auto; }
+.notice { background: var(--gold-soft); color: var(--gold-text); border-radius: 12px; padding: 10px 14px; font-weight: 500; }
+.sheet-panel .notice { color: var(--gold-text); }
+
+/* Forms */
+.field-label { font-weight: 600; font-size: 15px; display: block; }
+.field-hint { font-weight: 400; color: var(--text-2); font-size: 13px; }
+.field {
+  width: 100%; min-height: 50px; border-radius: 12px; border: 1.5px solid var(--line);
+  background: var(--card); color: var(--text); font: 400 16px Poppins, system-ui, sans-serif; padding: 10px 14px;
+}
+textarea.field { min-height: 110px; resize: vertical; line-height: 1.5; }
+.field:focus { border-color: var(--accent); }
+.pin-box { min-height: 64px; text-align: center; font: 800 28px Montserrat, sans-serif; letter-spacing: 6px; }
+.form { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.form .field { margin-bottom: 10px; }
+.form-error { margin: 0; color: var(--accent); font-weight: 600; }
+.sheet-panel .form-error { color: var(--accent); }
+.btn-big { min-height: 54px; font-size: 16px; }
+.btn[disabled] { opacity: .6; cursor: default; }
+.back-link { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; font-weight: 600; text-decoration: none; }
+.back-link .chev { width: 18px; height: 18px; transform: rotate(180deg); }
+.done-ico { width: 52px; height: 52px; border-radius: 26px; background: var(--green); color: #fff; display: flex; align-items: center; justify-content: center; }
+.done-ico svg { width: 26px; height: 26px; stroke-width: 3; }
+.empty .btn-row { align-self: stretch; flex-wrap: wrap; }
+.empty .btn-row .btn { flex: 1 1 160px; }
+
+/* Committee */
+.who { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.who .muted { font-size: 15px; }
+.who .btn { flex: 0 0 auto; padding: 0 18px; }
+.post-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.post-tiles .tile { cursor: pointer; font-size: 15px; padding: 18px 4px 16px; }
+.post-tiles .tile-ico { width: 48px; height: 48px; border-radius: 14px; }
+.post-tiles .tile-ico svg { width: 24px; height: 24px; }
+button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line-soft); cursor: pointer; text-align: left; font: 500 16px Poppins, sans-serif; }
+
+/* Tab bar with the Committee tab: tabs share the width by label length so all six stay readable */
+.tabbar a[hidden] { display: none; }
+.tabbar.six a { flex: 1 1 auto; max-width: none; padding: 0 2px; }
+.tabbar.six .tab-ico { padding: 4px 10px; }
 
 :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 
