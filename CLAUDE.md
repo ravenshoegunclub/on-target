@@ -35,7 +35,21 @@ Parked: electronic range sign-in / Form 33 (waiting on Queensland Police), onlin
     - `?feed=photos&n=60` → `{photos:[{date,album,caption,thumb,full}]}`
     - Dates are `yyyy-mm-dd`. The feed caches for 2 minutes.
 - **The current On Target app (Apps Script page) stays the club's working tool** for posting, messages, payments and members until this app does everything it does. Never change or break anything it or the website relies on.
-- Apps Script changes are made by Carl in the Apps Script editor, not from here. If a feature needs a back-end change, write the exact code to add and explain where it goes; add new functions rather than changing existing ones.
+- Apps Script changes can be made from here with clasp (see "Back end" below). Add new functions rather than changing existing ones.
+
+## Back end (clasp)
+
+The Apps Script project is cloned into `backend/` with clasp, Google's free command-line tool.
+
+- **`backend/` is in `.gitignore` and must stay there.** The code contains the club's bank details. Never commit it, and never copy its contents into tracked files or commit messages.
+- clasp is signed in as the club Google account. To sign in again: `clasp login --no-localhost` (the Apps Script API must be On at script.google.com/home/usersettings).
+- The Script ID is not recorded here. It is in the Apps Script editor under Project Settings. To clone again: `clasp clone <Script ID>` inside an empty `backend/`.
+- Files: `Code.js` (server code), `Index.html` (the current On Target page), `appsscript.json` (settings).
+- **Run `clasp pull` before any change.** Carl may also edit in the Apps Script editor, and `clasp push` overwrites what is there.
+- **Don't push or deploy without asking.** Tell Carl what changed first, the same as for this repo.
+- **Deploy only to the live deployment**, so the feed address never changes:
+  `clasp deploy -i AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig -d "short description"`
+  Never run a plain `clasp deploy` (it makes a new address) and never `clasp undeploy`.
 
 ## Hard rules
 
