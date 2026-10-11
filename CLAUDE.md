@@ -8,7 +8,7 @@ On Target is the club app for **Ravenshoe & District Sporting Shooters** (SSAA B
 It is a free, installable web app (PWA) hosted on GitHub Pages from this repo:
 
 - Repo: `ravenshoegunclub/on-target` (owned by the club's own GitHub account, `ravenshoegunclub`)
-- Live: https://app.ravenshoegunclub.com.au/ (still unlisted). The `CNAME` file at the repo root tells GitHub Pages to use this address; never delete or change it. DNS is at GoDaddy: `app` must be a CNAME record pointing to `ravenshoegunclub.github.io`.
+- Live: https://ontarget.ravenshoegunclub.com.au/ (still unlisted). The `CNAME` file at the repo root tells GitHub Pages to use this address; never delete or change it. DNS is at GoDaddy (which reserves the name `app`, so the app lives at `ontarget`): `ontarget` must be a CNAME record pointing to `ravenshoegunclub.github.io`.
 - Old address: https://ravenshoegunclub.github.io/on-target/ now redirects to the new one.
 - The app uses relative paths everywhere (manifest, service worker, icons, share links), so it works at either address. Keep it that way: no hard-coded `ravenshoegunclub.github.io` or `/on-target`.
 - A new address is a new site as far as phones are concerned: a saved Club Team sign-in and a home-screen install at the old address do not carry over.
