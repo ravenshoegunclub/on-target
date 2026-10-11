@@ -1,10 +1,10 @@
-/* On Target v1.2.0 — app shell with live club data and committee sign-in
+/* On Target v1.3.0 — app shell with live club data and committee tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -291,6 +291,7 @@ const VIEWS = {
         <button type="button" class="btn btn-primary btn-big" data-signin>Committee sign-in</button>
       </div></section>`;
     if (sub === 'event') return posted ? eventPosted() : eventForm();
+    if (sub === 'results') return posted ? resultsPosted() : resultsForm();
     const tile = (icon, label) => `<button type="button" class="tile" data-soon><span class="tile-ico">${icon}</span>${label}</button>`;
     const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
     return `
@@ -302,7 +303,7 @@ const VIEWS = {
         <div class="section-head"><h2>Post to the app and website</h2></div>
         <div class="post-tiles">
           <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
-          ${tile(ICON.trophy, 'Results')}
+          <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
           ${tile(ICON.camera, 'Photos')}
         </div>
       </section>
@@ -322,7 +323,7 @@ const VIEWS = {
 };
 
 const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
-let posted = false; // true while the "Event posted" message is showing
+let posted = false; // true while the "Event posted" or "Results posted" message is showing
 
 function eventForm() {
   return `
@@ -356,6 +357,185 @@ function eventPosted() {
         <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
       </div>
     </div></section>`;
+}
+
+/* ---------- Post results ---------- */
+let MEMBERS = null;          // [{id, name, short}] from the server; kept in memory only, never saved on the phone
+let membersFailed = false, membersLoading = false;
+let sameDay = null;          // {date, discipline} carried over by "Add another competition for the same day"
+let resultsStart = { discipline: '' };
+
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const uniq = list => { const seen = new Set(); return list.map(v => String(v || '').trim()).filter(v => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())); };
+const options = list => list.map(v => `<option value="${esc(v)}"></option>`).join('');
+const pastComps = () => days().flatMap(d => d.competitions);
+
+/* Member to link a typed name to: the full name must match exactly one member */
+function memberFor(name) {
+  const key = String(name || '').trim().toLowerCase();
+  const hits = key && MEMBERS ? MEMBERS.filter(m => m.name.toLowerCase() === key) : [];
+  return hits.length === 1 ? hits[0] : null;
+}
+function shooterOptions() {
+  const members = MEMBERS || [];
+  const taken = new Set(members.map(m => m.name.toLowerCase()));
+  const past = uniq(pastComps().flatMap(c => c.rows.map(r => r.shooter))).filter(n => !taken.has(n.toLowerCase())).sort((a, b) => a.localeCompare(b));
+  return members.map(m => `<option value="${esc(m.name)}" label="Club member"></option>`).join('') + options(past);
+}
+
+function shooterRow() {
+  return `<div class="rs-row" role="group">
+    <label class="field-label rs-shooter"><span class="chip rs-place"></span> Shooter
+      <input class="field" data-f="shooter" list="rsShooterList" maxlength="60" autocomplete="off" autocapitalize="words"></label>
+    <button type="button" class="icon-btn soft rs-remove" data-remove>${ICON.close}</button>
+    <p class="rs-member" hidden></p>
+    <label class="field-label rs-class">Class
+      <input class="field" data-f="class" list="rsClassList" maxlength="30" autocomplete="off"></label>
+    <label class="field-label rs-score">Score
+      <input class="field" data-f="score" maxlength="20" autocomplete="off"></label>
+  </div>`;
+}
+
+function resultsForm() {
+  const start = sameDay || { date: todayIso(), discipline: '' };
+  sameDay = null;
+  resultsStart = start;
+  if (!MEMBERS) loadMembers();
+  const comps = pastComps();
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post results</h1></div>
+    <section class="section"><form class="card form" id="resultsForm" novalidate>
+      <label class="field-label" for="rsDate">Competition day</label>
+      <input class="field" type="date" id="rsDate" value="${esc(start.date)}" required>
+      <label class="field-label" for="rsDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
+      <input class="field" id="rsDisc" maxlength="40" list="rsDiscList" autocomplete="off" value="${esc(start.discipline)}">
+      <datalist id="rsDiscList">${options(uniq(comps.map(c => c.discipline)))}</datalist>
+      <label class="field-label" for="rsComp">Competition name</label>
+      <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" required>
+      <datalist id="rsCompList">${options(uniq(comps.map(c => c.competition)))}</datalist>
+      <datalist id="rsClassList">${options(uniq(comps.flatMap(c => c.rows.map(r => r['class']))))}</datalist>
+      <datalist id="rsShooterList">${shooterOptions()}</datalist>
+
+      <h2 class="form-head">Shooters</h2>
+      <p class="muted" id="rsHint">${membersHint()}</p>
+      <div id="rsRows">${shooterRow()}${shooterRow()}${shooterRow()}</div>
+      <div class="btn-row rs-tools">
+        <button type="button" class="btn btn-outline btn-big" data-add-shooter>Add shooter</button>
+        <button type="button" class="btn btn-outline btn-big" data-sort-score>Sort by score</button>
+      </div>
+      <p class="form-error" id="rsError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="rsSubmit">Post results</button>
+    </form></section>`;
+}
+function membersHint() {
+  if (membersFailed) return "Couldn't load the member names. You can still type each name.";
+  return 'Start typing a name and pick the member from the list. For a visitor, just type their name.';
+}
+
+function resultsPosted() {
+  return `
+    <div class="page-title"><h1>Post results</h1></div>
+    <section class="section"><div class="card empty" role="status">
+      <span class="done-ico">${ICON.check}</span>
+      <div class="empty-title">Results posted</div>
+      <p class="muted">They appear on the website and app within about 2 minutes.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary btn-big" data-same-day>Add another competition for the same day</button>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+      </div>
+    </div></section>`;
+}
+
+async function loadMembers() {
+  if (membersLoading || !session) return;
+  membersLoading = true;
+  try { MEMBERS = await committeeApi('memberNames'); membersFailed = false; }
+  catch (e) { membersFailed = !e.signedOut; }
+  membersLoading = false;
+  const form = document.getElementById('resultsForm');
+  if (!form) return;
+  form.querySelector('#rsShooterList').innerHTML = shooterOptions();
+  form.querySelector('#rsHint').textContent = membersHint();
+  tidyRows(form);
+}
+
+const rowValue = (row, f) => row.querySelector(`[data-f="${f}"]`).value.trim();
+const rowEmpty = row => !rowValue(row, 'shooter');
+
+/* Places follow the row order (rows without a shooter are skipped), then the button count and member ticks are brought up to date */
+function tidyRows(form) {
+  const rows = [...form.querySelectorAll('.rs-row')];
+  const lastFilled = rows.reduce((last, row, i) => rowEmpty(row) ? last : i, -1);
+  let n = 0;
+  rows.forEach((row, i) => {
+    const place = rowEmpty(row) && i < lastFilled ? '' : placeLabel(++n); // an empty row between shooters gets no place
+    row.querySelector('.rs-place').textContent = place || '–';
+    row.setAttribute('aria-label', place ? place + ' place' : 'Empty row');
+    const name = rowValue(row, 'shooter'), m = memberFor(name), note = row.querySelector('.rs-member');
+    row.querySelector('[data-remove]').setAttribute('aria-label', name ? 'Remove ' + name : 'Remove this empty row');
+    note.hidden = !m;
+    note.innerHTML = m ? `${ICON.check}Member · shows as ${esc(m.short)} on the results` : '';
+  });
+  const count = rows.filter(row => !rowEmpty(row)).length;
+  form.querySelector('#rsSubmit').textContent = count ? `Post ${count} result${count === 1 ? '' : 's'}` : 'Post results';
+}
+
+/* 95, 95.5 or "195.7x" / "195-7x" (score then number of Xs). No number sorts last. */
+function scoreValue(text) {
+  const t = String(text).replace(/,/g, '').trim();
+  const withX = /^(\d+)\s*[.\- ]\s*(\d+)\s*x$/i.exec(t);
+  if (withX) return [Number(withX[1]), Number(withX[2])];
+  const n = parseFloat(t);
+  return isNaN(n) ? null : [n, 0];
+}
+function sortByScore(form) {
+  const box = form.querySelector('#rsRows');
+  const rank = row => rowEmpty(row) ? 2 : scoreValue(rowValue(row, 'score')) ? 0 : 1;
+  [...box.children].map((row, i) => ({ row, i, r: rank(row), s: scoreValue(rowValue(row, 'score')) || [0, 0] }))
+    .sort((a, b) => a.r - b.r || b.s[0] - a.s[0] || b.s[1] - a.s[1] || a.i - b.i)
+    .forEach(x => box.appendChild(x.row));
+  tidyRows(form);
+}
+
+function resultsDirty() {
+  const form = document.getElementById('resultsForm');
+  if (!form) return false;
+  return !!form.querySelector('#rsComp').value.trim() || form.querySelector('#rsDisc').value.trim() !== resultsStart.discipline
+    || [...form.querySelectorAll('.rs-row input')].some(i => i.value.trim());
+}
+
+async function postResultsForm(form) {
+  const btn = form.querySelector('#rsSubmit'), error = form.querySelector('#rsError');
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  tidyRows(form);
+  const comp = { date: form.querySelector('#rsDate').value, discipline: form.querySelector('#rsDisc').value.trim(), competition: form.querySelector('#rsComp').value.trim() };
+  const filled = [...form.querySelectorAll('.rs-row')].filter(row => !rowEmpty(row));
+  if (!comp.date) return fail('Please choose the competition day.', form.querySelector('#rsDate'));
+  if (!comp.competition) return fail('Please enter the competition name.', form.querySelector('#rsComp'));
+  if (!filled.length) return fail('Please add at least one shooter.', form.querySelector('[data-f="shooter"]'));
+  comp.rows = filled.map((row, i) => {
+    const m = memberFor(rowValue(row, 'shooter'));
+    const r = { place: String(i + 1), shooter: m ? m.short : rowValue(row, 'shooter'), 'class': rowValue(row, 'class'), score: rowValue(row, 'score') };
+    if (m) r.memberId = m.id;
+    return r;
+  });
+  error.hidden = true;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Posting…';
+  try {
+    await committeeApi('postResults', [comp]);
+    sameDay = { date: comp.date, discipline: comp.discipline };
+    posted = true;
+    render();
+    view.focus();
+    refresh('results', true);
+    setTimeout(() => refresh('results', true), REFRESH_AFTER_MS + 10000); // the feed keeps its old copy for 2 minutes
+  } catch (err) {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    fail(err.message);
+  }
 }
 
 function winnerRow(c) {
@@ -406,14 +586,14 @@ document.addEventListener('keydown', e => {
 
 /* ---------- Router ---------- */
 const view = document.getElementById('view');
-let currentPage = '';
+let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && sub === 'event' ? '/event' : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && (sub === 'event' || sub === 'results') ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   if (quiet && page === currentPage && view.querySelector('form')) return;
-  if (page !== 'committee/event') posted = false;
+  if (page !== currentPage) { posted = false; sameDay = null; }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
   view.innerHTML = VIEWS[page.split('/')[0]](sub);
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
@@ -421,7 +601,9 @@ function render(quiet) {
     view.style.animation = 'none'; void view.offsetWidth; view.style.animation = '';
     window.scrollTo(0, 0);
   }
-  currentPage = page;
+  currentPage = page; currentHash = location.hash;
+  const rs = document.getElementById('resultsForm');
+  if (rs) tidyRows(rs);
   document.querySelectorAll('.tabbar a').forEach(a => {
     if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -439,11 +621,44 @@ view.addEventListener('click', e => {
   if (t.closest('[data-signout]')) signOut();
   if (t.closest('[data-soon]')) openSheet(soonSheet, document.getElementById('soonClose'));
   if (t.closest('[data-another]')) { posted = false; render(); }
+  if (t.closest('[data-same-day]')) { posted = false; render(); }
+  const rs = t.closest('#resultsForm');
+  if (rs && t.closest('[data-add-shooter]')) {
+    rs.querySelector('#rsRows').insertAdjacentHTML('beforeend', shooterRow());
+    tidyRows(rs);
+    rs.querySelector('.rs-row:last-child [data-f="shooter"]').focus();
+  }
+  if (rs && t.closest('[data-sort-score]')) sortByScore(rs);
+  if (rs && t.closest('[data-remove]')) {
+    const rows = rs.querySelector('#rsRows'), row = t.closest('.rs-row'), next = row.nextElementSibling || row.previousElementSibling;
+    row.remove();
+    if (!rows.children.length) rows.insertAdjacentHTML('beforeend', shooterRow());
+    tidyRows(rs);
+    (next || rows.firstElementChild).querySelector('[data-f="shooter"]').focus();
+  }
 });
-view.addEventListener('submit', e => { if (e.target.id === 'eventForm') { e.preventDefault(); postEvent(e.target); } });
-view.addEventListener('input', e => { const err = e.target.form && e.target.form.querySelector('.form-error'); if (err) err.hidden = true; });
+view.addEventListener('submit', e => {
+  if (e.target.id === 'eventForm') { e.preventDefault(); postEvent(e.target); }
+  if (e.target.id === 'resultsForm') { e.preventDefault(); postResultsForm(e.target); }
+});
+view.addEventListener('input', e => {
+  const form = e.target.form, err = form && form.querySelector('.form-error');
+  if (err) err.hidden = true;
+  if (form && form.id === 'resultsForm') tidyRows(form);
+});
 
-window.addEventListener('hashchange', () => render());
+/* Leaving a results form with something typed in it: ask first */
+let leavingTo = null;
+window.addEventListener('hashchange', () => {
+  if (location.hash !== currentHash && resultsDirty()) {
+    leavingTo = location.hash;
+    history.replaceState(null, '', currentHash);
+    openSheet(leaveSheet, document.getElementById('leaveStay'));
+    return;
+  }
+  render();
+});
+window.addEventListener('beforeunload', e => { if (resultsDirty()) { e.preventDefault(); e.returnValue = ''; } });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
 
 /* ---------- Committee: sign-in and the server ---------- */
@@ -496,12 +711,16 @@ function showCommitteeTab() {
 
 function signOut() {
   session = null; sessionStore.set(null);
+  MEMBERS = null; membersFailed = false;
+  const rs = document.getElementById('resultsForm');
+  if (rs) rs.remove(); // nothing left to ask about
   showCommitteeTab();
   if (location.hash.indexOf('#/committee') === 0) location.hash = '#/home'; else render(true);
 }
 
 /* Sheets (simple dialogs) */
-const sheet = document.getElementById('sheet'), soonSheet = document.getElementById('soonSheet');
+const sheet = document.getElementById('sheet'), soonSheet = document.getElementById('soonSheet'), leaveSheet = document.getElementById('leaveSheet');
+const SHEETS = [sheet, soonSheet, leaveSheet];
 const committeeBtn = document.getElementById('committeeBtn');
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
@@ -513,13 +732,13 @@ function openSheet(el, focusOn) {
   focusOn.focus();
 }
 function closeSheets() {
-  if (sheet.hidden && soonSheet.hidden) return;
-  sheet.hidden = true; soonSheet.hidden = true;
+  if (SHEETS.every(el => el.hidden)) return;
+  SHEETS.forEach(el => { el.hidden = true; });
   if (sheetOpener && document.contains(sheetOpener)) sheetOpener.focus();
   sheetOpener = null;
 }
 function openSignIn(note) {
-  soonSheet.hidden = true;
+  soonSheet.hidden = true; leaveSheet.hidden = true;
   pinBox.value = ''; signInError.hidden = true;
   signInNote.textContent = note || ''; signInNote.hidden = !note;
   openSheet(sheet, pinBox);
@@ -529,7 +748,15 @@ document.getElementById('soonLink').href = FEED_URL;
 committeeBtn.addEventListener('click', () => { if (session) location.hash = '#/committee'; else openSignIn(); });
 document.getElementById('sheetClose').addEventListener('click', closeSheets);
 document.getElementById('soonClose').addEventListener('click', closeSheets);
-[sheet, soonSheet].forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
+SHEETS.forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
+document.getElementById('leaveStay').addEventListener('click', closeSheets);
+document.getElementById('leaveGo').addEventListener('click', () => {
+  const to = leavingTo; leavingTo = null;
+  sheetOpener = null; closeSheets();
+  const rs = document.getElementById('resultsForm');
+  if (rs) rs.remove();
+  location.hash = to || '#/committee';
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
 
 pinBox.addEventListener('input', () => { signInError.hidden = true; });

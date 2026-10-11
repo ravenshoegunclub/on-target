@@ -21,6 +21,11 @@ Carl is a volunteer club member (a former IT professional), not on the committee
 3. Club life: RSVP, training and safety course bookings, members-only documents, Learn section, calendar subscription.
 4. Bench booking (pistol range 5 benches, rifle range 10; benches 9 and 10 for big calibres and muzzle brakes).
 
+Planned for build step 4 of phase 1 (Manage posts), not started:
+
+- Events get a "Who can see this?" choice: **Everyone / Members only / Committee only**. It works for signed-in committee straight away.
+- Members-only and committee-only events must **never** appear on the website or the public feed, and must **not be stored in the published RDSS Club Data sheet**.
+
 Parked: electronic range sign-in / Form 33 (waiting on Queensland Police), online payments, SMS alerts, one-tap Facebook/Instagram posting.
 
 ## How it fits together
@@ -45,7 +50,9 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 - clasp is signed in as the club Google account. To sign in again: `clasp login --no-localhost` (the Apps Script API must be On at script.google.com/home/usersettings).
 - The Script ID is not recorded here. It is in the Apps Script editor under Project Settings. To clone again: `clasp clone <Script ID>` inside an empty `backend/`.
 - Files: `Code.js` (server code), `Api.js` (the new app's front door, shows as `Api.gs` in the editor), `Index.html` (the current On Target page), `appsscript.json` (settings).
-- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called (so far `signIn` and `addEvent`); each calls the existing function unchanged.
+- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called: `signIn` and `addEvent` (the existing functions, unchanged), plus `memberNames` and `postResults`, which are new and live in `Api.js`.
+- **Member IDs on results:** `postResults` saves a "Member ID" in the last column of the Results tab (it adds the header itself the first time). The public feeds read columns by header name and never output it. Member names from `memberNames` are kept in memory in the app, never saved on the phone or in this repo. Editing a competition in the old On Target app rewrites its rows without the Member IDs.
+- A new deploy can take about a minute before the live address serves it.
 - To roll back a bad deploy, redeploy the previous version: add `-V <version number>` to the deploy command below (`clasp versions` lists them).
 - **Run `clasp pull` before any change.** Carl may also edit in the Apps Script editor, and `clasp push` overwrites what is there.
 - **Don't push or deploy without asking.** Tell Carl what changed first, the same as for this repo.
@@ -62,7 +69,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.2.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.3.0**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.
