@@ -8,8 +8,10 @@ On Target is the club app for **Ravenshoe & District Sporting Shooters** (SSAA B
 It is a free, installable web app (PWA) hosted on GitHub Pages from this repo:
 
 - Repo: `ravenshoegunclub/on-target` (owned by the club's own GitHub account, `ravenshoegunclub`)
-- Live (development, unlisted): https://ravenshoegunclub.github.io/on-target/
-- Later, at launch: app.ravenshoegunclub.com.au (DNS at GoDaddy, not set up yet)
+- Live: https://app.ravenshoegunclub.com.au/ (still unlisted). The `CNAME` file at the repo root tells GitHub Pages to use this address; never delete or change it. DNS is at GoDaddy: `app` must be a CNAME record pointing to `ravenshoegunclub.github.io`.
+- Old address: https://ravenshoegunclub.github.io/on-target/ now redirects to the new one.
+- The app uses relative paths everywhere (manifest, service worker, icons, share links), so it works at either address. Keep it that way: no hard-coded `ravenshoegunclub.github.io` or `/on-target`.
+- A new address is a new site as far as phones are concerned: a saved Club Team sign-in and a home-screen install at the old address do not carry over.
 - Club website: https://ravenshoegunclub.com.au
 
 Carl is a volunteer club member (a former IT professional), not on the committee. He builds and looks after the app.
@@ -74,7 +76,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.7.1**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.7.2**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.
