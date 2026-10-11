@@ -1,10 +1,10 @@
-/* On Target v1.5.0 — app shell with live club data and committee tools
+/* On Target v1.6.0 — app shell with live club data and committee tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -285,7 +285,7 @@ const VIEWS = {
       <p class="muted" style="text-align:center;margin:20px 16px 0">On Target v${APP_VERSION}</p>`;
   },
 
-  committee(sub) {
+  committee(sub, arg) {
     if (!session) return `
       <div class="page-title"><h1>Committee</h1></div>
       <section class="section"><div class="card empty">
@@ -297,10 +297,14 @@ const VIEWS = {
     if (sub === 'results') return posted ? resultsPosted() : resultsForm();
     if (sub === 'photos') return posted ? photosAdded() : photosForm();
     if (sub === 'manage') return manageView();
+    if (sub === 'messages') return messagesView();
+    if (sub === 'message') return messageView(arg);
+    if (sub === 'reply') return replyView(arg);
     if (sub === 'edit') {
       if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
       return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
     }
+    loadUnread();
     const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
     return `
       <div class="page-title"><h1>Committee</h1>
@@ -316,7 +320,7 @@ const VIEWS = {
         </div>
       </section>
       <section class="section"><div class="card list">
-        ${soon(ICON.mail, 'Messages')}
+        <a class="menu-row" href="#/committee/messages"><span class="tile-ico">${ICON.mail}</span>Messages${unreadBadge()}${ICON.chev}</a>
         <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
       </div></section>
       ${session.admin ? `<section class="section">
@@ -536,26 +540,288 @@ function askDelete() {
       () => committeeApi('deleteResults', [rows.map(r => ({ row: r.row, fp: r.fp }))]), 'Results deleted.']
     : ['Delete this photo?', 'This removes the photo from the gallery on the website and the app.', 'photos',
       () => committeeApi('deletePhoto', [it.row, it.fp]), 'Photo deleted.'];
-  document.getElementById('confirmTitle').textContent = what[0];
-  document.getElementById('confirmText').textContent = what[1] + ' It cannot be undone in the app.';
+  confirmAsk({
+    title: what[0], text: what[1] + ' It cannot be undone in the app.', yes: 'Yes, delete it', busy: 'Deleting…',
+    run: what[3],
+    done: () => { changed(what[2], what[4]); go('#/committee/manage'); },
+    fail: err => CONFLICT.test(err.message) && (changed(what[2], CONFLICT_NOTE), go('#/committee/manage'), true)
+  });
+}
+
+/* A question before something that is hard to undo. The safe answer has the focus.
+   o: {title, text, yes, busy, no, run (async), done, fail (returns true when it has dealt with the error)} */
+function confirmAsk(o) {
+  document.getElementById('confirmTitle').textContent = o.title;
+  document.getElementById('confirmText').textContent = o.text;
+  document.getElementById('confirmNo').textContent = o.no || 'No, keep it';
   const yes = document.getElementById('confirmYes'), error = document.getElementById('confirmError');
-  error.hidden = true; yes.disabled = false; yes.textContent = 'Yes, delete it';
+  error.hidden = true; yes.disabled = false; yes.textContent = o.yes;
   yes.onclick = async () => {
     if (yes.disabled) return;
-    yes.disabled = true; yes.textContent = 'Deleting…'; error.hidden = true;
+    yes.disabled = true; yes.textContent = o.busy; error.hidden = true;
     try {
-      await what[3]();
+      const out = await o.run();
       sheetOpener = null; closeSheets();
-      changed(what[2], what[4]);
-      go('#/committee/manage');
+      if (o.done) o.done(out);
     } catch (err) {
       if (err.signedOut) return;
-      if (CONFLICT.test(err.message)) { sheetOpener = null; closeSheets(); changed(what[2], CONFLICT_NOTE); return go('#/committee/manage'); }
-      yes.disabled = false; yes.textContent = 'Yes, delete it';
+      if (o.fail && o.fail(err)) { sheetOpener = null; return closeSheets(); }
+      yes.disabled = false; yes.textContent = o.yes;
       error.textContent = err.message; error.hidden = false;
     }
   };
   openSheet(confirmSheet, document.getElementById('confirmNo'));
+}
+
+/* ---------- Messages (the club inbox, for every committee member) ---------- */
+const MSG_VIEWS = [['inbox', 'Inbox'], ['mine', 'Mine'], ['replied', 'Replied'], ['all', 'All']];
+const CLUB_FROM = 'info@ravenshoegunclub.com.au';
+/* Everything here is kept in memory only: no email ever goes into the phone's storage */
+const MSG = { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: 0 };
+let msgOpen = null;          // the conversation that is open (from the server)
+let msgOpenState = '';       // '', 'loading' or the reason it could not be opened
+let msgUnread = null, unreadAt = 0;
+let SAVED = null, savedLoading = false; // saved replies [{title, text}]
+
+function unreadBadge() {
+  return msgUnread ? `<span class="count-badge" aria-label="${msgUnread} unread">${msgUnread}</span>` : '';
+}
+async function loadUnread(force) {
+  if (!session || (!force && Date.now() - unreadAt < 60000)) return;
+  unreadAt = Date.now();
+  try {
+    const n = (await committeeApi('msgCount')).unread || 0;
+    if (n === msgUnread) return;
+    msgUnread = n;
+    if (currentPage === 'committee') render(true);
+  } catch (e) { /* the badge is only a hint */ }
+}
+
+function msgWhen(iso) {
+  const [day, time] = String(iso).split('T');
+  if (!day) return '';
+  if (day === todayIso() && time) { const [h, m] = time.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; }
+  const d = parseDate(day);
+  return `${d.getDate()} ${mon(d)}${d.getFullYear() === new Date().getFullYear() ? '' : ' ' + d.getFullYear()}`;
+}
+const msgWho = m => m.name || m.email || 'Unknown sender';
+const AVATAR_COLOURS = ['#5C0F1F', '#9B1B35', '#1E7A3C', '#1D4C8A', '#6B4600', '#5E4C51'];
+function avatar(who) {
+  const ch = (String(who).match(/[A-Za-z0-9]/) || ['?'])[0].toUpperCase();
+  return `<span class="avatar" style="background:${AVATAR_COLOURS[[...String(who)].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_COLOURS.length]}" aria-hidden="true">${ch}</span>`;
+}
+const labelChips = labels => (labels || []).map(l => `<span class="lab lab-${esc(l.toLowerCase())}">${esc(l)}</span>`).join('');
+const statusTags = m => (m.repliedBy ? `<span class="lab lab-tag">Replied by ${esc(m.repliedBy)}</span>` : '') + (m.claimedBy && !m.repliedBy ? `<span class="lab lab-tag">Claimed by ${esc(m.claimedBy)}</span>` : '');
+
+async function loadMessages(more) {
+  if (!session || (more && MSG.state === 'loading')) return;
+  const run = ++MSG.run, page = more ? MSG.page + 1 : 0; // a newer request (another view, a search) replaces one still on its way
+  if (!more) MSG.items = null;
+  MSG.state = 'loading';
+  drawMessages();
+  try {
+    const d = await committeeApi('msgList', [MSG.view, MSG.query, page]);
+    if (run !== MSG.run) return;
+    MSG.items = (more ? MSG.items || [] : []).concat(d.items || []);
+    MSG.more = !!d.more; MSG.page = page; MSG.state = ''; MSG.at = Date.now();
+  } catch (e) {
+    if (e.signedOut || run !== MSG.run) return;
+    MSG.state = 'failed';
+  }
+  drawMessages();
+}
+
+function messagesView() {
+  if (!MSG.items && MSG.state !== 'failed' || Date.now() - MSG.at > 60000 && MSG.state !== 'loading') setTimeout(() => loadMessages(), 0);
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Messages</h1></div>
+    <section class="section">
+      <form class="msg-search" id="msgSearch" role="search" novalidate>
+        <label class="sr-only" for="msgQuery">Search messages</label>
+        <input class="field" type="search" id="msgQuery" placeholder="Search messages" autocomplete="off" maxlength="80" value="${esc(MSG.query)}">
+        <button type="submit" class="btn btn-primary">Search</button>
+      </form>
+      <div class="seg" role="group" aria-label="Which messages">${MSG_VIEWS.map(v => `
+        <button type="button" data-mview="${v[0]}" aria-pressed="${v[0] === MSG.view}">${v[1]}</button>`).join('')}</div>
+      <div id="msgList"></div>
+    </section>`;
+}
+
+/* Draws the list part of the Messages screen (the search box above it is left alone, so typing is never lost) */
+function drawMessages() {
+  const box = document.getElementById('msgList');
+  if (!box) return;
+  const none = { inbox: ['Inbox is clear', 'New messages to the club appear here.'], mine: ['Nothing claimed', 'Messages you claim appear here until they are replied to.'],
+    replied: ['No replies yet', 'Messages that have been replied to appear here.'], all: ['No messages', 'Nothing was found.'] }[MSG.view];
+  const rows = (MSG.items || []).map(m => `
+    <a class="msg-row${m.unread ? ' unread' : ''}" href="#/committee/message/${esc(m.id)}">${avatar(msgWho(m))}
+      <span class="msg-main">
+        <span class="msg-top"><span class="msg-name">${esc(msgWho(m))}${m.count > 1 ? ` <span class="msg-count">${m.count}</span>` : ''}</span><span class="msg-date">${esc(msgWhen(m.date))}</span></span>
+        <span class="msg-subject">${m.unread ? '<span class="sr-only">Unread. </span>' : ''}${esc(m.subject)}</span>
+        <span class="msg-snippet">${esc(m.snippet)}</span>
+        ${m.labels.length || m.claimedBy || m.repliedBy ? `<span class="labs">${labelChips(m.labels)}${statusTags(m)}</span>` : ''}
+      </span></a>`).join('');
+  box.innerHTML = `
+    ${MSG.note ? `<p class="notice" role="status">${esc(MSG.note)}</p>` : ''}
+    ${MSG.items === null && MSG.state === 'failed' ? `<div class="card empty"><div class="empty-title">Can't load the messages</div>
+        <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" data-msg-refresh>${ICON.refresh}Try again</button></div>`
+      : MSG.items === null ? skeletonRows(5)
+      : !MSG.items.length ? empty(MSG.query ? 'Nothing found' : none[0], MSG.query ? `No messages match "${MSG.query}".` : none[1])
+      : `<div class="card list msg-list">${rows}</div>`}
+    ${MSG.items && MSG.state === 'failed' ? `<p class="form-error" role="alert">Couldn't load more. Check your signal and try again.</p>` : ''}
+    ${MSG.items && MSG.more ? `<button type="button" class="btn btn-outline btn-big" data-msg-more${MSG.state === 'loading' ? ' disabled' : ''}>${MSG.state === 'loading' ? 'Loading…' : 'Load more'}</button>` : ''}
+    ${MSG.items ? `<button type="button" class="btn btn-outline" data-msg-refresh${MSG.state === 'loading' ? ' disabled' : ''}>${ICON.refresh}Refresh</button>` : ''}`;
+}
+
+async function loadMessage(id) {
+  if (msgOpenState === 'loading') return;
+  msgOpenState = 'loading'; msgOpen = null;
+  try { msgOpen = await committeeApi('msgRead', [id]); msgOpenState = ''; MSG.at = 0; loadUnread(true); }
+  catch (e) { if (e.signedOut) { msgOpenState = ''; return; } msgOpenState = e.message; }
+  if (currentPage === 'committee/message' || currentPage === 'committee/reply') render(true);
+}
+
+/* One conversation: every message in it, with its labels and who has claimed it */
+function messageView(id) {
+  const back = `<a class="back-link" href="#/committee/messages">${ICON.chev}Messages</a>`;
+  if (!msgOpen || msgOpen.id !== id) {
+    if (msgOpenState && msgOpenState !== 'loading') {
+      const why = msgOpenState; msgOpenState = '';
+      return `<div class="page-title">${back}<h1>Message</h1></div><section class="section"><div class="card empty"><div class="empty-title">Can't open this message</div><p class="muted">${esc(why)}</p></div></section>`;
+    }
+    if (id) setTimeout(() => loadMessage(id), 0);
+    return `<div class="page-title">${back}<h1>Message</h1></div><section class="section">${skeletonRows(3)}</section>`;
+  }
+  const m = msgOpen, mine = m.claimedBy && m.claimedBy === m.me;
+  const status = m.repliedBy ? `Replied by ${m.repliedBy}${m.repliedAt ? ' on ' + msgWhen(m.repliedAt.replace(' ', 'T')) : ''}`
+    : m.claimedBy ? `Claimed by ${mine ? 'you' : m.claimedBy}` : 'Not claimed yet';
+  return `
+    <div class="page-title">${back}<h1 class="msg-title">${esc(m.subject)}</h1></div>
+    <section class="section">
+      <div class="labs">${labelChips(m.labels)}<span class="lab lab-tag">${esc(status)}</span></div>
+      <p class="form-error" id="msgError" role="alert" hidden></p>
+      <div class="btn-row msg-actions">
+        ${m.claimedBy ? `<button type="button" class="btn btn-outline btn-big" data-msg-act="msgUnclaim">Un-claim</button>` : `<button type="button" class="btn btn-outline btn-big" data-msg-act="msgClaim">Claim</button>`}
+        <a class="btn btn-primary btn-big" href="#/committee/reply/${esc(m.id)}">Reply</a>
+        ${m.inbox ? `<button type="button" class="btn btn-outline btn-big" data-msg-archive>Archive</button>` : ''}
+      </div>
+      ${m.messages.map(x => `
+        <article class="card msg-card">
+          <div class="msg-from">${esc(x.from)}</div><div class="muted">${esc(x.date)}</div>
+          <div class="msg-body">${esc(x.body)}</div>
+        </article>`).join('')}
+    </section>`;
+}
+
+/* Claim or un-claim, from the conversation screen */
+async function msgAct(btn) {
+  const fn = btn.dataset.msgAct, error = document.getElementById('msgError'), label = btn.textContent;
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Working…'; error.hidden = true;
+  try {
+    const out = await committeeApi(fn, [msgOpen.id]);
+    msgOpen.claimedBy = out.claimedBy || '';
+    MSG.at = 0;
+    render(true);
+    const next = view.querySelector('[data-msg-act]'); if (next) next.focus();
+  } catch (err) {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    error.textContent = err.message; error.hidden = false;
+  }
+}
+function askArchive() {
+  const id = msgOpen.id;
+  confirmAsk({
+    title: 'File this message away?', text: 'It leaves the Inbox for everyone on the committee. You can still find it under All.', yes: 'Yes, file it away', busy: 'Filing…',
+    run: () => committeeApi('msgArchive', [id]),
+    done: () => { MSG.note = 'Filed away. It is still under All.'; MSG.at = 0; msgOpen = null; loadUnread(true); go('#/committee/messages'); }
+  });
+}
+
+/* ----- reply ----- */
+const PLACEHOLDER = /\[[^\[\]\n]{1,60}\]/g;
+
+async function loadSaved() {
+  if (SAVED || savedLoading || !session) return;
+  savedLoading = true;
+  try { const list = await committeeApi('savedReplies'); SAVED = Array.isArray(list) ? list : []; } catch (e) { /* the reply can still be typed */ }
+  savedLoading = false;
+  const pick = document.getElementById('rpSaved');
+  if (pick && SAVED) pick.innerHTML = savedOptions();
+}
+const savedOptions = () => `<option value="">${SAVED ? (SAVED.length ? 'Choose a saved reply…' : 'No saved replies yet') : 'Loading saved replies…'}</option>` +
+  (SAVED || []).map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('');
+
+function replyView(id) {
+  if (!msgOpen || msgOpen.id !== id) return messageView(id); // loads it first (e.g. after the page was reloaded)
+  loadSaved();
+  const m = msgOpen;
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/message/${esc(m.id)}">${ICON.chev}Message</a><h1>Reply</h1><p class="muted">${esc(m.subject)}</p></div>
+    <section class="section"><form class="card form" id="replyForm" novalidate>
+      <label class="field-label" for="rpTo">To</label>
+      <input class="field" type="email" id="rpTo" inputmode="email" autocomplete="off" autocapitalize="off" maxlength="120" value="${esc(m.replyTo)}">
+      <p class="muted">From ${CLUB_FROM}</p>
+      <label class="field-label" for="rpSaved">Saved reply <span class="field-hint">fills in the box below</span></label>
+      <select class="field" id="rpSaved">${savedOptions()}</select>
+      <label class="field-label" for="rpText">Your reply</label>
+      <textarea class="field reply-text" id="rpText" maxlength="5000"></textarea>
+      <div id="rpGaps" class="gaps" hidden></div>
+      <p class="muted">Your name and the club's name are added at the end for you.</p>
+      <p class="form-error" id="rpError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="rpSubmit">Send reply</button>
+    </form></section>`;
+}
+
+/* Lists the [PLACEHOLDERS] still in the reply, highlighted. Tapping one selects it in the box, ready to type over. */
+function drawGaps() {
+  const text = document.getElementById('rpText'), box = document.getElementById('rpGaps');
+  if (!text || !box) return [];
+  const gaps = [...new Set(text.value.match(PLACEHOLDER) || [])];
+  box.hidden = !gaps.length;
+  box.innerHTML = gaps.length ? `<span class="gaps-title">Still to fill in. Tap one to find it:</span>${gaps.map(g => `<button type="button" class="gap" data-gap="${esc(g)}">${esc(g)}</button>`).join('')}` : '';
+  return gaps;
+}
+function useSaved(i) {
+  const r = SAVED && SAVED[Number(i)], text = document.getElementById('rpText');
+  if (!r) return;
+  const first = String(msgOpen.name || '').trim().split(/\s+/)[0];
+  const body = first ? r.text.replace(/\[NAME\]/g, first) : r.text;
+  text.value = text.value.trim() ? text.value.replace(/\s+$/, '') + '\n\n' + body : body; // added below anything already typed, never over it
+  document.getElementById('rpSaved').value = '';
+  drawGaps();
+  text.focus();
+}
+const replyDirty = () => { const t = document.getElementById('rpText'); return !!t && !!t.value.trim(); };
+
+function sendReply(form) {
+  const btn = form.querySelector('#rpSubmit'), error = form.querySelector('#rpError');
+  if (btn.disabled) return;
+  const to = form.querySelector('#rpTo').value.trim(), text = form.querySelector('#rpText').value.trim(), id = msgOpen.id;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return fail('Please check the email address to reply to.', form.querySelector('#rpTo'));
+  if (text.length < 2) return fail('Please write a reply first.', form.querySelector('#rpText'));
+  const sent = out => {
+    form.querySelector('#rpText').value = ''; // sent: nothing left to ask about when leaving
+    MSG.note = (out && out.message) || `Reply sent to ${to}.`; MSG.at = 0; msgOpen = null; loadUnread(true);
+    go('#/committee/messages');
+  };
+  const gaps = drawGaps();
+  if (gaps.length) {
+    return confirmAsk({
+      title: 'Some parts are not filled in', text: `This reply still has ${gaps.join(', ')} in it. The person would see ${gaps.length === 1 ? 'that' : 'those'} exactly as written.`,
+      yes: 'Send it anyway', busy: 'Sending…', no: 'Go back and fill them in',
+      run: () => committeeApi('msgReply', [id, to, text]), done: sent
+    });
+  }
+  error.hidden = true;
+  btn.disabled = true; btn.textContent = 'Sending…';
+  committeeApi('msgReply', [id, to, text]).then(sent).catch(err => {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Send reply';
+    fail(err.message);
+  });
 }
 
 /* ---------- Post results ---------- */
@@ -993,19 +1259,20 @@ const view = document.getElementById('view');
 let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
-  const [name, sub] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit'].includes(sub) ? '/' + sub : '');
+  const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   if (quiet && page === currentPage && view.querySelector('form')) return refreshSuggestions();
   if (page !== currentPage) {
     posted = false; sameDay = null; clearPicked();
     if (page !== 'committee/edit') editing = null;
     if (page !== 'committee/manage') manageNote = '';
+    if (page !== 'committee/messages') MSG.note = '';
     // Opening Manage posts afresh: get an up-to-date list (coming back from an edit screen keeps the one just loaded)
     else if (currentPage !== 'committee/edit' && Date.now() - manageAt > 30000) { MANAGE = null; manageState = ''; }
   }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
-  view.innerHTML = VIEWS[page.split('/')[0]](sub);
+  view.innerHTML = VIEWS[page.split('/')[0]](sub, arg);
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
   if (!quiet || page !== currentPage) {
     view.style.animation = 'none'; void view.offsetWidth; view.style.animation = '';
@@ -1015,6 +1282,7 @@ function render(quiet) {
   const rs = document.getElementById('resultsForm');
   if (rs) { tidyRows(rs); rs.dataset.initial = resultsSnapshot(rs); }
   drawPicked();
+  drawMessages();
   document.querySelectorAll('.tabbar a').forEach(a => {
     if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -1042,6 +1310,15 @@ view.addEventListener('click', e => {
     if (item) { editing = { kind, item }; location.hash = '#/committee/edit'; }
   }
   if (t.closest('[data-delete]') && editing) askDelete();
+  if (t.closest('[data-mview]')) { MSG.view = t.closest('[data-mview]').dataset.mview; MSG.note = ''; view.querySelectorAll('[data-mview]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mview === MSG.view)); loadMessages(); }
+  if (t.closest('[data-msg-refresh]')) { MSG.note = ''; loadMessages(); loadUnread(true); }
+  if (t.closest('[data-msg-more]')) loadMessages(true);
+  if (t.closest('[data-msg-act]') && msgOpen) msgAct(t.closest('[data-msg-act]'));
+  if (t.closest('[data-msg-archive]') && msgOpen) askArchive();
+  if (t.closest('[data-gap]')) {
+    const box = document.getElementById('rpText'), gap = t.closest('[data-gap]').dataset.gap, at = box.value.indexOf(gap);
+    if (at >= 0) { box.focus(); box.setSelectionRange(at, at + gap.length); }
+  }
   if (t.closest('[data-ph-choose]')) document.getElementById('phFiles').click();
   if (t.closest('[data-ph-remove]')) {
     const id = Number(t.closest('[data-ph-remove]').dataset.phRemove), p = PICKED.find(x => x.id === id);
@@ -1074,7 +1351,11 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'resultsForm') { e.preventDefault(); postResultsForm(e.target); }
   if (e.target.id === 'photosForm') { e.preventDefault(); uploadPhotos(e.target); }
   if (e.target.id === 'photoEditForm') { e.preventDefault(); savePhotoEdit(e.target); }
+  if (e.target.id === 'msgSearch') { e.preventDefault(); MSG.query = e.target.querySelector('#msgQuery').value.trim(); MSG.note = ''; loadMessages(); }
+  if (e.target.id === 'replyForm') { e.preventDefault(); sendReply(e.target); }
 });
+view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target.value !== '') useSaved(e.target.value); });
+view.addEventListener('input', e => { if (e.target.id === 'rpText') drawGaps(); });
 view.addEventListener('change', e => {
   if (e.target.id !== 'phFiles') return;
   if (e.target.files.length) choosePhotos(e.target.files);
@@ -1092,10 +1373,11 @@ view.addEventListener('input', e => {
 /* Leaving a results form with something typed in it, or while photos are uploading: ask first */
 const LEAVE_TEXT = {
   results: ['Leave without posting?', 'These results have not been posted yet. If you leave now, what you have typed will be lost.', 'Stay and keep typing', 'Leave without posting'],
+  reply: ['Leave without sending?', 'Your reply has not been sent. If you leave now, what you have typed will be lost.', 'Stay and keep writing', 'Leave without sending'],
   edit: ['Leave without saving?', 'Your changes to these results have not been saved. If you leave now, they will be lost.', 'Stay and keep editing', 'Leave without saving'],
   photos: ['Photos are still uploading', 'If you leave now, the photos that have not been sent yet will not be added.', 'Stay until they finish', 'Leave and stop uploading']
 };
-const leaveReason = () => uploading ? 'photos' : !resultsDirty() ? '' : document.getElementById('resultsForm').dataset.mode === 'edit' ? 'edit' : 'results';
+const leaveReason = () => uploading ? 'photos' : replyDirty() ? 'reply' : !resultsDirty() ? '' : document.getElementById('resultsForm').dataset.mode === 'edit' ? 'edit' : 'results';
 let leavingTo = null;
 window.addEventListener('hashchange', () => {
   const why = !skipLeaveCheck && location.hash !== currentHash && leaveReason();
@@ -1168,6 +1450,10 @@ function signOut() {
   session = null; sessionStore.set(null);
   MEMBERS = null; membersFailed = false;
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = '';
+  Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
+  msgOpen = null; msgOpenState = ''; msgUnread = null; unreadAt = 0; SAVED = null;
+  const rp = document.getElementById('replyForm');
+  if (rp) rp.remove();
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove(); // nothing left to ask about
   clearPicked();
@@ -1214,6 +1500,8 @@ document.getElementById('leaveGo').addEventListener('click', () => {
   sheetOpener = null; closeSheets();
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove();
+  const rp = document.getElementById('replyForm');
+  if (rp) rp.remove();
   clearPicked();
   location.hash = to || '#/committee';
 });

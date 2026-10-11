@@ -1,4 +1,4 @@
-/* On Target v1.5.0 — club styles */
+/* On Target v1.6.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -8,6 +8,8 @@
   --green: #1E7A3C;
   --ok-text: #1E7A3C;
   --ok-soft: #DDF0E3;
+  --info-soft: #DDE8F7;
+  --info-text: #1D4C8A;
 
   --bg: #F6F2EE;
   --card: #FFFFFF;
@@ -43,6 +45,8 @@
     --gold-text: #F2C76E;
     --ok-text: #7DD69A;
     --ok-soft: #1F3A28;
+    --info-soft: #1D2E48;
+    --info-text: #9CC1F2;
     --shadow: 0 1px 2px rgba(0,0,0,.3);
   }
 }
@@ -354,6 +358,48 @@ button.manage-row:last-child { border-bottom: 0; }
 .choice:has(input:checked) { border-color: var(--accent); background: var(--tint); }
 .choice-title { display: block; font-weight: 600; font-size: 15px; }
 .choice-text { display: block; color: var(--text-2); font-size: 13px; }
+
+/* Messages */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.count-badge { margin-left: 8px; min-width: 26px; height: 26px; padding: 0 8px; border-radius: 13px; background: var(--crimson); color: #fff; font: 700 13px/26px Poppins, sans-serif; text-align: center; }
+.menu-row .count-badge + .chev { margin-left: auto; }
+.msg-search { display: flex; gap: 8px; }
+.msg-search .field { flex: 1; min-width: 0; }
+.msg-search .btn { flex: 0 0 auto; min-height: 50px; padding: 0 18px; font-size: 15px; }
+#msgList { display: flex; flex-direction: column; gap: 10px; }
+#msgList > .btn { flex: 0 0 auto; }
+.msg-list { padding: 0 14px; }
+.msg-row { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); text-decoration: none; color: var(--text); min-height: 64px; }
+.msg-row:last-child { border-bottom: 0; }
+.avatar { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 20px; color: #fff; font: 700 17px/40px Montserrat, sans-serif; text-align: center; }
+.msg-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.msg-top { display: flex; align-items: baseline; gap: 8px; }
+.msg-name { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-date { flex: 0 0 auto; font-size: 13px; color: var(--text-2); }
+.msg-count { color: var(--text-2); font-weight: 400; font-size: 13px; }
+.msg-subject { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-snippet { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-row.unread .msg-name, .msg-row.unread .msg-subject { font-weight: 700; }
+.msg-row.unread .msg-date { color: var(--accent); font-weight: 700; }
+.labs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.lab { font: 700 12px Poppins, sans-serif; padding: 2px 10px; border-radius: 10px; white-space: nowrap; background: var(--line); color: var(--text); }
+.lab-membership { background: var(--gold-soft); color: var(--gold-text); }
+.lab-training { background: var(--info-soft); color: var(--info-text); }
+.lab-range { background: var(--tint); color: var(--accent); }
+.lab-replied { background: var(--ok-soft); color: var(--ok-text); }
+.lab-tag { background: none; color: var(--text-2); border: 1.5px solid var(--line); padding: 1px 9px; font-weight: 600; }
+.msg-title { font-size: 20px !important; overflow-wrap: anywhere; }
+.msg-actions { flex-wrap: wrap; }
+.msg-actions .btn { flex: 1 1 100px; }
+.msg-card { padding: 14px 16px; }
+.msg-from { font-weight: 600; overflow-wrap: anywhere; }
+.msg-body { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+select.field { -webkit-appearance: none; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%); background-position: calc(100% - 20px) 22px, calc(100% - 14px) 22px; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 36px; }
+.reply-text { min-height: 220px !important; }
+.gaps { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gold-soft); }
+.gaps[hidden] { display: none; }
+.gaps-title { flex: 1 1 100%; font-weight: 600; font-size: 14px; color: var(--gold-text); }
+.gap { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1.5px solid var(--gold); background: var(--card); color: var(--text); font: 600 14px Poppins, sans-serif; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
 
 /* Tab bar with the Committee tab: tabs share the width by label length so all six stay readable */
 .tabbar a[hidden] { display: none; }
