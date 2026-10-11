@@ -1,0 +1,6 @@
+# Apps Script back end (cloned with clasp). Contains the club's bank details.
+# Must never be committed to this public repo.
+backend/
+
+# clasp sign-in credentials, in case they ever land in the repo folder
+.clasprc.json
