@@ -1,15 +1,16 @@
-/* On Target v1.0.0 — offline support
+/* On Target v1.1.0 — offline support
    Change CACHE when files change so phones pick up the new version. */
-const CACHE = 'on-target-v1.0.0';
+const CACHE = 'on-target-v1.1.0';
+const PHOTO_CACHE = 'on-target-photos';
 const SHELL = [
   './',
   'index.html',
-  'styles.css?v=1.0.0',
-  'app.js?v=1.0.0',
-  'manifest.webmanifest?v=1.0.0',
-  'icons/icon-192.png?v=1.0.0',
-  'icons/favicon-48.png?v=1.0.0',
-  'icons/apple-touch-icon.png?v=1.0.0'
+  'styles.css?v=1.1.0',
+  'app.js?v=1.1.0',
+  'manifest.webmanifest?v=1.1.0',
+  'icons/icon-192.png?v=1.1.0',
+  'icons/favicon-48.png?v=1.1.0',
+  'icons/apple-touch-icon.png?v=1.1.0'
 ];
 
 self.addEventListener('install', e => {
@@ -19,7 +20,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== PHOTO_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -32,6 +33,17 @@ self.addEventListener('fetch', e => {
   // Pages: try the network first, fall back to the saved copy with no signal
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).catch(() => caches.match('index.html')));
+    return;
+  }
+
+  // Club photos: keep a copy once seen, so albums still open with no signal
+  if (url.hostname === 'lh3.googleusercontent.com') {
+    e.respondWith(
+      caches.open(PHOTO_CACHE).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
+        if (res.ok || res.type === 'opaque') c.put(req, res.clone());
+        return res;
+      })))
+    );
     return;
   }
 
