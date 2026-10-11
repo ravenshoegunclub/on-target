@@ -1,10 +1,10 @@
-/* On Target v1.6.0 — app shell with live club data and committee tools
+/* On Target v1.7.1 — app shell with live club data and Club Team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.1';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -223,7 +223,7 @@ const VIEWS = {
               </div>
               <button type="button" class="icon-btn soft" data-cal="${i}" aria-label="Add ${esc(ev.title)} to calendar">${ICON.calendar}</button>
             </div>`).join('')}
-        </div>` : empty('No upcoming events', 'New events appear here as soon as the committee posts them.'))}
+        </div>` : empty('No upcoming events', 'New events appear here as soon as the Club Team posts them.'))}
       </section>`;
   },
 
@@ -287,11 +287,11 @@ const VIEWS = {
 
   committee(sub, arg) {
     if (!session) return `
-      <div class="page-title"><h1>Committee</h1></div>
+      <div class="page-title"><h1>Club Team</h1></div>
       <section class="section"><div class="card empty">
         <div class="empty-title">Please sign in</div>
-        <p class="muted">This part of the app is for committee members.</p>
-        <button type="button" class="btn btn-primary btn-big" data-signin>Committee sign-in</button>
+        <p class="muted">This part of the app is for Club Team members.</p>
+        <button type="button" class="btn btn-primary btn-big" data-signin>Club Team sign-in</button>
       </div></section>`;
     if (sub === 'event') return posted ? eventPosted() : eventForm();
     if (sub === 'results') return posted ? resultsPosted() : resultsForm();
@@ -304,11 +304,18 @@ const VIEWS = {
       if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
       return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
     }
+    if (['payments', 'members', 'people', 'person'].includes(sub)) {
+      if (!session.admin) return `<div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Admin</h1></div>
+        <section class="section">${empty('Admins only', 'Only club app admins can use this part of the app.')}</section>`;
+      if (sub === 'person' && !personEdit) { location.replace('#/committee/people'); return ''; } // e.g. the page was reloaded
+      return sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
+    }
     loadUnread();
-    const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
+    if (session.admin) loadAdminSummary();
+    const sum = ADMIN.summary;
     return `
-      <div class="page-title"><h1>Committee</h1>
-        <div class="who"><span class="muted">Signed in as ${esc(session.name)}${session.admin ? ' · Admin' : ''}</span>
+      <div class="page-title"><h1>Club Team</h1>
+        <div class="who"><span class="muted">Signed in as ${esc(session.name)}${session.admin ? ' · Admin' : ' · Club Team'}</span>
           <button type="button" class="btn btn-outline" data-signout>Sign out</button></div>
       </div>
       <section class="section">
@@ -325,10 +332,15 @@ const VIEWS = {
       </div></section>
       ${session.admin ? `<section class="section">
         <div class="section-head"><h2>Admin</h2></div>
+        ${sum ? `<div class="admin-counts">
+          ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
+          ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
+          <a class="admin-count" href="#/committee/payments">Payments waiting: <b>${sum.pending}</b></a>
+        </div>` : ''}
         <div class="card list">
-          ${soon(ICON.fees, 'Payments to confirm')}
-          ${soon(ICON.people, 'Members')}
-          ${soon(ICON.key, 'People and PINs')}
+          <a class="menu-row" href="#/committee/payments"><span class="tile-ico">${ICON.fees}</span>Payments to confirm${sum && sum.pending ? `<span class="count-badge" aria-label="${sum.pending} waiting">${sum.pending}</span>` : ''}${ICON.chev}</a>
+          <a class="menu-row" href="#/committee/members"><span class="tile-ico">${ICON.people}</span>Members${ICON.chev}</a>
+          <a class="menu-row" href="#/committee/people"><span class="tile-ico">${ICON.key}</span>People and PINs${ICON.chev}</a>
         </div>
       </section>` : ''}`;
   }
@@ -337,14 +349,15 @@ const VIEWS = {
 const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
 let posted = false; // true while the "Event posted", "Results posted" or "Photos added" message is showing
 
-/* Who can see an event. "Hidden" only exists for older events with Show = No in the Sheet. */
+/* Who can see an event. "Hidden" only exists for older events with Show = No in the Sheet.
+   The Club Team (committee and range officers) is still stored and sent to the server as "Committee". */
 const AUDIENCES = [
   ['Everyone', 'Everyone', 'Shown on the website and in the app.'],
-  ['Members', 'Members only', 'Only signed-in members and committee. Not on the website.'],
-  ['Committee', 'Committee only', 'Only signed-in committee. Not on the website.'],
+  ['Members', 'Members only', 'Only signed-in members and the Club Team. Not on the website.'],
+  ['Committee', 'Club Team only', 'Only the signed-in Club Team. Not on the website.'],
   ['Hidden', 'Hidden', 'Not shown anywhere. Choose one of the others to show it.']
 ];
-const badge = audience => `<span class="badge badge-${audience.toLowerCase()}">${audience}</span>`;
+const badge = audience => `<span class="badge badge-${audience.toLowerCase()}">${audience === 'Committee' ? 'Club Team' : audience}</span>`;
 let postedText = '';
 
 /* `item` is the event being edited (from Manage posts), or nothing for a new one */
@@ -353,7 +366,7 @@ function eventForm(item) {
   const v = k => esc(ev[k] || '');
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit event</h1>`
-      : `<a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post an event</h1>`}</div>
+      : `<a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Post an event</h1>`}</div>
     <section class="section"><form class="card form" id="eventForm" novalidate>
       <label class="field-label" for="evDate">Date</label>
       ${dateField('evDate', item ? ev.date : nextSaturday())}
@@ -387,12 +400,12 @@ function eventPosted() {
       <p class="muted">${esc(postedText)}</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-another>Post another event</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Club Team</a>
       </div>
     </div></section>`;
 }
 
-/* ---------- Private events (members-only and committee-only), for signed-in committee ---------- */
+/* ---------- Private events (members-only and committee-only), for the signed-in Club Team ---------- */
 let PRIVATE = null;          // from the server; kept in memory only, never saved on the phone
 let privateLoading = false;
 
@@ -403,7 +416,7 @@ async function loadPrivate() {
   privateLoading = false;
   if (PRIVATE && currentPage === 'events') render(true);
 }
-/* The Events tab: public events, plus upcoming private ones (with a badge) when the committee is signed in */
+/* The Events tab: public events, plus upcoming private ones (with a badge) when the Club Team is signed in */
 function eventsShown() {
   const today = todayIso();
   const extra = session && PRIVATE ? PRIVATE.filter(e => e.date >= today) : [];
@@ -461,7 +474,7 @@ function manageView() {
       : empty('No photos yet', 'Photos you add appear here.');
   };
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Manage posts</h1></div>
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Manage posts</h1></div>
     <section class="section">
       ${manageNote ? `<p class="notice" role="status">${esc(manageNote)}</p>` : ''}
       <div class="seg" role="group" aria-label="What to manage">${MANAGE_TABS.map(t => `
@@ -573,7 +586,266 @@ function confirmAsk(o) {
   openSheet(confirmSheet, document.getElementById('confirmNo'));
 }
 
-/* ---------- Messages (the club inbox, for every committee member) ---------- */
+/* ---------- Admin: payments, members, people and PINs (admins only) ---------- */
+/* Everything here is kept in memory only: no member details or PINs go into the phone's storage (apart from the admin's own PIN) */
+const blankAdmin = () => ({ summary: null, summaryAt: 0, pending: null, pendingState: '', payNote: '',
+  mem: { filter: 'all', query: '', items: null, state: '', season: '', note: '', run: 0 }, sheetUrl: '',
+  people: null, peopleState: '', peopleNote: '', newPin: null });
+let ADMIN = blankAdmin();
+let sheetUrlLoading = false;
+let personEdit = null;       // the person being edited ({} for a new one) while that screen is open
+
+async function loadAdminSummary(force) {
+  if (!session || !session.admin || (!force && Date.now() - ADMIN.summaryAt < 60000)) return;
+  ADMIN.summaryAt = Date.now();
+  try {
+    const d = await committeeApi('membersSummary') || {};
+    const sum = { season: d.season || '', notRenewed: Number(d.notRenewed) || 0, overdue: Number(d.overdue) || 0, pending: Number(d.pending) || 0 };
+    const same = JSON.stringify(sum) === JSON.stringify(ADMIN.summary);
+    ADMIN.summary = sum; ADMIN.mem.season = sum.season || '';
+    if (!same && currentPage === 'committee') render(true);
+  } catch (e) { /* the counts are only a guide */ }
+}
+const adminBack = `<a class="back-link" href="#/committee">${ICON.chev}Club Team</a>`;
+const loadFailed = (what, attr) => `<div class="card empty"><div class="empty-title">Can't load ${what}</div>
+  <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" ${attr}>${ICON.refresh}Try again</button></div>`;
+const niceDate = iso => { if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return ''; const d = parseDate(String(iso).slice(0, 10)); return `${d.getDate()} ${mon(d)} ${d.getFullYear()}`; };
+/* 30 June that a payment confirmed today runs to (payments from 1 April count towards the next year, as on the server) */
+const paidToYear = () => { const d = new Date(); return d.getFullYear() + (d.getMonth() >= 3 ? 1 : 0); };
+
+/* ----- payments to confirm ----- */
+async function loadPending() {
+  if (ADMIN.pendingState === 'loading') return;
+  ADMIN.pendingState = 'loading';
+  try { const list = await committeeApi('adminPending'); ADMIN.pending = Array.isArray(list) ? list : []; ADMIN.pendingState = ''; }
+  catch (e) { if (e.signedOut) { ADMIN.pendingState = ''; return; } ADMIN.pendingState = 'failed'; }
+  if (currentPage === 'committee/payments') render(true);
+}
+function paymentsView() {
+  if (!ADMIN.pending && ADMIN.pendingState !== 'failed') setTimeout(loadPending, 0);
+  const cards = () => ADMIN.pending.length ? ADMIN.pending.map((a, i) => `
+    <article class="card pay-card">
+      <div class="row-between"><h2 class="pay-name">${esc(a.name)}</h2><span class="pay-total">${esc(a.total)}</span></div>
+      <div>${esc((a.items || [])[0])}</div>
+      <div class="muted">Paying by: ${esc(String(a.method || '').toLowerCase())} · Applied ${esc(niceDate(a.date) || a.date)}</div>
+      <div class="pay-ref"><span class="muted">Bank reference</span><b>${esc(a.reference)}</b></div>
+      <div class="pay-contact">${esc((a.items || [])[1])}</div>
+      ${a.ssaa ? `<div class="muted">SSAA number ${esc(a.ssaa)}</div>` : ''}
+      <button type="button" class="btn btn-primary btn-big" data-mark-paid="${i}">Mark paid</button>
+    </article>`).join('')
+    : empty('No payments waiting', 'New applications appear here when someone joins or renews on the website.');
+  return `
+    <div class="page-title">${adminBack}<h1>Payments to confirm</h1></div>
+    <section class="section">
+      ${ADMIN.payNote ? `<p class="notice" role="status">${esc(ADMIN.payNote)}</p>` : ''}
+      ${ADMIN.pending ? cards() : ADMIN.pendingState === 'failed' ? loadFailed('the payments', 'data-pay-reload') : skeletonRows(3)}
+      ${ADMIN.pending ? `<button type="button" class="btn btn-outline" data-pay-reload>${ICON.refresh}Refresh</button>` : ''}
+    </section>`;
+}
+function askMarkPaid(i) {
+  const a = ADMIN.pending[i];
+  if (!a) return;
+  confirmAsk({
+    title: `Mark ${a.name} as paid?`, text: `They'll be current to 30 June ${paidToYear()} and get a welcome email.`, yes: 'Yes, mark paid', busy: 'Marking paid…', no: 'No, not yet',
+    run: () => committeeApi('adminMarkPaid', [a.id]),
+    done: out => {
+      ADMIN.payNote = (out && out.message) || `${a.name} is marked as paid.`;
+      ADMIN.pending = ADMIN.pending.filter(x => x !== a);   // the card goes straight away; the list is then checked with the server
+      ADMIN.mem.items = null; MEMBERS = null;
+      render(true); loadPending(); loadAdminSummary(true);
+    }
+  });
+}
+
+/* ----- members ----- */
+const MEM_FILTERS = [['all', 'All'], ['current', 'Current'], ['waiting', 'Waiting for payment'], ['notRenewed', 'Not renewed yet'], ['overdue', 'Not financial – renewal overdue'], ['expired', 'Expired']];
+const MEM_BADGE = { current: ['ok', 'Current'], notRenewed: ['amber', 'Not renewed yet'], overdue: ['red', 'Not financial'], expired: ['red-line', 'Expired – not financial'], waiting: ['grey', 'Waiting for payment'], none: ['grey', 'No membership'] };
+/* "Not renewed yet" is only offered from 1 May to 30 June, and "Not financial" only in July: the server says which season it is */
+const memFilters = () => MEM_FILTERS.filter(f => (f[0] !== 'notRenewed' || ADMIN.mem.season === 'renew') && (f[0] !== 'overdue' || ADMIN.mem.season === 'followup'));
+
+async function loadMembersList() {
+  const mem = ADMIN.mem, run = ++mem.run;
+  mem.items = null; mem.state = 'loading';
+  drawMembers();
+  try {
+    const d = await committeeApi('membersList', [mem.query, mem.filter]);
+    if (run !== mem.run) return;
+    mem.items = d.items || []; mem.season = d.season || ''; mem.filter = d.filter || mem.filter; mem.state = '';
+  } catch (e) {
+    if (e.signedOut || run !== mem.run) return;
+    mem.state = 'failed';
+  }
+  drawMembers();
+}
+async function loadSheetUrl() {
+  if (ADMIN.sheetUrl || sheetUrlLoading) return;
+  sheetUrlLoading = true;
+  try { ADMIN.sheetUrl = String(await committeeApi('adminSheetLink') || ''); } catch (e) { /* the button just stays unavailable */ }
+  sheetUrlLoading = false;
+  drawMembers();
+}
+function membersView() {
+  setTimeout(() => { if (!ADMIN.mem.items && ADMIN.mem.state !== 'loading') loadMembersList(); loadSheetUrl(); }, 0);
+  return `
+    <div class="page-title">${adminBack}<h1>Members</h1></div>
+    <section class="section">
+      <form class="msg-search" id="memSearch" role="search" novalidate>
+        <label class="sr-only" for="memQuery">Search members by name, email or SSAA number</label>
+        <input class="field" type="search" id="memQuery" placeholder="Name, email or SSAA number" autocomplete="off" maxlength="60" value="${esc(ADMIN.mem.query)}">
+        <button type="submit" class="btn btn-primary">Search</button>
+      </form>
+      <div id="memList"></div>
+    </section>`;
+}
+/* Draws the chips, list and buttons under the Members search box (the box itself is left alone, so typing is never lost) */
+function drawMembers() {
+  const box = document.getElementById('memList');
+  if (!box) return;
+  const mem = ADMIN.mem, exportable = mem.filter === 'notRenewed' || mem.filter === 'overdue';
+  const rows = (mem.items || []).map(m => {
+    const b = MEM_BADGE[m.status] || MEM_BADGE.none;
+    return `<div class="mem-row${m.financial ? '' : ' not-financial'}">
+      <div class="list-main"><div class="list-title">${esc(m.name || m.email || 'No name')}</div>
+        <div class="muted">${joinDot(m.type, m.expiry ? (m.financial ? 'Expires ' : 'Expired ') + niceDate(m.expiry) : 'No expiry date')}</div></div>
+      <div class="mem-badges"><span class="mbadge mbadge-${b[0]}">${b[1]}</span>${m.waiting && m.status !== 'waiting' ? '<span class="mbadge mbadge-grey">Payment waiting</span>' : ''}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="chips" role="group" aria-label="Which members">${memFilters().map(f => `
+      <button type="button" class="chip-btn" data-mem-chip="${f[0]}" aria-pressed="${f[0] === mem.filter}">${f[1]}</button>`).join('')}</div>
+    ${mem.note ? `<p class="notice" role="status">${esc(mem.note)}</p>` : ''}
+    ${mem.filter === 'notRenewed' ? `<p class="muted">Membership ends this 30 June and next year is not paid yet. They are still financial until 30 June.</p>` : ''}
+    ${mem.filter === 'overdue' ? `<p class="notice notice-red">These people are <b>not financial members</b> from 1 July. This list is only for following up renewals.</p>` : ''}
+    ${mem.items === null && mem.state === 'failed' ? loadFailed('the members', 'data-mem-reload')
+      : mem.items === null ? skeletonRows(5)
+      : !mem.items.length ? empty('Nobody found', mem.query ? `No members match "${mem.query}".` : 'Nobody is in this list.')
+      : `<p class="muted" role="status">${mem.items.length} ${mem.items.length === 1 ? 'person' : 'people'}</p><div class="card list">${rows}</div>`}
+    ${exportable && mem.items && mem.items.length ? `<button type="button" class="btn btn-primary btn-big" data-mem-export>Export list</button>
+      <p class="muted">Downloads a file for GoDaddy email marketing: first name, last name, email, membership type and expiry. People whose payment is waiting are left out.</p>
+      <p class="form-error" id="memExportError" role="alert" hidden></p>` : ''}
+    ${ADMIN.sheetUrl ? `<a class="btn btn-outline btn-big" href="${esc(ADMIN.sheetUrl)}" target="_blank" rel="noopener">Open members sheet</a>
+      <p class="muted">Opens in a new tab, in the club Google account. You need to be signed in to that account.</p>` : ''}`;
+}
+/* Hands the CSV to the phone or computer as a file */
+async function exportMembers(btn) {
+  const error = document.getElementById('memExportError');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Getting the list ready…'; error.hidden = true;
+  try {
+    const d = await committeeApi('membersExport', [ADMIN.mem.filter]);
+    const file = new File([d.csv], d.filename, { type: 'text/csv' });
+    // Phones: offer the file through the share sheet (save to Files, email it...). Otherwise an ordinary download.
+    if (matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: d.filename }); } catch (e) { /* closed without sharing */ }
+    } else {
+      const url = URL.createObjectURL(file), a = document.createElement('a');
+      a.href = url; a.download = d.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+    ADMIN.mem.note = `Exported ${d.count} ${d.count === 1 ? 'person' : 'people'} to ${d.filename}.${d.leftOut ? ` ${d.leftOut} left out (payment waiting or no email address).` : ''}`;
+    drawMembers();
+  } catch (err) {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Export list';
+    error.textContent = err.message; error.hidden = false;
+  }
+}
+
+/* ----- people and PINs ----- */
+async function loadPeople() {
+  if (ADMIN.peopleState === 'loading') return;
+  ADMIN.peopleState = 'loading';
+  try { const list = await committeeApi('adminListPeople'); ADMIN.people = Array.isArray(list) ? list : []; ADMIN.peopleState = ''; }
+  catch (e) { if (e.signedOut) { ADMIN.peopleState = ''; return; } ADMIN.peopleState = 'failed'; }
+  if (currentPage === 'committee/people') render(true);
+}
+function peopleView() {
+  if (!ADMIN.people && ADMIN.peopleState !== 'failed') setTimeout(loadPeople, 0);
+  const pin = ADMIN.newPin;
+  return `
+    <div class="page-title">${adminBack}<h1>People and PINs</h1><p class="muted">Who can sign in to the Club Team part of the app</p></div>
+    <section class="section">
+      ${pin ? `<div class="pin-once" role="status" tabindex="-1" id="pinOnce">
+        <div>${esc(pin.name)}'s PIN is</div><div class="pin-digits">${esc(pin.pin)}</div>
+        <div>Give it to them in person or by phone. It will not be shown again.</div>
+        <button type="button" class="btn btn-primary btn-big" data-pin-done>Done, I have passed it on</button></div>` : ''}
+      ${ADMIN.peopleNote ? `<p class="notice" role="status">${esc(ADMIN.peopleNote)}</p>` : ''}
+      ${ADMIN.people ? `<div class="card list">${ADMIN.people.map((p, i) => `
+        <button type="button" class="list-row manage-row" data-person="${i}">
+          <span class="list-main"><span class="list-title">${esc(p.name)}${p.me ? ' (you)' : ''}</span><span class="muted">PIN ${esc(p.pinHint)}</span></span>
+          <span class="mbadge ${p.admin ? 'mbadge-maroon' : 'mbadge-grey'}">${p.admin ? 'Admin' : 'Club Team'}</span>${ICON.chev}</button>`).join('')}</div>
+        <button type="button" class="btn btn-primary btn-big" data-person="new">${ICON.plus}Add a person</button>`
+        : ADMIN.peopleState === 'failed' ? loadFailed('the list', 'data-people-reload') : skeletonRows(3)}
+    </section>`;
+}
+function personForm(p) {
+  const isNew = !p.id;
+  const choice = (value, title, text, checked) => `<label class="choice"><input type="radio" name="ppPin" value="${value}"${checked ? ' checked' : ''}>
+    <span><span class="choice-title">${title}</span><span class="choice-text">${text}</span></span></label>`;
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/people">${ICON.chev}People and PINs</a><h1>${isNew ? 'Add a person' : 'Edit ' + esc(p.name) + (p.me ? ' (you)' : '')}</h1></div>
+    <section class="section"><form class="card form" id="personForm" novalidate>
+      <label class="field-label" for="ppName">Name</label>
+      <input class="field" id="ppName" maxlength="40" autocomplete="off" autocapitalize="words" value="${esc(p.name || '')}" required>
+      <label class="choice"><input type="checkbox" id="ppAdmin"${p.admin ? ' checked' : ''}>
+        <span><span class="choice-title">Admin</span><span class="choice-text">Can also confirm payments, see members, and manage people and PINs.</span></span></label>
+      ${isNew ? `<p class="muted">A PIN is made for them when you save. You will be shown it once.</p>` : `
+      <fieldset class="choices">
+        <legend class="field-label">PIN <span class="field-hint">now ${esc(p.pinHint)}</span></legend>
+        ${choice('keep', 'Keep the PIN they have', 'Nothing changes.', true)}
+        ${choice('generate', 'Make a new PIN', 'The app chooses one. Their old PIN stops working.', false)}
+        ${choice('set', 'Set a PIN', '4 to 8 digits. Their old PIN stops working.', false)}
+        <div id="ppPinWrap" hidden><label class="field-label" for="ppNewPin">New PIN</label>
+          <input class="field pin-box" id="ppNewPin" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off"></div>
+      </fieldset>`}
+      <p class="form-error" id="ppError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="ppSubmit">${isNew ? 'Add person' : 'Save changes'}</button>
+      ${!isNew && !p.me ? `<button type="button" class="btn btn-danger btn-big" data-person-remove>Remove ${esc(p.name)}</button>` : ''}
+    </form></section>`;
+}
+/* After my own details change: keep this device signed in with the new PIN, name or admin setting */
+function keepMeSignedIn(out, admin) {
+  session = { pin: out.pin || session.pin, name: out.name || session.name, admin };
+  sessionStore.set(session);
+  showCommitteeTab();
+}
+async function savePerson(form) {
+  const p = personEdit, btn = form.querySelector('#ppSubmit'), error = form.querySelector('#ppError'), label = btn.textContent;
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const person = { id: p.id || null, name: form.querySelector('#ppName').value.trim(), admin: form.querySelector('#ppAdmin').checked };
+  const how = (form.querySelector('[name="ppPin"]:checked') || {}).value;
+  if (!person.name) return fail('Please enter a name.', form.querySelector('#ppName'));
+  if (how === 'generate') person.generatePin = true;
+  if (how === 'set') {
+    person.newPin = form.querySelector('#ppNewPin').value.trim();
+    if (!person.newPin) return fail('Please type the new PIN, 4 to 8 digits.', form.querySelector('#ppNewPin'));
+  }
+  error.hidden = true;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const out = await committeeApi('adminSavePerson', [person]);
+    if (p.me) keepMeSignedIn(out, person.admin); // before anything else talks to the server
+    ADMIN.people = null; ADMIN.peopleNote = out.message || 'Saved.';
+    ADMIN.newPin = out.pin ? { name: out.name || person.name, pin: out.pin } : null;
+    go(session.admin ? '#/committee/people' : '#/committee');
+  } catch (err) {
+    if (err.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    fail(err.message); // the server's own words
+  }
+}
+function askRemovePerson() {
+  const p = personEdit;
+  confirmAsk({
+    title: `Remove ${p.name}?`, text: `Their PIN stops working straight away and they can no longer sign in to the Club Team part of the app.`, yes: 'Yes, remove them', busy: 'Removing…',
+    run: () => committeeApi('adminRemovePerson', [p.id]),
+    done: out => { ADMIN.people = null; ADMIN.newPin = null; ADMIN.peopleNote = (out && out.message) || `${p.name} removed.`; go('#/committee/people'); }
+  });
+}
+
+/* ---------- Messages (the club inbox, for every Club Team member) ---------- */
 const MSG_VIEWS = [['inbox', 'Inbox'], ['mine', 'Mine'], ['replied', 'Replied'], ['all', 'All']];
 const CLUB_FROM = 'info@ravenshoegunclub.com.au';
 /* Everything here is kept in memory only: no email ever goes into the phone's storage */
@@ -634,7 +906,7 @@ async function loadMessages(more) {
 function messagesView() {
   if (!MSG.items && MSG.state !== 'failed' || Date.now() - MSG.at > 60000 && MSG.state !== 'loading') setTimeout(() => loadMessages(), 0);
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Messages</h1></div>
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Messages</h1></div>
     <section class="section">
       <form class="msg-search" id="msgSearch" role="search" novalidate>
         <label class="sr-only" for="msgQuery">Search messages</label>
@@ -733,7 +1005,7 @@ async function msgAct(btn) {
 function askArchive() {
   const id = msgOpen.id;
   confirmAsk({
-    title: 'File this message away?', text: 'It leaves the Inbox for everyone on the committee. You can still find it under All.', yes: 'Yes, file it away', busy: 'Filing…',
+    title: 'File this message away?', text: 'It leaves the Inbox for everyone in the Club Team. You can still find it under All.', yes: 'Yes, file it away', busy: 'Filing…',
     run: () => committeeApi('msgArchive', [id]),
     done: () => { MSG.note = 'Filed away. It is still under All.'; MSG.at = 0; msgOpen = null; loadUnread(true); go('#/committee/messages'); }
   });
@@ -884,7 +1156,7 @@ function resultsForm(item) {
   if (!MEMBERS) loadMembers();
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit results</h1>`
-      : `<a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post results</h1>`}</div>
+      : `<a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Post results</h1>`}</div>
     <section class="section"><form class="card form" id="resultsForm" novalidate${item ? ' data-mode="edit"' : ''}>
       <label class="field-label" for="rsDate">Competition day</label>
       ${dateField('rsDate', start.date)}
@@ -923,7 +1195,7 @@ function resultsPosted() {
       <p class="muted">They appear on the website and app within about 2 minutes.</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-same-day>Add another competition for the same day</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Club Team</a>
       </div>
     </div></section>`;
 }
@@ -931,7 +1203,7 @@ function resultsPosted() {
 async function loadMembers() {
   if (membersLoading || !session) return;
   membersLoading = true;
-  try { MEMBERS = await committeeApi('memberNames'); membersFailed = false; }
+  try { const list = await committeeApi('memberNames'); MEMBERS = Array.isArray(list) ? list : []; membersFailed = false; }
   catch (e) { membersFailed = !e.signedOut; }
   membersLoading = false;
   const form = document.getElementById('resultsForm');
@@ -1049,7 +1321,7 @@ function clearPicked() {
 
 function photosForm() {
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Add photos</h1></div>
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club Team</a><h1>Add photos</h1></div>
     <section class="section"><form class="card form" id="photosForm" novalidate>
       <label class="field-label" for="phAlbum">Album <span class="field-hint">choose one or type a new one</span></label>
       <input class="field" id="phAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="Around the range">
@@ -1078,7 +1350,7 @@ function photosAdded() {
       <p class="muted">${addedCount === 1 ? 'It appears' : 'They appear'} in the app and website gallery within about 2 minutes.</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-more-photos>Add more photos</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
+        <a class="btn btn-outline btn-big" href="#/committee">Back to Club Team</a>
       </div>
     </div></section>`;
 }
@@ -1260,7 +1532,7 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply'].includes(sub) ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   if (quiet && page === currentPage && view.querySelector('form')) return refreshSuggestions();
   if (page !== currentPage) {
@@ -1268,6 +1540,11 @@ function render(quiet) {
     if (page !== 'committee/edit') editing = null;
     if (page !== 'committee/manage') manageNote = '';
     if (page !== 'committee/messages') MSG.note = '';
+    if (page !== 'committee/payments') ADMIN.payNote = '';
+    if (page !== 'committee/members') ADMIN.mem.note = '';
+    if (page !== 'committee/person') personEdit = null;
+    // A new PIN is shown once: it is forgotten as soon as the People and PINs screen is left
+    if (page !== 'committee/people') { ADMIN.newPin = null; ADMIN.peopleNote = ''; }
     // Opening Manage posts afresh: get an up-to-date list (coming back from an edit screen keeps the one just loaded)
     else if (currentPage !== 'committee/edit' && Date.now() - manageAt > 30000) { MANAGE = null; manageState = ''; }
   }
@@ -1283,6 +1560,9 @@ function render(quiet) {
   if (rs) { tidyRows(rs); rs.dataset.initial = resultsSnapshot(rs); }
   drawPicked();
   drawMessages();
+  drawMembers();
+  const once = document.getElementById('pinOnce');
+  if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
     if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -1298,7 +1578,20 @@ view.addEventListener('click', e => {
   if (t.closest('[data-refresh]')) refreshAll(true);
   if (t.closest('[data-signin]')) openSignIn();
   if (t.closest('[data-signout]')) signOut();
-  if (t.closest('[data-soon]')) openSheet(soonSheet, document.getElementById('soonClose'));
+  if (t.closest('[data-mem-filter]')) { ADMIN.mem.filter = t.closest('[data-mem-filter]').dataset.memFilter; ADMIN.mem.query = ''; ADMIN.mem.items = null; }
+  if (t.closest('[data-pay-reload]')) { ADMIN.pending = null; ADMIN.pendingState = ''; ADMIN.payNote = ''; render(true); }
+  if (t.closest('[data-mark-paid]')) askMarkPaid(Number(t.closest('[data-mark-paid]').dataset.markPaid));
+  if (t.closest('[data-mem-chip]')) { ADMIN.mem.filter = t.closest('[data-mem-chip]').dataset.memChip; ADMIN.mem.note = ''; loadMembersList(); }
+  if (t.closest('[data-mem-reload]')) loadMembersList();
+  if (t.closest('[data-mem-export]')) exportMembers(t.closest('[data-mem-export]'));
+  if (t.closest('[data-people-reload]')) { ADMIN.people = null; ADMIN.peopleState = ''; render(true); }
+  if (t.closest('[data-pin-done]')) { ADMIN.newPin = null; render(true); }
+  if (t.closest('[data-person]') && ADMIN.people) {
+    const i = t.closest('[data-person]').dataset.person;
+    personEdit = i === 'new' ? {} : ADMIN.people[Number(i)];
+    if (personEdit) location.hash = '#/committee/person';
+  }
+  if (t.closest('[data-person-remove]') && personEdit) askRemovePerson();
   if (t.closest('[data-another]')) { posted = false; render(); }
   if (t.closest('[data-same-day]')) { posted = false; render(); }
   if (t.closest('[data-more-photos]')) { posted = false; render(); }
@@ -1353,8 +1646,16 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'photoEditForm') { e.preventDefault(); savePhotoEdit(e.target); }
   if (e.target.id === 'msgSearch') { e.preventDefault(); MSG.query = e.target.querySelector('#msgQuery').value.trim(); MSG.note = ''; loadMessages(); }
   if (e.target.id === 'replyForm') { e.preventDefault(); sendReply(e.target); }
+  if (e.target.id === 'memSearch') { e.preventDefault(); ADMIN.mem.query = e.target.querySelector('#memQuery').value.trim(); ADMIN.mem.note = ''; loadMembersList(); }
+  if (e.target.id === 'personForm') { e.preventDefault(); savePerson(e.target); }
 });
 view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target.value !== '') useSaved(e.target.value); });
+view.addEventListener('change', e => {
+  if (e.target.name !== 'ppPin') return;
+  const wrap = document.getElementById('ppPinWrap');
+  wrap.hidden = e.target.value !== 'set';
+  if (!wrap.hidden) document.getElementById('ppNewPin').focus();
+});
 view.addEventListener('input', e => { if (e.target.id === 'rpText') drawGaps(); });
 view.addEventListener('change', e => {
   if (e.target.id !== 'phFiles') return;
@@ -1398,14 +1699,14 @@ document.addEventListener('visibilitychange', () => {
   if (session && currentPage === 'events') loadPrivate(); // private events have no saved copy, so fetch them again
 });
 
-/* ---------- Committee: sign-in and the server ---------- */
+/* ---------- Club Team: sign-in and the server ---------- */
 const sessionStore = {
   get() { try { const s = JSON.parse(localStorage.getItem('ot:committee')); return s && s.pin ? s : null; } catch (e) { return null; } },
   set(s) { try { if (s) localStorage.setItem('ot:committee', JSON.stringify(s)); else localStorage.removeItem('ot:committee'); } catch (e) { /* storage blocked */ } }
 };
 let session = sessionStore.get(); // {pin, name, admin} while signed in on this device
 
-/* Calls one of the committee functions on the club's server. Gives back the data, or throws an Error with a plain-English message. */
+/* Calls one of the Club Team functions on the club's server. Gives back the data, or throws an Error with a plain-English message. */
 async function api(fn, pin, args) {
   let reply;
   try {
@@ -1443,7 +1744,7 @@ async function committeeApi(fn, args) {
 function showCommitteeTab() {
   document.getElementById('committeeTab').hidden = !session;
   document.querySelector('.tabbar').classList.toggle('six', !!session);
-  committeeBtn.setAttribute('aria-label', session ? 'Committee' : 'Committee sign-in');
+  committeeBtn.setAttribute('aria-label', session ? 'Club Team' : 'Club Team sign-in');
 }
 
 function signOut() {
@@ -1452,6 +1753,7 @@ function signOut() {
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = '';
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
   msgOpen = null; msgOpenState = ''; msgUnread = null; unreadAt = 0; SAVED = null;
+  ADMIN = blankAdmin(); personEdit = null;
   const rp = document.getElementById('replyForm');
   if (rp) rp.remove();
   const rs = document.getElementById('resultsForm');
@@ -1462,9 +1764,9 @@ function signOut() {
 }
 
 /* Sheets (simple dialogs) */
-const sheet = document.getElementById('sheet'), soonSheet = document.getElementById('soonSheet'), leaveSheet = document.getElementById('leaveSheet');
+const sheet = document.getElementById('sheet'), leaveSheet = document.getElementById('leaveSheet');
 const confirmSheet = document.getElementById('confirmSheet');
-const SHEETS = [sheet, soonSheet, leaveSheet, confirmSheet];
+const SHEETS = [sheet, leaveSheet, confirmSheet];
 const committeeBtn = document.getElementById('committeeBtn');
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
@@ -1482,16 +1784,14 @@ function closeSheets() {
   sheetOpener = null;
 }
 function openSignIn(note) {
-  soonSheet.hidden = true; leaveSheet.hidden = true; confirmSheet.hidden = true;
+  leaveSheet.hidden = true; confirmSheet.hidden = true;
   pinBox.value = ''; signInError.hidden = true;
   signInNote.textContent = note || ''; signInNote.hidden = !note;
   openSheet(sheet, pinBox);
 }
 
-document.getElementById('soonLink').href = FEED_URL;
 committeeBtn.addEventListener('click', () => { if (session) location.hash = '#/committee'; else openSignIn(); });
 document.getElementById('sheetClose').addEventListener('click', closeSheets);
-document.getElementById('soonClose').addEventListener('click', closeSheets);
 SHEETS.forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
 document.getElementById('leaveStay').addEventListener('click', closeSheets);
 document.getElementById('confirmNo').addEventListener('click', closeSheets);
@@ -1553,8 +1853,8 @@ async function postEvent(form) {
   btn.disabled = true; btn.textContent = 'Posting…';
   try {
     await committeeApi('postEvent', [{ ...ev, audience }]);
-    postedText = audience === 'Members' ? 'Only signed-in members and committee can see it. It is not on the website.'
-      : audience === 'Committee' ? 'Only signed-in committee can see it. It is not on the website.'
+    postedText = audience === 'Members' ? 'Only signed-in members and the Club Team can see it. It is not on the website.'
+      : audience === 'Committee' ? 'Only the signed-in Club Team can see it. It is not on the website.'
       : 'It appears on the website and app within about 2 minutes.';
     posted = true;
     changed('events');

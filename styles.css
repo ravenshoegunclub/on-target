@@ -1,4 +1,4 @@
-/* On Target v1.6.0 — club styles */
+/* On Target v1.7.1 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -8,6 +8,8 @@
   --green: #1E7A3C;
   --ok-text: #1E7A3C;
   --ok-soft: #DDF0E3;
+  --red: #B3261E;
+  --red-text: #B3261E;
   --info-soft: #DDE8F7;
   --info-text: #1D4C8A;
 
@@ -45,6 +47,7 @@
     --gold-text: #F2C76E;
     --ok-text: #7DD69A;
     --ok-soft: #1F3A28;
+    --red-text: #FF8A80;
     --info-soft: #1D2E48;
     --info-text: #9CC1F2;
     --shadow: 0 1px 2px rgba(0,0,0,.3);
@@ -276,7 +279,7 @@ input[type="date"].field::-webkit-date-and-time-value { text-align: left; margin
 .empty .btn-row { align-self: stretch; flex-wrap: wrap; }
 .empty .btn-row .btn { flex: 1 1 160px; white-space: normal; text-align: center; line-height: 1.3; padding: 10px 14px; }
 
-/* Committee */
+/* Club Team */
 .who { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .who .muted { font-size: 15px; }
 .who .btn { flex: 0 0 auto; padding: 0 18px; }
@@ -401,7 +404,49 @@ select.field { -webkit-appearance: none; appearance: none; background-image: lin
 .gaps-title { flex: 1 1 100%; font-weight: 600; font-size: 14px; color: var(--gold-text); }
 .gap { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1.5px solid var(--gold); background: var(--card); color: var(--text); font: 600 14px Poppins, sans-serif; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
 
-/* Tab bar with the Committee tab: tabs share the width by label length so all six stay readable */
+/* Admin */
+.admin-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-count { flex: 1 1 150px; min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); color: var(--text); text-decoration: none; font-weight: 500; }
+.admin-count b { font: 800 20px Montserrat, sans-serif; color: var(--heading); }
+.admin-count.amber { background: var(--gold-soft); color: var(--gold-text); }
+.admin-count.amber b { color: var(--gold-text); }
+.admin-count.red { background: var(--red); color: #fff; }
+.admin-count.red b { color: #fff; }
+.pay-card { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.pay-name { font-size: 18px; color: var(--heading); overflow-wrap: anywhere; }
+.pay-total { font: 800 20px Montserrat, sans-serif; color: var(--heading); white-space: nowrap; }
+.pay-ref { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; padding: 10px 14px; border-radius: 12px; background: var(--gold-soft); }
+.pay-ref .muted { color: var(--gold-text); font-weight: 600; }
+.pay-ref b { font: 800 18px Montserrat, sans-serif; letter-spacing: 1px; color: var(--text); overflow-wrap: anywhere; }
+.pay-contact { overflow-wrap: anywhere; }
+.pay-card .btn { flex: 0 0 auto; margin-top: 8px; }
+#memList { display: flex; flex-direction: column; gap: 10px; }
+#memList > .btn { flex: 0 0 auto; }
+#memList > p { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-btn { min-height: 44px; padding: 6px 16px; border-radius: 22px; border: 1.5px solid var(--line); background: var(--card); color: var(--text); font: 600 14px Poppins, sans-serif; cursor: pointer; text-align: left; }
+.chip-btn[aria-pressed="true"] { background: var(--maroon); border-color: var(--maroon); color: #fff; }
+.mem-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.mem-row:last-child { border-bottom: 0; }
+.mem-row .list-main { flex: 1 1 150px; }
+.mem-row .list-title { overflow-wrap: anywhere; }
+.mem-row.not-financial { border-left: 4px solid var(--red); padding-left: 10px; margin-left: -14px; }
+.mem-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.mbadge { font: 700 12px Poppins, sans-serif; padding: 3px 10px; border-radius: 10px; white-space: nowrap; }
+.mbadge-ok { background: var(--ok-soft); color: var(--ok-text); }
+.mbadge-amber { background: var(--gold-soft); color: var(--gold-text); }
+.mbadge-red { background: var(--red); color: #fff; }
+.mbadge-red-line { background: none; color: var(--red-text); border: 2px solid var(--red); padding: 1px 8px; }
+.mbadge-grey { background: var(--line); color: var(--text); }
+.mbadge-maroon { background: var(--maroon); color: #fff; }
+.notice-red { background: var(--red); color: #fff !important; }
+.pin-once { background: var(--gold-soft); color: var(--text); border: 2px solid var(--gold); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 8px; text-align: center; font-weight: 500; }
+.pin-digits { font: 800 40px Montserrat, sans-serif; letter-spacing: 6px; color: var(--heading); overflow-wrap: anywhere; }
+.pin-once .btn { flex: 0 0 auto; }
+#personForm > .choice { margin-bottom: 10px; }
+#ppPinWrap[hidden] { display: none; }
+
+/* Tab bar with the Club Team tab: tabs share the width by label length so all six stay readable */
 .tabbar a[hidden] { display: none; }
 .tabbar.six a { flex: 1 1 auto; max-width: none; padding: 0 2px; }
 .tabbar.six .tab-ico { padding: 4px 10px; }
