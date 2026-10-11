@@ -1,4 +1,4 @@
-/* On Target v1.4.0 — club styles */
+/* On Target v1.5.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -7,6 +7,7 @@
   --gold-text: #6B4600;
   --green: #1E7A3C;
   --ok-text: #1E7A3C;
+  --ok-soft: #DDF0E3;
 
   --bg: #F6F2EE;
   --card: #FFFFFF;
@@ -41,6 +42,7 @@
     --gold-soft: #3D3018;
     --gold-text: #F2C76E;
     --ok-text: #7DD69A;
+    --ok-soft: #1F3A28;
     --shadow: 0 1px 2px rgba(0,0,0,.3);
   }
 }
@@ -249,6 +251,13 @@ h1, h2, h3 { font-family: Montserrat, sans-serif; font-weight: 800; margin: 0; }
 }
 textarea.field { min-height: 110px; resize: vertical; line-height: 1.5; }
 .field:focus { border-color: var(--accent); }
+/* Date boxes: iPhones give them their own width and centre the date, so both are overridden here */
+.date-wrap { position: relative; min-width: 0; }
+input[type="date"].field { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; height: 50px; text-align: left; line-height: 1.5; }
+input[type="date"].field::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.5em; }
+.date-hint { position: absolute; left: 15.5px; top: 0; height: 50px; display: flex; align-items: center; color: var(--text-3); font-size: 16px; pointer-events: none; }
+.date-wrap:not(.no-date) .date-hint, .date-wrap:focus-within .date-hint { display: none; }
+.date-wrap.no-date input:not(:focus) { color: transparent; }
 .pin-box { min-height: 64px; text-align: center; font: 800 28px Montserrat, sans-serif; letter-spacing: 6px; }
 .form { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
 .form .field { margin-bottom: 10px; }
@@ -317,6 +326,34 @@ button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px s
 .ph-add { aspect-ratio: 1 / 1; border-radius: 12px; border: 2px dashed var(--line); background: none; color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: 600 14px Poppins, sans-serif; padding: 4px; }
 .ph-add.first { grid-column: 1 / -1; aspect-ratio: auto; min-height: 120px; font-size: 16px; }
 #phSubmit[hidden] { display: none; }
+
+/* Manage posts */
+.seg { display: flex; gap: 6px; background: var(--tint); border-radius: 14px; padding: 5px; }
+.seg button { flex: 1; min-height: 46px; border: 0; border-radius: 10px; background: none; color: var(--text); font: 600 15px Poppins, sans-serif; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--heading); font-weight: 700; box-shadow: var(--shadow); }
+button.manage-row { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); text-align: left; cursor: pointer; min-height: 64px; }
+button.manage-row:last-child { border-bottom: 0; }
+.manage-row .list-main { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.manage-row .list-title { font: 600 15px Poppins, sans-serif; }
+.manage-row .chev { flex: 0 0 18px; width: 18px; height: 18px; color: var(--text-3); }
+.badge { display: inline-block; font: 700 12px Poppins, sans-serif; padding: 2px 10px; border-radius: 10px; white-space: nowrap; vertical-align: middle; }
+.badge-everyone { background: var(--ok-soft); color: var(--ok-text); }
+.badge-members { background: var(--gold-soft); color: var(--gold-text); }
+.badge-committee { background: var(--maroon); color: #fff; }
+.badge-hidden { background: var(--line); color: var(--text); }
+.section > .btn { flex: 0 0 auto; }
+.edit-photo { width: 100%; max-height: 300px; object-fit: contain; border-radius: 12px; background: var(--tint); margin-bottom: 10px; }
+.btn-danger { background: var(--card); color: var(--accent); border: 1.5px solid var(--accent); margin-top: 10px; }
+.btn-danger-solid { background: var(--crimson); color: #fff; border: 0; }
+
+/* "Who can see this?" choices */
+.choices { border: 0; padding: 0; margin: 4px 0 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.choices legend { padding: 0; margin-bottom: 6px; }
+.choice { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; min-height: 56px; border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer; }
+.choice input { flex: 0 0 22px; width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--crimson); }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--tint); }
+.choice-title { display: block; font-weight: 600; font-size: 15px; }
+.choice-text { display: block; color: var(--text-2); font-size: 13px; }
 
 /* Tab bar with the Committee tab: tabs share the width by label length so all six stay readable */
 .tabbar a[hidden] { display: none; }

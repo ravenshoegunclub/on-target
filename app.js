@@ -1,10 +1,10 @@
-/* On Target v1.4.0 — app shell with live club data and committee tools
+/* On Target v1.5.0 — app shell with live club data and committee tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -208,14 +208,16 @@ const VIEWS = {
   },
 
   events() {
+    if (session && !PRIVATE) loadPrivate();
+    const list = eventsShown();
     return `
       <div class="page-title"><h1>Events</h1><p class="muted">Competition days, training and club events</p></div>
       <section class="section">
-        ${state('events', 4, () => events().length ? `<div class="card list">
-          ${events().map((ev, i) => `
+        ${state('events', 4, () => list.length ? `<div class="card list">
+          ${list.map((ev, i) => `
             <div class="list-row">${dateBlock(ev.date)}
               <div class="list-main">
-                <div class="list-title">${esc(ev.title)}</div>
+                <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}</div>
                 <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], ev.start, ev.discipline)}</div>
                 ${ev.description ? `<div class="muted desc">${esc(ev.description)}</div>` : ''}
               </div>
@@ -294,6 +296,11 @@ const VIEWS = {
     if (sub === 'event') return posted ? eventPosted() : eventForm();
     if (sub === 'results') return posted ? resultsPosted() : resultsForm();
     if (sub === 'photos') return posted ? photosAdded() : photosForm();
+    if (sub === 'manage') return manageView();
+    if (sub === 'edit') {
+      if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
+      return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
+    }
     const soon = (icon, label) => `<button type="button" class="menu-row" data-soon><span class="tile-ico">${icon}</span>${label}${ICON.chev}</button>`;
     return `
       <div class="page-title"><h1>Committee</h1>
@@ -310,7 +317,7 @@ const VIEWS = {
       </section>
       <section class="section"><div class="card list">
         ${soon(ICON.mail, 'Messages')}
-        ${soon(ICON.doc, 'Manage posts')}
+        <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
       </div></section>
       ${session.admin ? `<section class="section">
         <div class="section-head"><h2>Admin</h2></div>
@@ -326,23 +333,44 @@ const VIEWS = {
 const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
 let posted = false; // true while the "Event posted", "Results posted" or "Photos added" message is showing
 
-function eventForm() {
+/* Who can see an event. "Hidden" only exists for older events with Show = No in the Sheet. */
+const AUDIENCES = [
+  ['Everyone', 'Everyone', 'Shown on the website and in the app.'],
+  ['Members', 'Members only', 'Only signed-in members and committee. Not on the website.'],
+  ['Committee', 'Committee only', 'Only signed-in committee. Not on the website.'],
+  ['Hidden', 'Hidden', 'Not shown anywhere. Choose one of the others to show it.']
+];
+const badge = audience => `<span class="badge badge-${audience.toLowerCase()}">${audience}</span>`;
+let postedText = '';
+
+/* `item` is the event being edited (from Manage posts), or nothing for a new one */
+function eventForm(item) {
+  const ev = item || { audience: 'Everyone' };
+  const v = k => esc(ev[k] || '');
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post an event</h1></div>
+    <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit event</h1>`
+      : `<a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post an event</h1>`}</div>
     <section class="section"><form class="card form" id="eventForm" novalidate>
       <label class="field-label" for="evDate">Date</label>
-      <input class="field" type="date" id="evDate" required>
+      ${dateField('evDate', item ? ev.date : nextSaturday())}
       <label class="field-label" for="evStart">Start time <span class="field-hint">for example 8:30am</span></label>
-      <input class="field" id="evStart" maxlength="30" autocomplete="off">
+      <input class="field" id="evStart" maxlength="30" autocomplete="off" value="${v('start')}">
       <label class="field-label" for="evTitle">Title</label>
-      <input class="field" id="evTitle" maxlength="80" autocomplete="off" required>
+      <input class="field" id="evTitle" maxlength="80" autocomplete="off" value="${v('title')}" required>
       <label class="field-label" for="evDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
-      <input class="field" id="evDisc" maxlength="40" list="evDiscList" autocomplete="off">
+      <input class="field" id="evDisc" maxlength="40" list="evDiscList" autocomplete="off" value="${v('discipline')}">
       <datalist id="evDiscList">${DISCIPLINES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
       <label class="field-label" for="evDesc">Description <span class="field-hint">targets, distances, fees, what to bring</span></label>
-      <textarea class="field" id="evDesc" maxlength="400"></textarea>
+      <textarea class="field" id="evDesc" maxlength="400">${v('description')}</textarea>
+      <fieldset class="choices">
+        <legend class="field-label">Who can see this?</legend>
+        ${AUDIENCES.filter(a => a[0] !== 'Hidden' || ev.audience === 'Hidden').map(a => `
+          <label class="choice"><input type="radio" name="evAudience" value="${a[0]}"${a[0] === ev.audience ? ' checked' : ''}>
+            <span><span class="choice-title">${a[1]}</span><span class="choice-text">${a[2]}</span></span></label>`).join('')}
+      </fieldset>
       <p class="form-error" id="evError" role="alert" hidden></p>
-      <button type="submit" class="btn btn-primary btn-big" id="evSubmit">Post event</button>
+      <button type="submit" class="btn btn-primary btn-big" id="evSubmit">${item ? 'Save changes' : 'Post event'}</button>
+      ${item ? `<button type="button" class="btn btn-danger btn-big" data-delete>Delete event</button>` : ''}
     </form></section>`;
 }
 
@@ -352,7 +380,7 @@ function eventPosted() {
     <section class="section"><div class="card empty" role="status">
       <span class="done-ico">${ICON.check}</span>
       <div class="empty-title">Event posted</div>
-      <p class="muted">It appears on the website and app within about 2 minutes.</p>
+      <p class="muted">${esc(postedText)}</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-another>Post another event</button>
         <a class="btn btn-outline btn-big" href="#/committee">Back to Committee</a>
@@ -360,13 +388,185 @@ function eventPosted() {
     </div></section>`;
 }
 
+/* ---------- Private events (members-only and committee-only), for signed-in committee ---------- */
+let PRIVATE = null;          // from the server; kept in memory only, never saved on the phone
+let privateLoading = false;
+
+async function loadPrivate() {
+  if (privateLoading || !session) return;
+  privateLoading = true;
+  try { const list = await committeeApi('privateEvents'); PRIVATE = Array.isArray(list) ? list : []; } catch (e) { /* the public events still show */ }
+  privateLoading = false;
+  if (PRIVATE && currentPage === 'events') render(true);
+}
+/* The Events tab: public events, plus upcoming private ones (with a badge) when the committee is signed in */
+function eventsShown() {
+  const today = todayIso();
+  const extra = session && PRIVATE ? PRIVATE.filter(e => e.date >= today) : [];
+  return [...events(), ...extra].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+
+/* ---------- Manage posts ---------- */
+let MANAGE = null;           // {events, results, photos, privateEvents} from the server; memory only
+let manageState = '', manageAt = 0, manageTab = 'events', manageNote = '';
+let editing = null;          // {kind: 'event' | 'results' | 'photo', item} while an edit screen is open
+const MANAGE_TABS = [['events', 'Events'], ['results', 'Results'], ['photos', 'Photos']];
+
+async function loadManage() {
+  if (manageState === 'loading' || !session) return;
+  manageState = 'loading';
+  try {
+    const d = await committeeApi('manageItems') || {};
+    MANAGE = { events: d.events || [], results: d.results || [], photos: d.photos || [], privateEvents: d.privateEvents || [] };
+    manageAt = Date.now(); manageState = '';
+  }
+  catch (e) { if (e.signedOut) { manageState = ''; return; } manageState = 'failed'; }
+  if (currentPage === 'committee/manage') render(true);
+}
+
+/* Public events (Everyone or Hidden) and private ones (Members or Committee) in one list, newest first */
+function manageEvents() {
+  const pub = MANAGE.events.map(e => ({ ...e, source: 'public', audience: e.show === false ? 'Hidden' : 'Everyone' }));
+  const priv = (MANAGE.privateEvents || []).map(e => ({ ...e, source: 'private' }));
+  return [...pub, ...priv].sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+}
+
+function manageView() {
+  if (!MANAGE && manageState !== 'failed') loadManage();
+  const list = () => {
+    if (manageTab === 'events') {
+      const evs = manageEvents();
+      return evs.length ? `<div class="card list">${evs.map((ev, i) => `
+        <button type="button" class="list-row manage-row" data-edit="event:${i}">${ev.date ? dateBlock(ev.date) : ''}
+          <span class="list-main"><span class="list-title">${esc(ev.title || 'No title')}</span>
+            <span class="muted">${joinDot(ev.date && shortDate(ev.date) + ' ' + parseDate(ev.date).getFullYear(), ev.start, ev.discipline)}</span>
+            ${badge(ev.audience)}</span>${ICON.chev}</button>`).join('')}</div>`
+        : empty('No events yet', 'Events you post appear here.');
+    }
+    if (manageTab === 'results') {
+      return MANAGE.results.length ? `<div class="card list">${MANAGE.results.map((g, i) => `
+        <button type="button" class="list-row manage-row" data-edit="results:${i}"><span class="list-ico">${ICON.trophy}</span>
+          <span class="list-main"><span class="list-title">${esc(g.competition || 'No name')}</span>
+            <span class="muted">${joinDot(g.date && shortDate(g.date) + ' ' + parseDate(g.date).getFullYear(), g.discipline, g.rows.length + (g.rows.length === 1 ? ' shooter' : ' shooters'))}</span></span>${ICON.chev}</button>`).join('')}</div>`
+        : empty('No results yet', 'Results you post appear here.');
+    }
+    return MANAGE.photos.length ? `<p class="muted">Tap a photo to change its album, date or caption, or to delete it.</p>
+      <div class="photo-grid">${MANAGE.photos.map((p, i) => `
+        <button type="button" class="thumb" data-edit="photo:${i}" aria-label="Edit photo ${i + 1}: ${esc(p.album)}, ${esc(p.date && shortDate(p.date))}">
+          <img src="${esc(p.thumb)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>`
+      : empty('No photos yet', 'Photos you add appear here.');
+  };
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Manage posts</h1></div>
+    <section class="section">
+      ${manageNote ? `<p class="notice" role="status">${esc(manageNote)}</p>` : ''}
+      <div class="seg" role="group" aria-label="What to manage">${MANAGE_TABS.map(t => `
+        <button type="button" data-mtab="${t[0]}" aria-pressed="${t[0] === manageTab}">${t[1]}</button>`).join('')}</div>
+      ${MANAGE ? list() : manageState === 'failed' ? `<div class="card empty"><div class="empty-title">Can't load the posts</div>
+        <p class="muted">Check your signal and try again.</p>
+        <button type="button" class="btn btn-outline" data-manage-reload>${ICON.refresh}Try again</button></div>` : skeletonRows(5)}
+      ${MANAGE ? `<button type="button" class="btn btn-outline" data-manage-reload>${ICON.refresh}Reload the list</button>` : ''}
+    </section>`;
+}
+
+function photoEditForm(p) {
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit photo</h1></div>
+    <section class="section"><form class="card form" id="photoEditForm" novalidate>
+      <img class="edit-photo" src="${esc(p.thumb)}" alt="${esc(p.caption || p.album)}">
+      <label class="field-label" for="peAlbum">Album <span class="field-hint">choose one or type a new one</span></label>
+      <input class="field" id="peAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="${esc(p.album)}">
+      <datalist id="phAlbumList">${SUGGEST.phAlbumList()}</datalist>
+      <label class="field-label" for="peDate">Date</label>
+      ${dateField('peDate', p.date)}
+      <label class="field-label" for="peCaption">Caption <span class="field-hint">optional</span></label>
+      <input class="field" id="peCaption" maxlength="200" autocomplete="off" value="${esc(p.caption)}">
+      <p class="form-error" id="peError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="peSubmit">Save changes</button>
+      <button type="button" class="btn btn-danger btn-big" data-delete>Delete photo</button>
+    </form></section>`;
+}
+
+/* After anything is saved or deleted: forget the lists (they are reloaded), refresh the public data, go back to Manage posts */
+let skipLeaveCheck = false;
+function go(hash) {
+  if (location.hash === hash) return render();
+  skipLeaveCheck = true;
+  location.hash = hash;
+}
+function changed(kind, note) {
+  MANAGE = null; PRIVATE = null; manageState = ''; manageNote = note || '';
+  refresh(kind, true);
+  setTimeout(() => refresh(kind, true), REFRESH_AFTER_MS + 10000); // the feed keeps its old copy for 2 minutes
+}
+const CONFLICT = /Someone else has just changed this/i;
+const CONFLICT_NOTE = 'Someone else has just changed this, so nothing was saved. The list below is up to date. Please try again.';
+
+/* Runs a save from an edit screen: button shows it is working; a conflict reloads the list; other errors show on the form */
+async function saveEdit(form, kind, call, doneNote) {
+  const btn = form.querySelector('[type="submit"]'), error = form.querySelector('.form-error'), label = btn.textContent;
+  if (btn.disabled) return;
+  error.hidden = true;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    await call();
+    changed(kind, doneNote);
+    go('#/committee/manage');
+  } catch (err) {
+    if (err.signedOut) return;
+    if (CONFLICT.test(err.message)) { changed(kind, CONFLICT_NOTE); return go('#/committee/manage'); }
+    btn.disabled = false; btn.textContent = label;
+    error.textContent = err.message; error.hidden = false;
+  }
+}
+
+async function savePhotoEdit(form) {
+  const p = editing.item, error = form.querySelector('#peError');
+  const meta = { album: form.querySelector('#peAlbum').value.trim(), date: form.querySelector('#peDate').value, caption: form.querySelector('#peCaption').value.trim() };
+  if (!meta.date) { error.textContent = 'Please choose the date.'; error.hidden = false; return form.querySelector('#peDate').focus(); }
+  saveEdit(form, 'photos', () => committeeApi('updatePhoto', [p.row, p.fp, meta]), 'Photo updated.');
+}
+
+/* Delete: always asks first, in plain words */
+function askDelete() {
+  const it = editing.item, rows = it.rows || [];
+  const what = editing.kind === 'event' ? ['Delete this event?', `This removes "${it.title}" from the app${it.source === 'public' ? ' and the website' : ''}.`, 'events',
+      () => committeeApi(it.source === 'private' ? 'deletePrivateEvent' : 'deleteEvent', [it.row, it.fp]), 'Event deleted.']
+    : editing.kind === 'results' ? ['Delete these results?', `This removes ${rows.length === 1 ? 'the result' : 'all ' + rows.length + ' results'} for "${it.competition}" from the website and the app.`, 'results',
+      () => committeeApi('deleteResults', [rows.map(r => ({ row: r.row, fp: r.fp }))]), 'Results deleted.']
+    : ['Delete this photo?', 'This removes the photo from the gallery on the website and the app.', 'photos',
+      () => committeeApi('deletePhoto', [it.row, it.fp]), 'Photo deleted.'];
+  document.getElementById('confirmTitle').textContent = what[0];
+  document.getElementById('confirmText').textContent = what[1] + ' It cannot be undone in the app.';
+  const yes = document.getElementById('confirmYes'), error = document.getElementById('confirmError');
+  error.hidden = true; yes.disabled = false; yes.textContent = 'Yes, delete it';
+  yes.onclick = async () => {
+    if (yes.disabled) return;
+    yes.disabled = true; yes.textContent = 'Deleting…'; error.hidden = true;
+    try {
+      await what[3]();
+      sheetOpener = null; closeSheets();
+      changed(what[2], what[4]);
+      go('#/committee/manage');
+    } catch (err) {
+      if (err.signedOut) return;
+      if (CONFLICT.test(err.message)) { sheetOpener = null; closeSheets(); changed(what[2], CONFLICT_NOTE); return go('#/committee/manage'); }
+      yes.disabled = false; yes.textContent = 'Yes, delete it';
+      error.textContent = err.message; error.hidden = false;
+    }
+  };
+  openSheet(confirmSheet, document.getElementById('confirmNo'));
+}
+
 /* ---------- Post results ---------- */
 let MEMBERS = null;          // [{id, name, short}] from the server; kept in memory only, never saved on the phone
 let membersFailed = false, membersLoading = false;
 let sameDay = null;          // {date, discipline} carried over by "Add another competition for the same day"
-let resultsStart = { discipline: '' };
 
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const nextSaturday = () => { const d = new Date(); d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7 || 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+/* A date box. iPhones show an empty one as a blank box, so it gets its own "Tap to choose a date" hint. */
+const dateField = (id, value) => `<div class="date-wrap${value ? '' : ' no-date'}"><input class="field" type="date" id="${id}" value="${esc(value || '')}" required><span class="date-hint" aria-hidden="true">Tap to choose a date</span></div>`;
 const uniq = list => { const seen = new Set(); return list.map(v => String(v || '').trim()).filter(v => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())); };
 const options = list => list.map(v => `<option value="${esc(v)}"></option>`).join('');
 const pastComps = () => days().flatMap(d => d.competitions);
@@ -396,47 +596,51 @@ function refreshSuggestions() {
   Object.keys(SUGGEST).forEach(id => { const list = document.getElementById(id); if (list) list.innerHTML = SUGGEST[id](); });
 }
 
-function shooterRow() {
-  return `<div class="rs-row" role="group">
+/* `r` is an existing result row when editing; its member link is kept for as long as the name is not changed */
+function shooterRow(r) {
+  r = r || {};
+  return `<div class="rs-row" role="group"${r.memberId ? ` data-member-id="${esc(r.memberId)}" data-linked="${esc(r.shooter)}"` : ''}>
     <label class="field-label rs-shooter"><span class="chip rs-place"></span> Shooter
-      <input class="field" data-f="shooter" list="rsShooterList" maxlength="60" autocomplete="off" autocapitalize="words"></label>
+      <input class="field" data-f="shooter" list="rsShooterList" maxlength="60" autocomplete="off" autocapitalize="words" value="${esc(r.shooter || '')}"></label>
     <button type="button" class="icon-btn soft rs-remove" data-remove>${ICON.close}</button>
     <p class="rs-member" hidden></p>
     <label class="field-label rs-class">Class
-      <input class="field" data-f="class" list="rsClassList" maxlength="30" autocomplete="off"></label>
+      <input class="field" data-f="class" list="rsClassList" maxlength="30" autocomplete="off" value="${esc(r['class'] || '')}"></label>
     <label class="field-label rs-score">Score
-      <input class="field" data-f="score" maxlength="20" autocomplete="off"></label>
+      <input class="field" data-f="score" maxlength="20" autocomplete="off" value="${esc(r.score || '')}"></label>
   </div>`;
 }
 
-function resultsForm() {
-  const start = sameDay || { date: todayIso(), discipline: '' };
+/* `item` is the competition being edited (from Manage posts), or nothing for a new one */
+function resultsForm(item) {
+  const start = item || sameDay || { date: todayIso(), discipline: '' };
   sameDay = null;
-  resultsStart = start;
   if (!MEMBERS) loadMembers();
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post results</h1></div>
-    <section class="section"><form class="card form" id="resultsForm" novalidate>
+    <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit results</h1>`
+      : `<a class="back-link" href="#/committee">${ICON.chev}Committee</a><h1>Post results</h1>`}</div>
+    <section class="section"><form class="card form" id="resultsForm" novalidate${item ? ' data-mode="edit"' : ''}>
       <label class="field-label" for="rsDate">Competition day</label>
-      <input class="field" type="date" id="rsDate" value="${esc(start.date)}" required>
+      ${dateField('rsDate', start.date)}
       <label class="field-label" for="rsDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
       <input class="field" id="rsDisc" maxlength="40" list="rsDiscList" autocomplete="off" value="${esc(start.discipline)}">
       <datalist id="rsDiscList">${SUGGEST.rsDiscList()}</datalist>
       <label class="field-label" for="rsComp">Competition name</label>
-      <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" required>
+      <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" value="${esc(start.competition || '')}" required>
       <datalist id="rsCompList">${SUGGEST.rsCompList()}</datalist>
       <datalist id="rsClassList">${SUGGEST.rsClassList()}</datalist>
       <datalist id="rsShooterList">${SUGGEST.rsShooterList()}</datalist>
 
       <h2 class="form-head">Shooters</h2>
       <p class="muted" id="rsHint">${membersHint()}</p>
-      <div id="rsRows">${shooterRow()}${shooterRow()}${shooterRow()}</div>
+      <div id="rsRows">${item ? item.rows.map(shooterRow).join('') : shooterRow() + shooterRow() + shooterRow()}</div>
       <div class="btn-row rs-tools">
         <button type="button" class="btn btn-outline btn-big" data-add-shooter>Add shooter</button>
         <button type="button" class="btn btn-outline btn-big" data-sort-score>Sort by score</button>
       </div>
       <p class="form-error" id="rsError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="rsSubmit">Post results</button>
+      ${item ? `<button type="button" class="btn btn-danger btn-big" data-delete>Delete these results</button>` : ''}
     </form></section>`;
 }
 function membersHint() {
@@ -483,13 +687,27 @@ function tidyRows(form) {
     const place = rowEmpty(row) && i < lastFilled ? '' : placeLabel(++n); // an empty row between shooters gets no place
     row.querySelector('.rs-place').textContent = place || '–';
     row.setAttribute('aria-label', place ? place + ' place' : 'Empty row');
-    const name = rowValue(row, 'shooter'), m = memberFor(name), note = row.querySelector('.rs-member');
+    const name = rowValue(row, 'shooter'), m = linkFor(row), note = row.querySelector('.rs-member');
     row.querySelector('[data-remove]').setAttribute('aria-label', name ? 'Remove ' + name : 'Remove this empty row');
     note.hidden = !m;
-    note.innerHTML = m ? `${ICON.check}Member · shows as ${esc(m.short)} on the results` : '';
+    note.innerHTML = !m ? '' : m.kept ? `${ICON.check}Member` : `${ICON.check}Member · shows as ${esc(m.short)} on the results`;
   });
-  const count = rows.filter(row => !rowEmpty(row)).length;
-  form.querySelector('#rsSubmit').textContent = count ? `Post ${count} result${count === 1 ? '' : 's'}` : 'Post results';
+  const count = rows.filter(row => !rowEmpty(row)).length, verb = form.dataset.mode === 'edit' ? 'Save' : 'Post';
+  const btn = form.querySelector('#rsSubmit');
+  if (!btn.disabled) btn.textContent = count ? `${verb} ${count} result${count === 1 ? '' : 's'}` : `${verb} results`;
+}
+
+/* The member a row is linked to: one picked from the list, or the link an existing result already had (while its name is unchanged) */
+function linkFor(row) {
+  const name = rowValue(row, 'shooter'), m = memberFor(name);
+  if (m) return m;
+  return row.dataset.memberId && name === row.dataset.linked ? { id: row.dataset.memberId, short: name, kept: true } : null;
+}
+
+/* Everything typed in the results form, to tell whether it has changed since it was opened */
+function resultsSnapshot(form) {
+  return JSON.stringify([form.querySelector('#rsDate').value, form.querySelector('#rsDisc').value.trim(), form.querySelector('#rsComp').value.trim(),
+    [...form.querySelectorAll('.rs-row')].filter(row => [...row.querySelectorAll('input')].some(i => i.value.trim())).map(row => ['shooter', 'class', 'score'].map(f => rowValue(row, f)))]);
 }
 
 /* 95, 95.5 or "195.7x" / "195-7x" (score then number of Xs). No number sorts last. */
@@ -511,9 +729,7 @@ function sortByScore(form) {
 
 function resultsDirty() {
   const form = document.getElementById('resultsForm');
-  if (!form) return false;
-  return !!form.querySelector('#rsComp').value.trim() || form.querySelector('#rsDisc').value.trim() !== resultsStart.discipline
-    || [...form.querySelectorAll('.rs-row input')].some(i => i.value.trim());
+  return !!form && resultsSnapshot(form) !== form.dataset.initial;
 }
 
 async function postResultsForm(form) {
@@ -527,16 +743,21 @@ async function postResultsForm(form) {
   if (!comp.competition) return fail('Please enter the competition name.', form.querySelector('#rsComp'));
   if (!filled.length) return fail('Please add at least one shooter.', form.querySelector('[data-f="shooter"]'));
   comp.rows = filled.map((row, i) => {
-    const m = memberFor(rowValue(row, 'shooter'));
+    const m = linkFor(row);
     const r = { place: String(i + 1), shooter: m ? m.short : rowValue(row, 'shooter'), 'class': rowValue(row, 'class'), score: rowValue(row, 'score') };
     if (m) r.memberId = m.id;
     return r;
   });
+  if (form.dataset.mode === 'edit') {
+    const old = editing.item.rows.map(r => ({ row: r.row, fp: r.fp }));
+    return saveEdit(form, 'results', () => committeeApi('saveResults', [old, comp]), 'Results updated.');
+  }
   error.hidden = true;
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Posting…';
   try {
     await committeeApi('postResults', [comp]);
+    MANAGE = null;
     sameDay = { date: comp.date, discipline: comp.discipline };
     posted = true;
     render();
@@ -568,7 +789,7 @@ function photosForm() {
       <input class="field" id="phAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="Around the range">
       <datalist id="phAlbumList">${SUGGEST.phAlbumList()}</datalist>
       <label class="field-label" for="phDate">Date</label>
-      <input class="field" type="date" id="phDate" value="${todayIso()}" required>
+      ${dateField('phDate', todayIso())}
       <label class="field-label" for="phCaption">Caption <span class="field-hint">optional, used for every photo here</span></label>
       <input class="field" id="phCaption" maxlength="200" autocomplete="off">
       <input type="file" id="phFiles" accept="image/*" multiple hidden>
@@ -707,7 +928,7 @@ async function uploadPhotos(form) {
   }
   uploading = false;
   const done = PICKED.filter(p => p.state === 'done').length, failed = PICKED.filter(p => p.state === 'failed').length;
-  if (done) { refresh('photos', true); setTimeout(() => refresh('photos', true), REFRESH_AFTER_MS + 10000); } // the feed keeps its old copy for 2 minutes
+  if (done) { MANAGE = null; refresh('photos', true); setTimeout(() => refresh('photos', true), REFRESH_AFTER_MS + 10000); } // the feed keeps its old copy for 2 minutes
   if (!failed) return finishPhotos();
   drawPicked();
   fail(`${failed} photo${failed === 1 ? '' : 's'} could not be sent. ${lastError}`);
@@ -773,10 +994,16 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos'].includes(sub) ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   if (quiet && page === currentPage && view.querySelector('form')) return refreshSuggestions();
-  if (page !== currentPage) { posted = false; sameDay = null; clearPicked(); }
+  if (page !== currentPage) {
+    posted = false; sameDay = null; clearPicked();
+    if (page !== 'committee/edit') editing = null;
+    if (page !== 'committee/manage') manageNote = '';
+    // Opening Manage posts afresh: get an up-to-date list (coming back from an edit screen keeps the one just loaded)
+    else if (currentPage !== 'committee/edit' && Date.now() - manageAt > 30000) { MANAGE = null; manageState = ''; }
+  }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
   view.innerHTML = VIEWS[page.split('/')[0]](sub);
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
@@ -786,7 +1013,7 @@ function render(quiet) {
   }
   currentPage = page; currentHash = location.hash;
   const rs = document.getElementById('resultsForm');
-  if (rs) tidyRows(rs);
+  if (rs) { tidyRows(rs); rs.dataset.initial = resultsSnapshot(rs); }
   drawPicked();
   document.querySelectorAll('.tabbar a').forEach(a => {
     if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -796,7 +1023,7 @@ function render(quiet) {
 view.addEventListener('click', e => {
   const t = e.target;
   const cal = t.closest('[data-cal]'), shr = t.closest('[data-share]'), ph = t.closest('[data-photo]');
-  if (cal) addToCalendar(events()[Number(cal.dataset.cal)]);
+  if (cal) addToCalendar((currentPage === 'events' ? eventsShown() : events())[Number(cal.dataset.cal)]);
   if (shr) shareEvent(events()[Number(shr.dataset.share)]);
   if (ph) openPhoto(Number(ph.dataset.photo));
   if (t.closest('[data-retry]')) { const k = t.closest('[data-retry]').dataset.retry; FAILED[k] = false; render(true); refresh(k, true); }
@@ -807,6 +1034,14 @@ view.addEventListener('click', e => {
   if (t.closest('[data-another]')) { posted = false; render(); }
   if (t.closest('[data-same-day]')) { posted = false; render(); }
   if (t.closest('[data-more-photos]')) { posted = false; render(); }
+  if (t.closest('[data-mtab]')) { manageTab = t.closest('[data-mtab]').dataset.mtab; manageNote = ''; render(true); view.querySelector(`[data-mtab="${manageTab}"]`).focus(); }
+  if (t.closest('[data-manage-reload]')) { MANAGE = null; manageState = ''; manageNote = ''; render(true); }
+  if (t.closest('[data-edit]') && MANAGE) {
+    const [kind, i] = t.closest('[data-edit]').dataset.edit.split(':');
+    const item = (kind === 'event' ? manageEvents() : kind === 'results' ? MANAGE.results : MANAGE.photos)[Number(i)];
+    if (item) { editing = { kind, item }; location.hash = '#/committee/edit'; }
+  }
+  if (t.closest('[data-delete]') && editing) askDelete();
   if (t.closest('[data-ph-choose]')) document.getElementById('phFiles').click();
   if (t.closest('[data-ph-remove]')) {
     const id = Number(t.closest('[data-ph-remove]').dataset.phRemove), p = PICKED.find(x => x.id === id);
@@ -838,12 +1073,16 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'eventForm') { e.preventDefault(); postEvent(e.target); }
   if (e.target.id === 'resultsForm') { e.preventDefault(); postResultsForm(e.target); }
   if (e.target.id === 'photosForm') { e.preventDefault(); uploadPhotos(e.target); }
+  if (e.target.id === 'photoEditForm') { e.preventDefault(); savePhotoEdit(e.target); }
 });
 view.addEventListener('change', e => {
   if (e.target.id !== 'phFiles') return;
   if (e.target.files.length) choosePhotos(e.target.files);
   e.target.value = ''; // so the same photo can be chosen again after removing it
 });
+const dateHint = e => { if (e.target.type === 'date') e.target.parentNode.classList.toggle('no-date', !e.target.value); };
+view.addEventListener('input', dateHint);
+view.addEventListener('change', dateHint);
 view.addEventListener('input', e => {
   const form = e.target.form, err = form && form.querySelector('.form-error');
   if (err) err.hidden = true;
@@ -853,12 +1092,14 @@ view.addEventListener('input', e => {
 /* Leaving a results form with something typed in it, or while photos are uploading: ask first */
 const LEAVE_TEXT = {
   results: ['Leave without posting?', 'These results have not been posted yet. If you leave now, what you have typed will be lost.', 'Stay and keep typing', 'Leave without posting'],
+  edit: ['Leave without saving?', 'Your changes to these results have not been saved. If you leave now, they will be lost.', 'Stay and keep editing', 'Leave without saving'],
   photos: ['Photos are still uploading', 'If you leave now, the photos that have not been sent yet will not be added.', 'Stay until they finish', 'Leave and stop uploading']
 };
-const leaveReason = () => uploading ? 'photos' : resultsDirty() ? 'results' : '';
+const leaveReason = () => uploading ? 'photos' : !resultsDirty() ? '' : document.getElementById('resultsForm').dataset.mode === 'edit' ? 'edit' : 'results';
 let leavingTo = null;
 window.addEventListener('hashchange', () => {
-  const why = location.hash !== currentHash && leaveReason();
+  const why = !skipLeaveCheck && location.hash !== currentHash && leaveReason();
+  skipLeaveCheck = false;
   if (why) {
     leavingTo = location.hash;
     history.replaceState(null, '', currentHash);
@@ -869,7 +1110,11 @@ window.addEventListener('hashchange', () => {
   render();
 });
 window.addEventListener('beforeunload', e => { if (leaveReason()) { e.preventDefault(); e.returnValue = ''; } });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  refreshAll();
+  if (session && currentPage === 'events') loadPrivate(); // private events have no saved copy, so fetch them again
+});
 
 /* ---------- Committee: sign-in and the server ---------- */
 const sessionStore = {
@@ -922,6 +1167,7 @@ function showCommitteeTab() {
 function signOut() {
   session = null; sessionStore.set(null);
   MEMBERS = null; membersFailed = false;
+  MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = '';
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove(); // nothing left to ask about
   clearPicked();
@@ -931,7 +1177,8 @@ function signOut() {
 
 /* Sheets (simple dialogs) */
 const sheet = document.getElementById('sheet'), soonSheet = document.getElementById('soonSheet'), leaveSheet = document.getElementById('leaveSheet');
-const SHEETS = [sheet, soonSheet, leaveSheet];
+const confirmSheet = document.getElementById('confirmSheet');
+const SHEETS = [sheet, soonSheet, leaveSheet, confirmSheet];
 const committeeBtn = document.getElementById('committeeBtn');
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
@@ -949,7 +1196,7 @@ function closeSheets() {
   sheetOpener = null;
 }
 function openSignIn(note) {
-  soonSheet.hidden = true; leaveSheet.hidden = true;
+  soonSheet.hidden = true; leaveSheet.hidden = true; confirmSheet.hidden = true;
   pinBox.value = ''; signInError.hidden = true;
   signInNote.textContent = note || ''; signInNote.hidden = !note;
   openSheet(sheet, pinBox);
@@ -961,6 +1208,7 @@ document.getElementById('sheetClose').addEventListener('click', closeSheets);
 document.getElementById('soonClose').addEventListener('click', closeSheets);
 SHEETS.forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
 document.getElementById('leaveStay').addEventListener('click', closeSheets);
+document.getElementById('confirmNo').addEventListener('click', closeSheets);
 document.getElementById('leaveGo').addEventListener('click', () => {
   const to = leavingTo; leavingTo = null;
   sheetOpener = null; closeSheets();
@@ -994,24 +1242,36 @@ document.getElementById('signInForm').addEventListener('submit', async e => {
   }
 });
 
-/* Post an event */
+/* Post a new event, or save an edited one (which may also change who can see it) */
 async function postEvent(form) {
   const btn = form.querySelector('#evSubmit'), error = form.querySelector('#evError');
   if (btn.disabled) return;
   const val = id => form.querySelector('#' + id).value.trim();
   const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector('#' + id).focus(); };
   const ev = { date: val('evDate'), start: val('evStart'), title: val('evTitle'), discipline: val('evDisc'), description: val('evDesc') };
+  const audience = (form.querySelector('[name="evAudience"]:checked') || {}).value || 'Everyone';
   if (!ev.date) return fail('Please choose a date.', 'evDate');
   if (!ev.title) return fail('Please give the event a title.', 'evTitle');
+
+  if (editing) {
+    const it = editing.item, from = { source: it.source, row: it.row, fp: it.fp }, isPrivate = audience === 'Members' || audience === 'Committee';
+    const call = it.source === 'public' && !isPrivate ? () => committeeApi('updateEvent', [it.row, it.fp, { ...ev, show: audience !== 'Hidden' }])   // stays in the Events tab
+      : it.source === 'private' && isPrivate ? () => committeeApi('updatePrivateEvent', [it.row, it.fp, { ...ev, audience }])                        // stays private
+      : () => committeeApi('setEventAudience', [from, audience, ev]);                                                                                   // moves between the two
+    return saveEdit(form, 'events', call, 'Event updated.');
+  }
+
   error.hidden = true;
   btn.disabled = true; btn.textContent = 'Posting…';
   try {
-    await committeeApi('addEvent', [ev]);
+    await committeeApi('postEvent', [{ ...ev, audience }]);
+    postedText = audience === 'Members' ? 'Only signed-in members and committee can see it. It is not on the website.'
+      : audience === 'Committee' ? 'Only signed-in committee can see it. It is not on the website.'
+      : 'It appears on the website and app within about 2 minutes.';
     posted = true;
+    changed('events');
     render();
     view.focus();
-    refresh('events', true);
-    setTimeout(() => refresh('events', true), REFRESH_AFTER_MS + 10000); // the feed keeps its old copy for 2 minutes
   } catch (err) {
     if (err.signedOut) return;
     btn.disabled = false; btn.textContent = 'Post event';
