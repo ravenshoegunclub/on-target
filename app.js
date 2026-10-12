@@ -1,10 +1,10 @@
-/* On Target v1.8.1 — app shell with live club data and club team tools
+/* On Target v2.1.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -46,6 +46,8 @@ const ICON = {
   people: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 15c1.5.9 2.5 2.5 3 5"/></svg>',
   key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>',
   phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M12 8v7M9 12l3 3 3-3"/></svg>',
+  firstaid: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
+  call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   rings: '<svg class="hero-rings" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48"/><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="20"/><circle cx="50" cy="50" r="6" fill="currentColor"/></svg>'
 };
@@ -330,6 +332,12 @@ const VIEWS = {
     if (sub === 'results') return posted ? resultsPosted() : resultsForm();
     if (sub === 'photos') return posted ? photosAdded() : photosForm();
     if (sub === 'manage') return manageView();
+    if (sub === 'emergency') return emergencyView();
+    if (sub === 'documents') return docsAdminView();
+    if (sub === 'document') {
+      if (!docEdit) { location.replace('#/committee/documents'); return ''; } // e.g. the page was reloaded
+      return docForm(docEdit);
+    }
     if (sub === 'messages') return messagesView();
     if (sub === 'message') return messageView(arg);
     if (sub === 'reply') return replyView(arg);
@@ -454,26 +462,32 @@ async function loadManage() {
   if (currentPage === 'committee/manage') render(true);
 }
 
-/* Public events (Everyone or Hidden) and private ones (Members or Committee) in one list, newest first */
+/* Public events (Everyone or Hidden) and private ones (Members or Committee) in one list:
+   upcoming first, soonest at the top, then past events, newest first */
+const isPast = ev => !!ev.date && ev.date < todayIso();
 function manageEvents() {
   const pub = MANAGE.events.map(e => ({ ...e, source: 'public', audience: e.show === false ? 'Hidden' : 'Everyone' }));
   const priv = (MANAGE.privateEvents || []).map(e => ({ ...e, source: 'private' }));
-  return [...pub, ...priv].sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  const all = [...pub, ...priv], soonest = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  return [...all.filter(e => !isPast(e)).sort(soonest), ...all.filter(isPast).sort((a, b) => soonest(b, a))];
 }
 
 function manageView() {
   if (!MANAGE && manageState !== 'failed') loadManage();
   const list = () => {
     if (manageTab === 'events') {
-      const evs = manageEvents();
+      const evs = manageEvents(), firstPast = evs.findIndex(isPast), split = firstPast < 0 ? evs.length : firstPast;
       // Only events everyone can see get a Share button: private and hidden ones must never be posted publicly
-      return evs.length ? `<div class="card list">${evs.map((ev, i) => `
+      const row = (ev, i) => `
         <div class="manage-item"><button type="button" class="list-row manage-row" data-edit="event:${i}">${ev.date ? dateBlock(ev.date) : ''}
           <span class="list-main"><span class="list-title">${esc(ev.title || 'No title')}</span>
             <span class="muted">${joinDot(ev.date && shortDate(ev.date) + ' ' + parseDate(ev.date).getFullYear(), timeRange(ev), ev.discipline)}</span>
             ${badge(ev.audience)}</span>${ICON.chev}</button>
-          ${ev.audience === 'Everyone' && ev.date ? shareBtn('event:' + i, 'Share ' + (ev.title || 'this event')) : ''}</div>`).join('')}</div>`
-        : empty('No events yet', 'Events you post appear here.');
+          ${ev.audience === 'Everyone' && ev.date ? shareBtn('event:' + i, 'Share ' + (ev.title || 'this event')) : ''}</div>`;
+      if (!evs.length) return empty('No events yet', 'Events you post appear here.');
+      return (split ? `<div class="card list">${evs.slice(0, split).map(row).join('')}</div>` : empty('No upcoming events', 'Events you post appear here.'))
+        + (split < evs.length ? `<div class="section-head"><h2>Past events</h2></div>
+        <div class="card list">${evs.slice(split).map((ev, i) => row(ev, split + i)).join('')}</div>` : '');
     }
     if (manageTab === 'results') {
       return MANAGE.results.length ? `<p class="muted">Share copies a caption with every competition from that day.</p>
@@ -614,7 +628,7 @@ function confirmAsk(o) {
 /* Everything here is kept in memory only: no member details or PINs go into the phone's storage (apart from the admin's own PIN) */
 const blankAdmin = () => ({ summary: null, summaryAt: 0, pending: null, pendingState: '', payNote: '',
   mem: { filter: 'all', query: '', items: null, state: '', season: '', note: '', run: 0 }, sheetUrl: '',
-  people: null, peopleState: '', peopleNote: '', newPin: null, signups: null, signState: '', signNote: '', signCount: 0 });
+  people: null, memberPick: [], peopleState: '', peopleNote: '', newPin: null, signups: null, signState: '', signNote: '', signCount: 0 });
 let ADMIN = blankAdmin();
 let sheetUrlLoading = false;
 let personEdit = null;       // the person being edited ({} for a new one) while that screen is open
@@ -781,7 +795,13 @@ async function exportMembers(btn) {
 async function loadPeople() {
   if (ADMIN.peopleState === 'loading') return;
   ADMIN.peopleState = 'loading';
-  try { const list = await committeeApi('adminListPeople'); ADMIN.people = Array.isArray(list) ? list : []; ADMIN.peopleState = ''; }
+  try {
+    const [list, d] = await Promise.all([committeeApi('adminListPeople'), committeeApi('peopleLinks')]);
+    const links = (d && d.links) || {};
+    ADMIN.people = (Array.isArray(list) ? list : []).map(p => ({ ...p, member: links[p.id] || null })); // member: {id, name} when their PIN is linked to a membership
+    ADMIN.memberPick = (d && Array.isArray(d.members)) ? d.members : [];
+    ADMIN.peopleState = '';
+  }
   catch (e) { if (e.signedOut) { ADMIN.peopleState = ''; return; } ADMIN.peopleState = 'failed'; }
   if (currentPage === 'committee/people') render(true);
 }
@@ -798,7 +818,7 @@ function peopleView() {
       ${ADMIN.peopleNote ? `<p class="notice" role="status">${esc(ADMIN.peopleNote)}</p>` : ''}
       ${ADMIN.people ? `<div class="card list">${ADMIN.people.map((p, i) => `
         <button type="button" class="list-row manage-row" data-person="${i}">
-          <span class="list-main"><span class="list-title">${esc(p.name)}${p.me ? ' (you)' : ''}</span><span class="muted">PIN ${esc(p.pinHint)}</span></span>
+          <span class="list-main"><span class="list-title">${esc(p.name)}${p.me ? ' (you)' : ''}</span><span class="muted">PIN ${esc(p.pinHint)} · ${p.member ? 'Member: ' + esc(p.member.name) : 'Not linked to a membership'}</span></span>
           <span class="mbadge ${p.admin ? 'mbadge-maroon' : 'mbadge-grey'}">${p.admin ? 'Admin' : 'Club team'}</span>${ICON.chev}</button>`).join('')}</div>
         <button type="button" class="btn btn-primary btn-big" data-person="new">${ICON.plus}Add a person</button>`
         : ADMIN.peopleState === 'failed' ? loadFailed('the list', 'data-people-reload') : skeletonRows(3)}
@@ -815,6 +835,9 @@ function personForm(p) {
       <input class="field" id="ppName" maxlength="40" autocomplete="off" autocapitalize="words" value="${esc(p.name || '')}" required>
       <label class="choice"><input type="checkbox" id="ppAdmin"${p.admin ? ' checked' : ''}>
         <span><span class="choice-title">Admin</span><span class="choice-text">Can also confirm payments, see members, and manage people and PINs.</span></span></label>
+      <label class="field-label" for="ppMember">Their membership <span class="field-hint">so their PIN also shows their own membership card</span></label>
+      <select class="field" id="ppMember"><option value="">Not linked to a membership</option>${ADMIN.memberPick.map(m =>
+        `<option value="${esc(m.id)}"${p.member && p.member.id === m.id ? ' selected' : ''}>${esc(m.name)}${m.ssaa ? ' (SSAA ' + esc(m.ssaa) + ')' : ''}</option>`).join('')}</select>
       ${isNew ? `<p class="muted">A PIN is made for them when you save. You will be shown it once.</p>` : `
       <fieldset class="choices">
         <legend class="field-label">PIN <span class="field-hint">now ${esc(p.pinHint)}</span></legend>
@@ -839,7 +862,7 @@ async function savePerson(form) {
   if (btn.disabled) return;
   const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
   const person = { id: p.id || null, name: form.querySelector('#ppName').value.trim(), admin: form.querySelector('#ppAdmin').checked };
-  const how = (form.querySelector('[name="ppPin"]:checked') || {}).value;
+  const how = (form.querySelector('[name="ppPin"]:checked') || {}).value, wantMember = form.querySelector('#ppMember').value;
   if (!person.name) return fail('Please enter a name.', form.querySelector('#ppName'));
   if (how === 'generate') person.generatePin = true;
   if (how === 'set') {
@@ -851,7 +874,19 @@ async function savePerson(form) {
   try {
     const out = await committeeApi('adminSavePerson', [person]);
     if (p.me) keepMeSignedIn(out, person.admin); // before anything else talks to the server
-    ADMIN.people = null; ADMIN.peopleNote = out.message || 'Saved.';
+    let linkNote = '';
+    if (wantMember !== (p.member ? p.member.id : '')) {
+      try {
+        // A new person's ID isn't sent back, so they are found by their name (names can't be the same)
+        const id = p.id || ((await committeeApi('adminListPeople')).find(x => x.name === (out.name || person.name)) || {}).id;
+        linkNote = ' ' + ((await committeeApi('personLinkMember', [id, wantMember])).message || '');
+        if (p.me && !member) { ME = null; meState = ''; }
+      } catch (err) {
+        if (err.signedOut) return;
+        linkNote = ' But their membership could not be linked: ' + err.message;
+      }
+    }
+    ADMIN.people = null; ADMIN.peopleNote = (out.message || 'Saved.') + linkNote;
     ADMIN.newPin = out.pin ? { name: out.name || person.name, pin: out.pin } : null;
     go(session.admin ? '#/committee/people' : '#/me');
   } catch (err) {
@@ -1563,8 +1598,8 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'details', 'documents'].includes(sub) ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'details', 'email', 'documents'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -1578,6 +1613,11 @@ function render(quiet) {
     if (page !== 'committee/person') personEdit = null;
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
+    if (page !== 'me/email') emailChange = null;
+    if (page !== 'committee/emergency') EMERG = blankEmerg();
+    if (page !== 'committee/document') { docEdit = null; docFile = null; docBusy = false; }
+    if (page !== 'committee/documents') DOCADMIN.note = '';
+    if (page !== 'committee/documents' && page !== 'committee/document') { DOCADMIN.list = null; DOCADMIN.state = ''; }
     if (page.indexOf('me') !== 0) relinking = false;
     if (page !== 'me/documents') { DOCS = null; docsState = ''; }
     // A new PIN is shown once: it is forgotten as soon as the People and PINs screen is left
@@ -1612,13 +1652,25 @@ view.addEventListener('click', e => {
   if (shr) shareEvent(events()[Number(shr.dataset.share)]);
   if (ph) openPhoto(Number(ph.dataset.photo));
   if (t.closest('[data-retry]')) { const k = t.closest('[data-retry]').dataset.retry; FAILED[k] = false; render(true); refresh(k, true); }
-  if (t.closest('[data-refresh]')) refreshAll(true);
   if (t.closest('[data-signin]')) openSignIn();
   if (t.closest('[data-signout-all]')) signOutAll();
   if (t.closest('[data-install]')) installApp();
   if (t.closest('[data-docs-reload]')) { DOCS = null; docsState = ''; render(true); }
   if (t.closest('[data-me-reload]')) { ME = null; meState = ''; relinking = false; render(true); }
   if (t.closest('[data-me-relink]')) { relinking = true; render(); }
+  if (t.closest('[data-ec-again]')) emailCodeAgain(t.closest('[data-ec-again]'));
+  if (t.closest('[data-ec-back]')) { emailChange = null; render(); }
+  if (t.closest('[data-em-pick]')) openEmergency(Number(t.closest('[data-em-pick]').dataset.emPick));
+  if (t.closest('[data-em-list]')) { EMERG.open = null; EMERG.state = ''; drawEmergency(); }
+  if (t.closest('[data-docadmin-reload]')) { DOCADMIN.list = null; DOCADMIN.state = ''; DOCADMIN.note = ''; render(true); }
+  if (t.closest('[data-doc]') && (DOCADMIN.list || t.closest('[data-doc]').dataset.doc === 'new')) {
+    const i = t.closest('[data-doc]').dataset.doc;
+    docEdit = i === 'new' ? {} : DOCADMIN.list[Number(i)];
+    if (docEdit) location.hash = '#/committee/document';
+  }
+  if (t.closest('[data-doc-choose]') && !docBusy) document.getElementById('dcFile').click();
+  if (t.closest('[data-doc-replace]') && docEdit) replaceDoc(t.closest('form'));
+  if (t.closest('[data-doc-remove]') && docEdit) askRemoveDoc();
   if (t.closest('[data-su-reload]')) { ADMIN.signups = null; ADMIN.signState = ''; ADMIN.signNote = ''; render(true); }
   if (t.closest('[data-su-link]')) askSignup(Number(t.closest('[data-su-link]').dataset.suLink), true);
   if (t.closest('[data-su-decline]')) askSignup(Number(t.closest('[data-su-decline]').dataset.suDecline), false);
@@ -1700,8 +1752,16 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'personForm') { e.preventDefault(); savePerson(e.target); }
   if (e.target.id === 'linkForm') { e.preventDefault(); linkMe(e.target); }
   if (e.target.id === 'meEmailForm') { e.preventDefault(); requestCode(e.target); }
+  if (e.target.id === 'detailsForm') { e.preventDefault(); saveDetails(e.target); }
+  if (e.target.id === 'emailForm') { e.preventDefault(); changeEmail(e.target); }
+  if (e.target.id === 'emForm') { e.preventDefault(); findEmergency(e.target); }
+  if (e.target.id === 'docForm') { e.preventDefault(); saveDoc(e.target); }
 });
-view.addEventListener('change', e => { if (e.target.name === 'meNewsChoice' && ME) saveNews(e.target); });
+view.addEventListener('change', e => {
+  if (e.target.id !== 'dcFile') return;
+  if (e.target.files.length) chooseDoc(e.target.files[0]);
+  e.target.value = ''; // so the same file can be chosen again
+});
 view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target.value !== '') useSaved(e.target.value); });
 view.addEventListener('change', e => {
   if (e.target.name !== 'ppPin') return;
@@ -1746,6 +1806,9 @@ window.addEventListener('hashchange', () => {
   render();
 });
 window.addEventListener('beforeunload', e => { if (leaveReason()) { e.preventDefault(); e.returnValue = ''; } });
+/* Club data looks after itself: it is fetched again once it is 2 minutes old while On Target is on the screen,
+   and straight away when On Target comes back to the screen. There is no Refresh button. */
+setInterval(() => { if (!document.hidden) refreshAll(); }, 30000);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   refreshAll();
@@ -1796,6 +1859,8 @@ async function committeeApi(fn, args) {
 
 function signOut() {
   session = null; sessionStore.set(null);
+  if (!member) { ME = null; meState = ''; meNote = ''; } // the membership their PIN was showing
+  EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; docFile = null; DOCS = null; docsState = '';
   MEMBERS = null; membersFailed = false;
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = ''; sharePick = null; ADDED = [];
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
@@ -1868,6 +1933,7 @@ document.getElementById('signInForm').addEventListener('submit', async e => {
     const me = await api('signIn', pin);
     session = { pin, name: me.name, admin: !!me.admin };
     sessionStore.set(session);
+    if (!member) { ME = null; meState = ''; } // a PIN linked to a membership shows that member's card
     sheetOpener = null; closeSheets();
     if (location.hash === '#/me') render(); else location.hash = '#/me';
   } catch (err) {
@@ -2085,11 +2151,19 @@ const meStatus = d => d.waiting || d.status === 'waiting' ? 'waiting' : ME_PILL[
 const mePill = key => `<span class="me-pill me-pill-${ME_PILL[key][0]}">${ME_PILL[key][1]}</span>`;
 const initialsOf = name => { const w = String(name || '').trim().split(/\s+/).filter(Boolean); return ((w[0] || '').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase(); };
 const maskEmail = email => { const [a, b] = String(email).split('@'); return a.charAt(0) + '•••@' + (b || ''); };
+/* Who is asking for their own membership: a member's sign-in token, or the PIN of a club team member
+   (the server shows them the membership an admin has linked their PIN to in People and PINs). */
+const meAuth = () => member ? member.token : session ? 'pin:' + session.pin : '';
 async function memberApi(fn, args) {
+  const viaPin = !member;
   try {
-    return await api(fn, undefined, [member.token].concat(args || []));
+    return await api(fn, undefined, [meAuth()].concat(args || []));
   } catch (e) {
-    if (/signed out/i.test(e.message)) { e.signedOut = true; forgetMember(); }
+    if (viaPin && e.badPin) {
+      signOut();
+      openSignIn('You have been signed out because your PIN is no longer recognised. It may have been changed. Please sign in with your new PIN.');
+      e.signedOut = true;
+    } else if (!viaPin && /signed out/i.test(e.message)) { e.signedOut = true; forgetMember(); }
     throw e;
   }
 }
@@ -2107,41 +2181,45 @@ function signOutAll() {
   view.focus();
 }
 async function loadMe() {
-  if (!member || meState === 'loading') return;
+  if (!(member || session) || meState === 'loading') return;
   meState = 'loading';
+  const auth = meAuth();
   try {
-    ME = await memberApi('memberMe');
-    meState = '';
-    const keep = { token: member.token, initials: ME.linked ? initialsOf(ME.name) : '', first: ME.linked ? ME.first : '', status: ME.linked ? meStatus(ME) : '' };
-    member = keep; memberStore.set(member);
+    const me = await memberApi('memberMe');
+    if (auth !== meAuth()) { meState = ''; return; } // signed out, or signed in as someone else, meanwhile
+    ME = me; meState = '';
+    if (member) {
+      member = { token: member.token, initials: ME.linked ? initialsOf(ME.name) : '', first: ME.linked ? ME.first : '', status: ME.linked ? meStatus(ME) : '' };
+      memberStore.set(member);
+    }
   } catch (e) {
     if (e.signedOut) return;
-    meState = 'failed';
+    meState = auth === meAuth() ? 'failed' : '';
   }
   if (currentPage.indexOf('me') === 0) render(true);
 }
 
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
-const yesNo = (name, value) => `<div class="yesno">
-  <label><input type="radio" name="${name}" value="yes"${value === true ? ' checked' : ''}><span>Yes</span></label>
-  <label><input type="radio" name="${name}" value="no"${value === false ? ' checked' : ''}><span>Sign-in only</span></label></div>`;
 const SITE_URL = 'https://ravenshoegunclub.com.au';
 const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
 const menuLink = (icon, label, href) => `<a class="menu-row" href="${href}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
 
 /* Me: the one place for signing in, My membership, the club team's tools and the club links */
 function meView(sub) {
-  const linked = !!(member && ME && ME.linked);
-  if (sub === 'documents') { if (member || session) return documentsView(); location.replace('#/me'); return ''; }
-  if (sub && !linked) { if (!member || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
+  const signedIn = !!(member || session), linked = !!(signedIn && ME && ME.linked);
+  if (sub === 'documents') { if (signedIn) return documentsView(); location.replace('#/me'); return ''; }
+  if (sub && !linked) { if (!signedIn || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
   else if (sub === 'results') return meResults();
   else if (sub === 'details') return meDetails();
+  else if (sub === 'email') return meEmail();
   if (session) { loadUnread(); if (session.admin) loadAdminSummary(); }
-  const signedIn = !!(member || session);
-  const first = (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
-  const canSeeDocs = session || (member && member.status);
+  const first = (linked && ME.first) || (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
+  const canSeeDocs = session || linked || (member && member.status);
+  // Signed in with a PIN that no admin has linked to a membership yet
+  const linkHint = session && !member && ME && !ME.linked ? `<p class="muted">Link your membership: ${session.admin
+    ? 'choose yourself in <a href="#/committee/people">People and PINs</a>.' : 'ask an admin to link you in People and PINs.'}</p>` : '';
   return `
-    <div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1></div>
+    <div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1>${linkHint}</div>
     ${memberBlock()}
     ${session ? clubAdminBlock() : ''}
     <section class="section">
@@ -2149,7 +2227,7 @@ function meView(sub) {
       <div class="card list">
         ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', SITE_URL + '/visit-the-range')}
         ${menuLink(ICON.help, 'FAQs', SITE_URL + '/faq')}
-        ${signedIn ? '' : menuLink(ICON.web, 'Club website', SITE_URL)}
+        ${menuLink(ICON.web, 'Club website', SITE_URL)}
         ${menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
         ${isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`}
       </div>
@@ -2160,14 +2238,14 @@ function meView(sub) {
       : `<p class="muted">Club team? <button type="button" class="link-btn" data-signin>Sign in with your PIN</button></p>`}
     </section>
     <section class="section me-end">
-      <button type="button" class="link-btn" data-refresh>Refresh club data</button>
       <p class="muted">On Target v${APP_VERSION}${TEST_SERVER ? ' · TEST SERVER' : ''}</p>
     </section>`;
 }
 
-/* The top of Me: the sign-in box, or the membership card and its quick buttons */
+/* The top of Me: the sign-in box, or the membership card and its quick buttons.
+   Someone signed in with a PIN never sees the email sign-in box: their PIN is their membership too. */
 function memberBlock() {
-  if (!member) return `
+  if (!member && !session) return `
     <section class="section"><form class="card form" id="meEmailForm" novalidate>
       <h2 class="form-head">Member sign-in</h2>
       <p class="muted">Enter your email address and we'll email you a one-time 6-digit code. No password to remember.</p>
@@ -2181,7 +2259,7 @@ function memberBlock() {
     if (meState !== 'failed' && meState !== 'loading') setTimeout(loadMe, 0);
     return `<section class="section">${meState === 'failed' ? loadFailed('your membership', 'data-me-reload') : skeletonRows(3)}</section>`;
   }
-  if (!ME.linked) return ME.pending && !relinking ? mePending() : linkForm();
+  if (!ME.linked) return !member ? '' : ME.pending && !relinking ? mePending() : linkForm();
   return meCard();
 }
 
@@ -2194,10 +2272,8 @@ function linkForm() {
       <input class="field" id="lkName" maxlength="80" autocomplete="name" autocapitalize="words">
       <label class="field-label" for="lkSsaa">SSAA member number</label>
       <input class="field" id="lkSsaa" maxlength="20" inputmode="numeric" autocomplete="off">
-      <fieldset class="choices">
-        <legend class="field-label">Use this email for club news and renewal reminders?</legend>
-        ${yesNo('lkNews', null)}
-      </fieldset>
+      <label class="choice"><input type="checkbox" id="lkNews" checked>
+        <span><span class="choice-title">Send me club news and renewal reminders</span><span class="choice-text">This becomes your one email address for everything from the club.</span></span></label>
       <p class="form-error" id="lkError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="lkSubmit">Link me up</button>
       <p class="muted form-foot">If your details match our records you're in straight away. If not, the club team will check and email you.</p>
@@ -2220,13 +2296,11 @@ async function linkMe(form) {
   if (btn.disabled) return;
   const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
   const name = form.querySelector('#lkName').value.trim(), ssaa = form.querySelector('#lkSsaa').value.trim();
-  const news = form.querySelector('input[name="lkNews"]:checked');
   if (name.split(/\s+/).length < 2) return fail('Please type your full name (first name and surname).', '#lkName');
   if (!/\d/.test(ssaa)) return fail('Please type your SSAA member number.', '#lkSsaa');
-  if (!news) return fail('Please choose Yes or Sign-in only.');
   error.hidden = true; btn.disabled = true; btn.textContent = 'Checking…';
   try {
-    const out = await memberApi('memberLink', [name, ssaa, news.value === 'yes']);
+    const out = await memberApi('memberLink', [name, ssaa, form.querySelector('#lkNews').checked]);
     relinking = false;
     if (out && out.linked) { ME = null; meState = ''; } else ME.pending = true;
     form.remove(); render();
@@ -2263,7 +2337,7 @@ function meCard() {
     <section class="section"><nav class="post-tiles me-tiles" aria-label="My membership">
       <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>My results<span class="tile-sub">${esc(resultsSummary())}</span></a>
       ${renewTile}
-      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email and club news</span></a>
+      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email, mobile, emergency contact</span></a>
     </nav></section>`;
 }
 
@@ -2273,6 +2347,7 @@ function clubAdminBlock() {
   return `
     <section class="section">
       <div class="section-head"><h2 class="caps-head">Club admin</h2></div>
+      <a class="btn btn-emergency btn-big" href="#/committee/emergency">${ICON.firstaid}Emergency contacts</a>
       <div class="card list">
         <a class="menu-row" href="#/committee/messages"><span class="tile-ico">${ICON.mail}</span>Messages${unreadBadge()}${ICON.chev}</a>
       </div>
@@ -2284,6 +2359,7 @@ function clubAdminBlock() {
       </div>
       <div class="card list sub-gap">
         <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
+        <a class="menu-row" href="#/committee/documents"><span class="tile-ico">${ICON.doc}</span>Club documents${ICON.chev}</a>
       </div>
       ${session.admin ? `<h3 class="sub-head">Admin</h3>
         ${sum ? `<div class="admin-counts">
@@ -2319,7 +2395,8 @@ function documentsView() {
   if (!DOCS && !docsState) setTimeout(loadDocs, 0);
   return `
     <div class="page-title">${meBack}<h1>Club documents</h1></div>
-    <section class="section">${DOCS ? (DOCS.length ? `<div class="card list">${DOCS.map(d => /^https:\/\//.test(d.url) ? menuLink(ICON.doc, esc(d.name), esc(d.url)) : '').join('')}</div>`
+    <section class="section">${DOCS ? (DOCS.length ? `<div class="card list">${DOCS.map(d => /^https:\/\//.test(d.url) ? `<a class="menu-row" href="${esc(d.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.doc}</span>
+          <span class="list-main">${esc(d.name)}<span class="muted doc-type">${esc(d.type || '')}</span></span>${ICON.chev}</a>` : '').join('')}</div>`
         : `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`)
       : docsState === 'members' ? empty('For members', 'Club documents appear here once your email is linked to your membership.')
       : docsState === 'failed' ? loadFailed('the club documents', 'data-docs-reload') : skeletonRows(3)}</section>`;
@@ -2353,41 +2430,337 @@ function meResults() {
       <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
     </div>`}</section>`;
 }
+/* My details: members change their own, and it is saved straight away with no club team approval.
+   Name and SSAA number are the two things only the club can change. */
 function meDetails() {
   const row = (label, value) => `<div class="detail-row"><span class="muted">${label}</span><b>${esc(value)}</b></div>`;
+  const em = ME.emergency || {};
   return `
     <div class="page-title">${meBack}<h1>My details</h1></div>
     <section class="section">
       ${meNote ? `<p class="notice" role="status">${esc(meNote)}</p>` : ''}
       <div class="card form">
         ${row('Name', ME.name)}
-        ${row('Sign-in email', ME.email)}
-        ${row('Contact email', ME.contactEmail || 'None on our records')}
-        <fieldset class="choices" id="meNews">
-          <legend class="field-label">Use this email for club news and renewal reminders?</legend>
-          ${yesNo('meNewsChoice', !!ME.useForNews)}
-        </fieldset>
-        <p class="form-error" id="meError" role="alert" hidden></p>
+        ${row('SSAA number', ME.ssaa || 'None on our records')}
+        <p class="muted">To change your name or SSAA number, <a href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('Change my details')}">ask the club</a>.</p>
+        ${row('Email', ME.email || 'None on our records')}
+        <a class="btn btn-outline btn-big" href="#/me/email">${ICON.mail}Change my email</a>
       </div>
     </section>
-    <section class="section"><div class="card list">
-      <a class="menu-row" href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('Change my details')}"><span class="tile-ico">${ICON.mail}</span>To change other details, message the club${ICON.chev}</a>
-    </div></section>`;
+    <section class="section"><form class="card form" id="detailsForm" novalidate>
+      <label class="field-label" for="mdMobile">Mobile <span class="field-hint">optional</span></label>
+      <input class="field" id="mdMobile" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" value="${esc(ME.mobile || '')}">
+      <h2 class="form-head">Emergency contact <span class="field-hint">optional</span></h2>
+      <p class="muted">Only the club team can see this, and only to call them if something happens to you at the range.</p>
+      <label class="field-label" for="mdEmName">Contact name</label>
+      <input class="field" id="mdEmName" maxlength="60" autocomplete="off" autocapitalize="words" value="${esc(em.name || '')}">
+      <label class="field-label" for="mdEmRelation">Who are they to you? <span class="field-hint">wife, son, friend…</span></label>
+      <input class="field" id="mdEmRelation" maxlength="40" autocomplete="off" value="${esc(em.relation || '')}">
+      <label class="field-label" for="mdEmPhone">Their phone</label>
+      <input class="field" id="mdEmPhone" type="tel" inputmode="tel" autocomplete="off" maxlength="30" value="${esc(em.phone || '')}">
+      <label class="choice"><input type="checkbox" id="mdNews"${ME.news ? ' checked' : ''}>
+        <span><span class="choice-title">Send me club news and renewal reminders</span><span class="choice-text">Sent to your email address above.</span></span></label>
+      <p class="form-error" id="mdError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="mdSubmit">Save my details</button>
+    </form></section>`;
 }
-async function saveNews(input) {
-  const want = input.value === 'yes', boxes = [...view.querySelectorAll('input[name="meNewsChoice"]')], error = document.getElementById('meError');
-  if (want === !!ME.useForNews) return;
-  boxes.forEach(b => { b.disabled = true; });
+async function saveDetails(form) {
+  const btn = form.querySelector('#mdSubmit'), error = form.querySelector('#mdError'), val = id => form.querySelector(id).value.trim();
+  if (btn.disabled) return;
+  const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
+  const d = { mobile: val('#mdMobile'), emName: val('#mdEmName'), emRelation: val('#mdEmRelation'), emPhone: val('#mdEmPhone'), news: form.querySelector('#mdNews').checked };
+  if ((d.emName || d.emRelation || d.emPhone) && !d.emName) return fail("Please type your emergency contact's name.", '#mdEmName');
+  if (d.emName && !d.emPhone) return fail("Please type your emergency contact's phone number.", '#mdEmPhone');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    ME = await memberApi('memberSetContact', [want]);
-    meNote = want ? 'Saved. We will use this email for club news and renewal reminders.' : 'Saved. This email is for signing in only.';
-    if (currentPage === 'me/details') render(true);
+    ME = await memberApi('memberSaveDetails', [d]);
+    meNote = 'Saved. Your details are up to date.';
+    form.remove(); render();
+    view.focus();
   } catch (e) {
     if (e.signedOut) return;
-    boxes.forEach(b => { b.disabled = false; b.checked = (b.value === 'yes') === !!ME.useForNews; });
-    if (error) { error.textContent = e.message; error.hidden = false; }
+    btn.disabled = false; btn.textContent = 'Save my details';
+    fail(e.message);
   }
 }
+
+/* Change my email: a code goes to the NEW address, and nothing changes until it is typed in here */
+let emailChange = null;      // {email} once a code has been sent to the new address
+function meEmail() {
+  return `
+    <div class="page-title"><a class="back-link" href="#/me/details">${ICON.chev}My details</a><h1>Change my email</h1></div>
+    <section class="section"><form class="card form" id="emailForm" novalidate>
+      ${emailChange ? `
+      <p class="notice" role="status">We've sent a code to ${esc(emailChange.email)}. It lasts 15 minutes.</p>
+      <label class="field-label" for="ecCode">The 6-digit code from that email</label>
+      <input class="field pin-box" id="ecCode" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6">
+      <p class="form-error" id="ecError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="ecSubmit">Confirm my new email</button>
+      <button type="button" class="btn btn-outline btn-big" data-ec-again>Send a new code</button>
+      <button type="button" class="btn btn-outline btn-big" data-ec-back>Use a different address</button>` : `
+      <div class="detail-row"><span class="muted">Your email now</span><b>${esc(ME.email || 'None on our records')}</b></div>
+      <label class="field-label" for="ecEmail">Your new email address</label>
+      <input class="field" id="ecEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="120">
+      <p class="muted">We'll email a 6-digit code to the new address. Your email only changes once you type that code in here. Until then your old one keeps working.</p>
+      <p class="muted">It becomes your one email for everything: signing in to On Target and emails from the club.</p>
+      <p class="form-error" id="ecError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="ecSubmit">Email me a code</button>`}
+    </form></section>`;
+}
+async function changeEmail(form) {
+  const btn = form.querySelector('#ecSubmit'), error = form.querySelector('#ecError'), label = btn.textContent;
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const box = form.querySelector(emailChange ? '#ecCode' : '#ecEmail');
+  const email = emailChange ? emailChange.email : box.value.trim().toLowerCase(), code = emailChange ? box.value.replace(/\D/g, '') : '';
+  if (!emailChange && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('Please check your new email address.', box);
+  if (emailChange && code.length !== 6) return fail('Please type all 6 digits of the code.', box);
+  error.hidden = true; btn.disabled = true; btn.textContent = emailChange ? 'Checking…' : 'Sending…';
+  try {
+    if (!emailChange) {
+      await memberApi('memberChangeEmail', [email]);
+      emailChange = { email };
+      form.remove(); render();
+      return document.getElementById('ecCode').focus();
+    }
+    ME = await memberApi('memberConfirmEmail', [email, code]);
+    emailChange = null;
+    meNote = `Done. Your email is now ${email}. Use it to sign in to On Target from now on.`;
+    form.remove(); go('#/me/details');
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    fail(e.message, box);
+  }
+}
+async function emailCodeAgain(btn) {
+  if (btn.disabled || !emailChange) return;
+  const error = document.getElementById('ecError');
+  btn.disabled = true; btn.textContent = 'Sending…'; error.hidden = true;
+  try {
+    await memberApi('memberChangeEmail', [emailChange.email]);
+    error.hidden = true;
+    const box = document.getElementById('ecCode');
+    if (box) { box.value = ''; box.focus(); }
+    btn.textContent = 'A new code is on its way';
+    setTimeout(() => { if (document.contains(btn)) { btn.disabled = false; btn.textContent = 'Send a new code'; } }, 5000);
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Send a new code';
+    error.textContent = e.message; error.hidden = false;
+  }
+}
+
+/* ---------- Emergency contacts (any club team PIN) ----------
+   Looked up live, one member at a time: nothing is kept on the phone, and the server records every look-up. */
+const blankEmerg = () => ({ query: '', list: null, open: null, state: '', error: '', run: 0 });
+let EMERG = blankEmerg();
+function emergencyView() {
+  return `
+    <div class="page-title">${adminBack}<h1>Emergency contacts</h1></div>
+    <section class="section">
+      <p class="notice notice-red em-000"><b>In a medical emergency, call 000 first.</b> Range address: 311 Cemetery Road, Ravenshoe.</p>
+      <form class="card form" id="emForm" novalidate>
+        <label class="field-label" for="emQuery">Member's name</label>
+        <input class="field" id="emQuery" maxlength="60" autocomplete="off" autocapitalize="words" enterkeyhint="search" value="${esc(EMERG.query)}">
+        <p class="form-error" id="emError" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-big" id="emSubmit">Find their emergency contact</button>
+      </form>
+    </section>
+    <section class="section" id="emResult" aria-live="polite">${emergencyResult()}</section>
+    <section class="section"><p class="muted">Every look-up is recorded for the club: who looked, when, and which member. Nothing is kept on this phone.</p></section>`;
+}
+function emergencyResult() {
+  const e = EMERG;
+  if (e.state === 'loading') return skeletonRows(2);
+  if (e.state === 'failed') return `<div class="card empty"><div class="empty-title">Can't look that up</div><p class="muted">${esc(e.error)}</p><p class="muted">Tap the button above to try again.</p></div>`;
+  if (e.open) {
+    const c = e.open.contact, tel = c ? String(c.phone || '').replace(/[^\d+]/g, '') : '';
+    return `<article class="card pay-card em-card">
+        <div class="muted">Emergency contact for ${esc(e.open.name)}</div>
+        ${c ? `<h2 class="pay-name">${esc(c.name || 'No name given')}</h2>
+          ${c.relation ? `<div>${esc(c.relation)}</div>` : ''}
+          ${tel ? `<a class="btn btn-call btn-big" href="tel:${esc(tel)}">${ICON.call}Call ${esc(c.phone)}</a>` : '<p><b>No phone number given.</b></p>'}`
+        : `<h2 class="pay-name">None given</h2><p>${esc(e.open.name)} has not added an emergency contact in On Target.</p>`}
+      </article>
+      ${e.list && e.list.length > 1 ? `<button type="button" class="btn btn-outline" data-em-list>${ICON.people}Back to the names</button>` : ''}`;
+  }
+  if (!e.list) return '';
+  return e.list.length ? `<p class="muted">${e.list.length} members match. Tap the right one.</p><div class="card list">${e.list.map((m, i) => `
+      <button type="button" class="list-row manage-row" data-em-pick="${i}"><span class="list-main"><span class="list-title">${esc(m.name)}</span></span>${ICON.chev}</button>`).join('')}</div>`
+    : empty('No member found', 'Check the spelling, or try just their surname.');
+}
+function drawEmergency() {
+  const box = document.getElementById('emResult');
+  if (box) box.innerHTML = emergencyResult();
+}
+async function findEmergency(form) {
+  const box = form.querySelector('#emQuery'), error = form.querySelector('#emError'), q = box.value.trim(), run = ++EMERG.run;
+  if (q.replace(/\s/g, '').length < 2) { error.textContent = "Please type the member's name."; error.hidden = false; return box.focus(); }
+  error.hidden = true;
+  Object.assign(EMERG, { query: q, list: null, open: null, state: 'loading', error: '' });
+  drawEmergency();
+  try {
+    const list = await committeeApi('emergencySearch', [q]);
+    if (run !== EMERG.run) return;
+    EMERG.list = Array.isArray(list) ? list : []; EMERG.state = '';
+    if (EMERG.list.length === 1) return openEmergency(0); // only one member it can be: go straight to their contact
+  } catch (e) {
+    if (e.signedOut || run !== EMERG.run) return;
+    EMERG.state = 'failed'; EMERG.error = e.message;
+  }
+  drawEmergency();
+}
+async function openEmergency(i) {
+  const m = EMERG.list && EMERG.list[i], run = ++EMERG.run;
+  if (!m) return;
+  EMERG.state = 'loading'; EMERG.open = null;
+  drawEmergency();
+  try {
+    const d = await committeeApi('emergencyContact', [m.id]);
+    if (run !== EMERG.run) return;
+    EMERG.open = { name: (d && d.name) || m.name, contact: (d && d.contact) || null }; EMERG.state = '';
+  } catch (e) {
+    if (e.signedOut || run !== EMERG.run) return;
+    EMERG.state = 'failed'; EMERG.error = e.message;
+  }
+  drawEmergency();
+}
+
+/* ---------- Club documents: adding and looking after them (any club team PIN) ----------
+   The files live in the club Drive folder "On Target – Club documents". One file is sent per request, as photos are. */
+const DOC_TYPES = ['Policy', 'Form', 'Minutes', 'Other'], DOC_MAX_MB = 10;
+let DOCADMIN = { list: null, state: '', note: '' };
+let docEdit = null;          // the document being edited ({} for a new one) while that screen is open
+let docFile = null;          // {blob, name}: the file chosen on that screen, ready to send
+let docBusy = false;
+
+async function loadDocAdmin() {
+  if (DOCADMIN.state === 'loading') return;
+  DOCADMIN.state = 'loading';
+  try { const list = await committeeApi('clubDocuments'); DOCADMIN.list = Array.isArray(list) ? list : []; DOCADMIN.state = ''; }
+  catch (e) { if (e.signedOut) { DOCADMIN.state = ''; return; } DOCADMIN.state = 'failed'; }
+  if (currentPage === 'committee/documents') render(true);
+}
+function docsAdminView() {
+  if (!DOCADMIN.list && DOCADMIN.state !== 'failed') setTimeout(loadDocAdmin, 0);
+  return `
+    <div class="page-title">${adminBack}<h1>Club documents</h1><p class="muted">Members see these in On Target under Me, Club documents. Only add things every member may see.</p></div>
+    <section class="section">
+      ${DOCADMIN.note ? `<p class="notice" role="status">${esc(DOCADMIN.note)}</p>` : ''}
+      <button type="button" class="btn btn-primary btn-big" data-doc="new">${ICON.plus}Add a document</button>
+      ${DOCADMIN.list ? (DOCADMIN.list.length ? `<div class="card list">${DOCADMIN.list.map((d, i) => `
+        <button type="button" class="list-row manage-row" data-doc="${i}"><span class="list-ico">${ICON.doc}</span>
+          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}</span></span>${ICON.chev}</button>`).join('')}</div>`
+          : empty('No documents yet', 'Until you add one, members see "Coming soon: club policies and forms will be here."'))
+        : DOCADMIN.state === 'failed' ? loadFailed('the club documents', 'data-docadmin-reload') : skeletonRows(3)}
+    </section>`;
+}
+function docForm(d) {
+  const isNew = !d.id, fileLine = docFile ? `Chosen: ${docFile.name}` : '';
+  const bar = `<div class="doc-bar" id="dcBar" hidden><span class="ph-bar" role="progressbar" aria-label="Sending the file"><span></span></span></div>`;
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/documents">${ICON.chev}Club documents</a><h1>${isNew ? 'Add a document' : 'Edit document'}</h1></div>
+    <section class="section"><form class="card form" id="docForm" novalidate>
+      <input type="file" id="dcFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" hidden>
+      ${isNew ? `<span class="field-label">File <span class="field-hint">a PDF, a Word document or a photo, up to ${DOC_MAX_MB} MB</span></span>
+      <button type="button" class="btn btn-outline btn-big" data-doc-choose>${ICON.doc}<span id="dcChooseText">${docFile ? 'Choose a different file' : 'Choose a file'}</span></button>
+      <p class="muted" id="dcFileName" role="status">${esc(fileLine)}</p>` : ''}
+      <label class="field-label" for="dcTitle">Title <span class="field-hint">what members see</span></label>
+      <input class="field" id="dcTitle" maxlength="100" autocomplete="off" value="${esc(d.name || '')}">
+      <label class="field-label" for="dcType">Type</label>
+      <select class="field" id="dcType">${DOC_TYPES.map(t => `<option${(d.type || 'Policy') === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      ${isNew ? bar : ''}
+      <p class="form-error" id="dcError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="dcSubmit">${isNew ? 'Upload document' : 'Save changes'}</button>
+      ${isNew ? '' : `
+      ${/^https:\/\//.test(d.url) ? `<a class="btn btn-outline btn-big" href="${esc(d.url)}" target="_blank" rel="noopener">${ICON.doc}Open the document</a>` : ''}
+      <h2 class="form-head">A newer version</h2>
+      <p class="muted">Choose the newer file (a PDF, a Word document or a photo). It takes this document's place; the title and type stay the same.</p>
+      <p class="muted" id="dcFileName" role="status">${esc(fileLine)}</p>
+      ${bar}
+      <button type="button" class="btn btn-outline btn-big" data-doc-replace id="dcReplace">${docFile ? 'Replace with this file' : 'Replace with a newer version'}</button>
+      <button type="button" class="btn btn-danger btn-big" data-doc-remove>Remove this document</button>`}
+    </form></section>`;
+}
+/* Gets the chosen file ready: photos are made smaller, as they are for the gallery; PDFs and Word documents go as they are */
+async function chooseDoc(file) {
+  const form = document.getElementById('docForm'), error = form.querySelector('#dcError'), line = form.querySelector('#dcFileName');
+  const ext = ((/\.([a-z0-9]+)$/i.exec(file.name) || [])[1] || '').toLowerCase();
+  const fail = msg => { docFile = null; line.textContent = ''; error.textContent = msg; error.hidden = false; };
+  error.hidden = true;
+  try {
+    if (/^image\//.test(file.type) || /^(jpe?g|png|heic|heif|webp)$/.test(ext)) {
+      line.textContent = 'Getting the photo ready…';
+      const made = await shrinkPhoto(file);
+      docFile = { blob: made.blob, name: file.name.replace(/\.[^.]*$/, '') + '.jpg' };
+    } else {
+      if (!/^(pdf|docx?)$/.test(ext)) return fail('Please choose a PDF, a Word document or a photo.');
+      if (file.size > DOC_MAX_MB * 1024 * 1024) return fail(`That file is too big. Documents can be up to ${DOC_MAX_MB} MB.`);
+      docFile = { blob: file, name: file.name };
+    }
+  } catch (e) { return fail("That photo can't be opened. Please choose a PDF, a Word document or a different photo."); }
+  if (!document.contains(form)) return;
+  line.textContent = `Chosen: ${docFile.name}`;
+  const title = form.querySelector('#dcTitle'), choose = form.querySelector('#dcChooseText'), replace = form.querySelector('#dcReplace');
+  if (choose) choose.textContent = 'Choose a different file';
+  if (replace) replace.textContent = 'Replace with this file';
+  if (!title.value.trim()) title.value = file.name.replace(/\.[^.]*$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 100);
+}
+/* Sends one file; while it goes the "working" bar shows. If it fails the file is kept, so the same button tries again. */
+async function sendDoc(form, btn, busyText, call, retryText) {
+  const error = form.querySelector('#dcError'), bar = form.querySelector('#dcBar');
+  if (docBusy) return;
+  docBusy = true; error.hidden = true; bar.hidden = false;
+  btn.disabled = true; btn.textContent = busyText;
+  try {
+    const out = await call(await blobToDataUrl(docFile.blob));
+    docBusy = false;
+    doneDoc(out);
+  } catch (e) {
+    docBusy = false;
+    if (e.signedOut || !document.contains(form)) return;
+    bar.hidden = true; btn.disabled = false; btn.textContent = retryText;
+    error.textContent = e.message; error.hidden = false;
+  }
+}
+function doneDoc(out) {
+  DOCADMIN.list = null; DOCADMIN.state = ''; DOCADMIN.note = (out && out.message) || 'Done.'; DOCS = null; docsState = '';
+  const form = document.getElementById('docForm');
+  if (form) form.remove();
+  go('#/committee/documents');
+}
+async function saveDoc(form) {
+  const d = docEdit, btn = form.querySelector('#dcSubmit'), error = form.querySelector('#dcError');
+  if (btn.disabled || docBusy) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const meta = { title: form.querySelector('#dcTitle').value.trim(), type: form.querySelector('#dcType').value };
+  if (!d.id && !docFile) return fail('Please choose a file first.', form.querySelector('[data-doc-choose]'));
+  if (!meta.title) return fail('Please give the document a title.', form.querySelector('#dcTitle'));
+  if (!d.id) return sendDoc(form, btn, 'Uploading…', data => committeeApi('docAdd', [{ ...meta, fileName: docFile.name }, data]), 'Try again');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+  try { doneDoc(await committeeApi('docSave', [d.id, meta])); }
+  catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Save changes';
+    fail(e.message);
+  }
+}
+function replaceDoc(form) {
+  if (docBusy) return;
+  if (!docFile) return document.getElementById('dcFile').click();
+  const name = docFile.name;
+  sendDoc(form, form.querySelector('#dcReplace'), 'Uploading…', data => committeeApi('docReplace', [docEdit.id, name, data]), 'Try again');
+}
+function askRemoveDoc() {
+  const d = docEdit;
+  confirmAsk({
+    title: 'Remove this document?', text: `Members will no longer see "${d.name}" in On Target. The file goes to the bin in the club's Google Drive, where it is kept for 30 days.`,
+    yes: 'Yes, remove it', busy: 'Removing…',
+    run: () => committeeApi('docRemove', [d.id]), done: doneDoc
+  });
+}
+
 /* ----- signing in: the email box is on Me; the code is typed in the sign-in sheet ----- */
 const memberCodeForm = document.getElementById('memberCodeForm'), pinForm = document.getElementById('signInForm');
 const codeBoxes = [...document.querySelectorAll('.code-box')], codeError = document.getElementById('codeError'), codeBtn = document.getElementById('codeBtn');
@@ -2480,7 +2853,7 @@ codeAgain.addEventListener('click', async () => {
   }
 });
 document.querySelectorAll('[data-sheet-close]').forEach(b => b.addEventListener('click', closeSheets));
-if (member) loadMe();
+if (member || session) loadMe();
 
 /* ----- club team: "App sign-ups to check" (admins only) ----- */
 const SIGNUP_TAG = { 'Linked automatically': 'replied', 'Linked by the club team': 'replied', 'Not a member': 'tag' };
