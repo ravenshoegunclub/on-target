@@ -4,3 +4,6 @@ backend/
 
 # clasp sign-in credentials, in case they ever land in the repo folder
 .clasprc.json
+
+# Code blocks for the club website (pasted into GoDaddy by hand). Kept here for copying only.
+website/

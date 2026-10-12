@@ -11,7 +11,7 @@ It is a free, installable web app (PWA) hosted on GitHub Pages from this repo:
 - Live: https://ontarget.ravenshoegunclub.com.au/ (still unlisted). The `CNAME` file at the repo root tells GitHub Pages to use this address; never delete or change it. DNS is at GoDaddy (which reserves the name `app`, so the app lives at `ontarget`): `ontarget` must be a CNAME record pointing to `ravenshoegunclub.github.io`.
 - Old address: https://ravenshoegunclub.github.io/on-target/ now redirects to the new one.
 - The app uses relative paths everywhere (manifest, service worker, icons, share links), so it works at either address. Keep it that way: no hard-coded `ravenshoegunclub.github.io` or `/on-target`.
-- A new address is a new site as far as phones are concerned: a saved Club Team sign-in and a home-screen install at the old address do not carry over.
+- A new address is a new site as far as phones are concerned: a saved club team sign-in and a home-screen install at the old address do not carry over.
 - Club website: https://ravenshoegunclub.com.au
 
 Carl is a volunteer club member (a former IT professional), not on the committee. He builds and looks after the app.
@@ -37,7 +37,7 @@ Parked: electronic range sign-in / Form 33 (waiting on Queensland Police), onlin
 - **Back end (NOT in this repo):** the existing "On Target" Google Apps Script web app, running as the club Google account, with the "RDSS Club Data" Google Sheet.
   - Public read-only feed (no PINs, no member details):
     `https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec`
-    - `?feed=events&n=30` → `{events:[{date,start,title,discipline,description}]}` (upcoming, soonest first)
+    - `?feed=events&n=30` → `{events:[{date,start,end,title,discipline,description}]}` (upcoming, soonest first). `start` and `end` go out ready to show ("8:30am"); `end` is `""` when there isn't one. The website shows `start` exactly as sent, so never change its format.
     - `?feed=results&all=1&n=12` → `{days:[{date,competitions:[{competition,discipline,rows:[{place,shooter,class,score}]}]}]}`
     - `?feed=photos&n=60` → `{photos:[{date,album,caption,thumb,full}]}`
     - Dates are `yyyy-mm-dd`. The feed caches for 2 minutes.
@@ -53,10 +53,13 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 - **`backend/` is in `.gitignore` and must stay there.** The code contains the club's bank details. Never commit it, and never copy its contents into tracked files or commit messages.
 - clasp is signed in as the club Google account. To sign in again: `clasp login --no-localhost` (the Apps Script API must be On at script.google.com/home/usersettings).
 - The Script ID is not recorded here. It is in the Apps Script editor under Project Settings. To clone again: `clasp clone <Script ID>` inside an empty `backend/`.
+- `website/` (also in `.gitignore`) holds copies of the code blocks Carl pastes into the GoDaddy website by hand (What's on, Calendar). They are for copying only; the live website is whatever is pasted in GoDaddy.
 - Files: `Code.js` (server code), `Api.js` (the new app's front door, shows as `Api.gs` in the editor), `Moved.html` (the "On Target has moved" page that `doGet` serves), `Index.html` (the old app's screen, kept but no longer served), `appsscript.json` (settings).
-- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called. Existing functions, called unchanged: `signIn`, `addEvent`, `addPhoto`, `listItems`, `updateEvent`, `deleteEvent`, `deleteResults`, `updatePhoto`, `deletePhoto`, and the admin ones `adminSummary`, `adminPending`, `adminMarkPaid`, `adminSheetLink`, `adminListPeople`, `adminSavePerson`, `adminRemovePerson`. New functions in `Api.js`: `memberNames`, `postResults`, `saveResults`, `manageItems`, `postEvent`, `privateEvents`, `updatePrivateEvent`, `deletePrivateEvent`, `setEventAudience`, `msgCount`, `msgList`, `msgRead`, `msgClaim`, `msgUnclaim`, `msgReply`, `msgArchive`, `savedReplies`, `membersList`, `membersSummary`, `membersExport`. The existing `updateResults` is deliberately left off: it drops member IDs, so the app uses `saveResults`. Photos go up one per request as a JPEG data URL, already shrunk in the browser to 1600px; a cross-origin request can't report upload progress without a CORS preflight, which Apps Script doesn't answer, so the progress bar is a "working" bar.
+- **Front door for this app (`Api.js`):** POST to the feed address with `Content-Type: text/plain` and body `{"action":"api","fn":"<name>","pin":"<pin>","args":[...]}`. Reply is `{"ok":true,"data":...}` or `{"ok":false,"error":"<plain-English message>"}`. Only functions listed in `API_FUNCTIONS` can be called. Existing functions, called unchanged: `signIn`, `addEvent`, `addPhoto`, `listItems`, `updateEvent`, `deleteEvent`, `deleteResults`, `updatePhoto`, `deletePhoto`, `photoForShare`, and the admin ones `adminSummary`, `adminPending`, `adminMarkPaid`, `adminSheetLink`, `adminListPeople`, `adminSavePerson`, `adminRemovePerson`. New functions in `Api.js`: `memberNames`, `postResults`, `saveResults`, `manageItems`, `postEvent`, `saveEvent`, `privateEvents`, `updatePrivateEvent`, `deletePrivateEvent`, `setEventAudience`, `msgCount`, `msgList`, `msgRead`, `msgClaim`, `msgUnclaim`, `msgReply`, `msgArchive`, `savedReplies`, `membersList`, `membersSummary`, `membersExport`. The existing `updateResults` is deliberately left off: it drops member IDs, so the app uses `saveResults`. Photos go up one per request as a JPEG data URL, already shrunk in the browser to 1600px; a cross-origin request can't report upload progress without a CORS preflight, which Apps Script doesn't answer, so the progress bar is a "working" bar.
 - **Messages (v1.6.0)** are open to every committee PIN; the old app's `admin*` message functions are untouched and still admin-only. Account and security emails (password resets, sign-in codes, security alerts) are shown **only to admins**, checked on the server for every message function (`accountMail_`). Claimed-by and replied-by live in a "Message log" tab, and saved replies in a "Saved replies" tab (Title, Text), both in the private Members spreadsheet. Labels (Membership, Training, Range, Website, Replied) are real Gmail labels. The app keeps emails in memory only, never in localStorage.
 - **Admin section (v1.7.0), admins only:** Payments to confirm, Members, People and PINs. Member statuses follow the renewal season, set in one place (`MEMBER_SEASON_` in `Api.js`): from 1 May to 30 June a member who has not paid for next year is "Not renewed yet" (still financial); from 1 to 31 July they are "Not financial – renewal overdue" (NOT financial, follow-up only); from 1 August "Expired". Not-financial is always shown in red, never as current. The old app's 30-day "due" status (`adminMembers`, `memberState_`) is not used by this app. Member details and new PINs are kept in memory only.
+- **Event times (v1.8.0):** events have a start and an optional end time, saved as plain text in one format, `HH:MM` on the 24-hour clock ("08:30"). The "End" column is the last column of the Events tab and of the Private events tab; the back end adds the header itself the first time an event is saved, and existing rows are never rewritten. Older rows hold whatever was typed ("8:30 am"); `time24_` reads them all. The app posts and edits events with `postEvent`, `saveEvent`, `updatePrivateEvent` and `setEventAudience`, which keep the end time; the old `addEvent` and `updateEvent` still work but know nothing about it. The one change inside `Code.js` is in `feedEvents_` (times through `feedTime_`).
+- **Sharing to Facebook or Instagram (v1.8.0):** On Target can't post for anyone. It gets the photos and a caption ready: phones hand the photos to the share sheet (the caption is copied, because both apps ignore text sent with a photo), laptops get "Save photo" and "Copy caption". Photos chosen in Manage posts come from the club Drive through `photoForShare`, one request each, up to 10; straight after Add photos the pictures just uploaded are shared from memory. Events and results have a Share button that copies a caption (results: the whole competition day). Private and hidden events never get a Share button. Captions are the one place emoji are used.
 - **Never refer to something in `Code.js` from the top level of `Api.js`** (only inside functions). Files load in order, and a top-level reference to a file not yet loaded would break the whole web app, feeds included.
 - **Edits and deletes** carry the sheet row number and a fingerprint of what the app last saw. If the server answers "Someone else has just changed this", the app says so and reloads the Manage posts list.
 - **Member IDs on results:** `postResults` saves a "Member ID" in the last column of the Results tab (it adds the header itself the first time). The public feeds read columns by header name and never output it. Member names from `memberNames` are kept in memory in the app, never saved on the phone or in this repo. Editing a competition in the old On Target app rewrites its rows without the Member IDs; editing it in this app keeps them.
@@ -78,7 +81,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.7.2**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.8.0**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.
@@ -87,7 +90,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 - Club colours: maroon `#5C0F1F`, crimson `#9B1B35`, gold `#E9B44C`. Background `#F6F2EE`. Dark mode follows the phone's setting.
 - Fonts: Montserrat (headings, 800) and Poppins (body), from Google Fonts.
-- Icons: simple inline stroke SVGs. No emoji.
+- Icons: simple inline stroke SVGs. No emoji (the only exception is the ready-made Facebook and Instagram captions).
 - Polished, first-class app feel: bottom tab bar, cards, smooth slide-in, skeleton loading (no spinners), friendly empty states.
 
 ## Who uses it
@@ -97,7 +100,8 @@ Many members and committee members are older and easily confused by technology. 
 - Large text and buttons (touch targets at least 44px), plain words, one clear action per screen.
 - Works the same on phone, tablet and laptop.
 - Say "competition days", not "shoot days".
-- The people who sign in with a PIN are the **"Club Team"** (the committee plus range officers). Use that name for anything a person sees: the tab, sign-in, badges and messages. The code still says `committee` in routes, function names and the saved "Committee" event audience; that is fine and should not be shown.
+- The app's name is **"On Target"**: two words, capital O and capital T. In anything a person reads (screens, messages, emails), say "On Target" rather than "the app" wherever it reads well, e.g. "It appears on the website and On Target", "This part of On Target is for the club team".
+- The people who sign in with a PIN are the **"Club team"** (the committee plus range officers): capital C only, never "Club Team". As a label or heading it is "Club team" (the tab, "Club team sign-in", the badge); inside a sentence it is "the club team". Use that name for anything a person sees. The code still says `committee` in routes, function names and the saved "Committee" event audience; that is fine and should not be shown.
 - Real buttons and links, labels on icon-only buttons, good contrast.
 
 ## Working with Carl
@@ -108,3 +112,4 @@ Many members and committee members are older and easily confused by technology. 
 - If he asks about a step (e.g. "at step 3 I can't see the button"), clarify it, then **repeat the remaining steps** from there, so he doesn't have to scroll back.
 - He works on a Windows laptop in Chrome. The "RDSS" Chrome profile is the club's (club Gmail, Drive, GitHub); his normal profile is personal.
 - Keep it friendly and plain-English. Australian spelling.
+

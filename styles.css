@@ -1,4 +1,4 @@
-/* On Target v1.7.2 — club styles */
+/* On Target v1.8.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -260,8 +260,11 @@ textarea.field { min-height: 110px; resize: vertical; line-height: 1.5; }
 .field:focus { border-color: var(--accent); }
 /* Date boxes: iPhones give them their own width and centre the date, so both are overridden here */
 .date-wrap { position: relative; min-width: 0; }
-input[type="date"].field { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; height: 50px; text-align: left; line-height: 1.5; }
-input[type="date"].field::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.5em; }
+input[type="date"].field, input[type="time"].field { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; height: 50px; text-align: left; line-height: 1.5; }
+input[type="date"].field::-webkit-date-and-time-value, input[type="time"].field::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.5em; }
+/* Start and end time side by side */
+.time-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.time-pair .field-label { margin-bottom: 6px; }
 .date-hint { position: absolute; left: 15.5px; top: 0; height: 50px; display: flex; align-items: center; color: var(--text-3); font-size: 16px; pointer-events: none; }
 .date-wrap:not(.no-date) .date-hint, .date-wrap:focus-within .date-hint { display: none; }
 .date-wrap.no-date input:not(:focus) { color: transparent; }
@@ -458,3 +461,27 @@ select.field { -webkit-appearance: none; appearance: none; background-image: lin
   .tiles { gap: 14px; }
   .hero h1 { font-size: 30px; }
 }
+
+/* Sharing to Facebook or Instagram (v1.8.0) */
+.manage-item { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line-soft); }
+.manage-item:last-child { border-bottom: 0; }
+.manage-item button.manage-row { flex: 1 1 auto; min-width: 0; width: auto; border-bottom: 0; }
+.manage-item .list-main { min-width: 0; overflow-wrap: anywhere; }
+.share-btn { flex: 0 0 auto; flex-direction: column; gap: 2px; min-width: 58px; min-height: 54px; padding: 6px 8px; font-size: 13px; }
+.thumb.pick { position: relative; }
+.thumb.pick .ph-mark { display: none; }
+.thumb.pick[aria-pressed="true"] { outline: 3px solid var(--green); outline-offset: -3px; }
+.thumb.pick[aria-pressed="true"] .ph-mark { display: flex; }
+.thumb.pick[aria-pressed="true"] img { opacity: .75; }
+.pick-bar { position: sticky; bottom: calc(var(--tabbar-h) + var(--safe-b) + 8px); z-index: 5; display: flex; gap: 10px; padding: 10px; background: var(--card); border-radius: 16px; box-shadow: var(--shadow), 0 0 0 1px var(--line); }
+.pick-bar .btn:first-child { flex: 2 1 0; }
+.pick-bar .btn { flex: 1 1 0; padding: 0 10px; }
+.share-panel { max-height: 92vh; max-height: 92dvh; overflow-y: auto; }
+.share-panel textarea.field { min-height: 150px; font-size: 15px; }
+.share-pics { display: flex; gap: 6px; overflow-x: auto; flex: 0 0 auto; }
+.share-pics[hidden] { display: none; }
+.share-panel .btn[hidden] { display: none; }
+.share-pics img { height: 96px; width: 96px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: var(--tint); }
+.share-pics img:only-child { width: 100%; height: auto; max-height: 200px; object-fit: contain; }
+.sheet-hint { font-size: 14px; text-align: center; }
+.empty .btn-row .share-added { flex-basis: 100%; }
