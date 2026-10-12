@@ -81,7 +81,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.8.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **1.8.1**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.
@@ -100,6 +100,7 @@ Many members and committee members are older and easily confused by technology. 
 - Large text and buttons (touch targets at least 44px), plain words, one clear action per screen.
 - Works the same on phone, tablet and laptop.
 - Say "competition days", not "shoot days".
+- On events the field is called **"Type of event"** (events aren't always shooting); it is still saved in the Events tab's "Discipline" column and sent as `discipline`. Results keep "Discipline".
 - The app's name is **"On Target"**: two words, capital O and capital T. In anything a person reads (screens, messages, emails), say "On Target" rather than "the app" wherever it reads well, e.g. "It appears on the website and On Target", "This part of On Target is for the club team".
 - The people who sign in with a PIN are the **"Club team"** (the committee plus range officers): capital C only, never "Club Team". As a label or heading it is "Club team" (the tab, "Club team sign-in", the badge); inside a sentence it is "the club team". Use that name for anything a person sees. The code still says `committee` in routes, function names and the saved "Committee" event audience; that is fine and should not be shown.
 - Real buttons and links, labels on icon-only buttons, good contrast.

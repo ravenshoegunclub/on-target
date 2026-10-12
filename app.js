@@ -1,10 +1,10 @@
-/* On Target v1.8.0 — app shell with live club data and club team tools
+/* On Target v1.8.1 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 
 const FEEDS = {
@@ -381,7 +381,8 @@ const VIEWS = {
   }
 };
 
-const DISCIPLINES = ['Pistol', 'Rifle', 'Clay target', 'Shotgun', 'Training', 'Safety course', 'Working bee', 'Social'];
+/* Suggestions for an event's "Type of event" (free text is still allowed). It is saved in the Events tab's Discipline column. */
+const EVENT_TYPES = ['Competition', 'Practice', 'Training', 'Safety course', 'Open day', 'Club meeting', 'Working bee', 'Social', 'Other'];
 let posted = false; // true while the "Event posted", "Results posted" or "Photos added" message is showing
 
 /* Who can see an event. "Hidden" only exists for older events with Show = No in the Sheet.
@@ -413,9 +414,9 @@ function eventForm(item) {
       </div>
       <label class="field-label" for="evTitle">Title</label>
       <input class="field" id="evTitle" maxlength="80" autocomplete="off" value="${v('title')}" required>
-      <label class="field-label" for="evDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
+      <label class="field-label" for="evDisc">Type of event <span class="field-hint">choose one or type your own</span></label>
       <input class="field" id="evDisc" maxlength="40" list="evDiscList" autocomplete="off" value="${v('discipline')}">
-      <datalist id="evDiscList">${DISCIPLINES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
+      <datalist id="evDiscList">${EVENT_TYPES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
       <label class="field-label" for="evDesc">Description <span class="field-hint">targets, distances, fees, what to bring</span></label>
       <textarea class="field" id="evDesc" maxlength="400">${v('description')}</textarea>
       <fieldset class="choices">
