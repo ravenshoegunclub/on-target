@@ -4,8 +4,20 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '1.8.1';
-const FEED_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
+const APP_VERSION = '2.0.0';
+const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
+/* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
+   test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
+const TEST_SERVER = (() => {
+  if (!/^(localhost|127\.0\.0\.1)$|\.app\.github\.dev$/.test(location.hostname)) return '';
+  try {
+    const id = new URLSearchParams(location.search).get('server');
+    if (id === 'live') localStorage.removeItem('ot:testServer');
+    else if (/^[\w-]{40,120}$/.test(id || '')) localStorage.setItem('ot:testServer', id);
+    return localStorage.getItem('ot:testServer') || '';
+  } catch (e) { return ''; }
+})();
+const FEED_URL = TEST_SERVER ? `https://script.google.com/macros/s/${TEST_SERVER}/exec` : LIVE_URL;
 
 const FEEDS = {
   events:  'feed=events&n=30',
@@ -33,6 +45,7 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   people: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 15c1.5.9 2.5 2.5 3 5"/></svg>',
   key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M12 8v7M9 12l3 3 3-3"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   rings: '<svg class="hero-rings" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48"/><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="20"/><circle cx="50" cy="50" r="6" fill="currentColor"/></svg>'
 };
@@ -301,28 +314,13 @@ const VIEWS = {
         </section>`).join('') : `<section class="section">${empty('No photos yet', 'Photos from the range appear here.')}</section>`)}`;
   },
 
-  more() {
-    const row = (icon, label, href) => `<a class="menu-row" href="${href}" target="_blank" rel="noopener"><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
-    return `
-      <div class="page-title"><h1>More</h1></div>
-      <section class="section"><div class="card list">
-        ${row(ICON.join, 'Join the club', 'https://ravenshoegunclub.com.au')}
-        ${row(ICON.pin, 'Visit the range', 'https://ravenshoegunclub.com.au')}
-        ${row(ICON.fees, 'Range days and fees', 'https://ravenshoegunclub.com.au')}
-        ${row(ICON.help, 'FAQs', 'https://ravenshoegunclub.com.au')}
-        ${row(ICON.doc, 'Club documents', 'https://ravenshoegunclub.com.au')}
-        ${row(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
-        ${row(ICON.web, 'Club website', 'https://ravenshoegunclub.com.au')}
-      </div></section>
-      <section class="section">
-        <button type="button" class="btn btn-outline" data-refresh>${ICON.refresh}Refresh club data</button>
-      </section>
-      <p class="muted" style="text-align:center;margin:20px 16px 0">On Target v${APP_VERSION}</p>`;
-  },
+  more() { location.replace('#/me'); return ''; },
+
+  me(sub) { return meView(sub); },
 
   committee(sub, arg) {
     if (!session) return `
-      <div class="page-title"><h1>Club team</h1></div>
+      <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club team</h1></div>
       <section class="section"><div class="card empty">
         <div class="empty-title">Please sign in</div>
         <p class="muted">This part of On Target is for the club team.</p>
@@ -339,45 +337,13 @@ const VIEWS = {
       if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
       return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
     }
-    if (['payments', 'members', 'people', 'person'].includes(sub)) {
-      if (!session.admin) return `<div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Admin</h1></div>
+    if (['payments', 'members', 'people', 'person', 'signups'].includes(sub)) {
+      if (!session.admin) return `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Admin</h1></div>
         <section class="section">${empty('Admins only', 'Only admins can use this part of On Target.')}</section>`;
       if (sub === 'person' && !personEdit) { location.replace('#/committee/people'); return ''; } // e.g. the page was reloaded
-      return sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
+      return sub === 'signups' ? signupsView() : sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
     }
-    loadUnread();
-    if (session.admin) loadAdminSummary();
-    const sum = ADMIN.summary;
-    return `
-      <div class="page-title"><h1>Club team</h1>
-        <div class="who"><span class="muted">Signed in as ${esc(session.name)}${session.admin ? ' · Admin' : ' · Club team'}</span>
-          <button type="button" class="btn btn-outline" data-signout>Sign out</button></div>
-      </div>
-      <section class="section">
-        <div class="section-head"><h2>Post something new</h2></div>
-        <div class="post-tiles">
-          <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
-          <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
-          <a class="tile" href="#/committee/photos"><span class="tile-ico">${ICON.camera}</span>Photos</a>
-        </div>
-      </section>
-      <section class="section"><div class="card list">
-        <a class="menu-row" href="#/committee/messages"><span class="tile-ico">${ICON.mail}</span>Messages${unreadBadge()}${ICON.chev}</a>
-        <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
-      </div></section>
-      ${session.admin ? `<section class="section">
-        <div class="section-head"><h2>Admin</h2></div>
-        ${sum ? `<div class="admin-counts">
-          ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
-          ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
-          <a class="admin-count" href="#/committee/payments">Payments waiting: <b>${sum.pending}</b></a>
-        </div>` : ''}
-        <div class="card list">
-          <a class="menu-row" href="#/committee/payments"><span class="tile-ico">${ICON.fees}</span>Payments to confirm${sum && sum.pending ? `<span class="count-badge" aria-label="${sum.pending} waiting">${sum.pending}</span>` : ''}${ICON.chev}</a>
-          <a class="menu-row" href="#/committee/members"><span class="tile-ico">${ICON.people}</span>Members${ICON.chev}</a>
-          <a class="menu-row" href="#/committee/people"><span class="tile-ico">${ICON.key}</span>People and PINs${ICON.chev}</a>
-        </div>
-      </section>` : ''}`;
+    location.replace('#/me'); return ''; // the club team's home is now part of Me
   }
 };
 
@@ -402,7 +368,7 @@ function eventForm(item) {
   const v = k => esc(ev[k] || '');
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit event</h1>`
-      : `<a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Post an event</h1>`}</div>
+      : `<a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Post an event</h1>`}</div>
     <section class="section"><form class="card form" id="eventForm" novalidate>
       <label class="field-label" for="evDate">Date</label>
       ${dateField('evDate', item ? ev.date : nextSaturday())}
@@ -440,7 +406,7 @@ function eventPosted() {
       <p class="muted">${esc(postedText)}</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-another>Post another event</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Club team</a>
+        <a class="btn btn-outline btn-big" href="#/me">Back to Me</a>
       </div>
     </div></section>`;
 }
@@ -532,7 +498,7 @@ function manageView() {
           <img src="${esc(p.thumb)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>`;
   };
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Manage posts</h1></div>
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Manage posts</h1></div>
     <section class="section">
       ${manageNote ? `<p class="notice" role="status">${esc(manageNote)}</p>` : ''}
       <div class="seg" role="group" aria-label="What to manage">${MANAGE_TABS.map(t => `
@@ -648,7 +614,7 @@ function confirmAsk(o) {
 /* Everything here is kept in memory only: no member details or PINs go into the phone's storage (apart from the admin's own PIN) */
 const blankAdmin = () => ({ summary: null, summaryAt: 0, pending: null, pendingState: '', payNote: '',
   mem: { filter: 'all', query: '', items: null, state: '', season: '', note: '', run: 0 }, sheetUrl: '',
-  people: null, peopleState: '', peopleNote: '', newPin: null });
+  people: null, peopleState: '', peopleNote: '', newPin: null, signups: null, signState: '', signNote: '', signCount: 0 });
 let ADMIN = blankAdmin();
 let sheetUrlLoading = false;
 let personEdit = null;       // the person being edited ({} for a new one) while that screen is open
@@ -656,15 +622,16 @@ let personEdit = null;       // the person being edited ({} for a new one) while
 async function loadAdminSummary(force) {
   if (!session || !session.admin || (!force && Date.now() - ADMIN.summaryAt < 60000)) return;
   ADMIN.summaryAt = Date.now();
+  loadSignupCount();
   try {
     const d = await committeeApi('membersSummary') || {};
     const sum = { season: d.season || '', notRenewed: Number(d.notRenewed) || 0, overdue: Number(d.overdue) || 0, pending: Number(d.pending) || 0 };
     const same = JSON.stringify(sum) === JSON.stringify(ADMIN.summary);
     ADMIN.summary = sum; ADMIN.mem.season = sum.season || '';
-    if (!same && currentPage === 'committee') render(true);
+    if (!same && currentPage === 'me') render(true);
   } catch (e) { /* the counts are only a guide */ }
 }
-const adminBack = `<a class="back-link" href="#/committee">${ICON.chev}Club team</a>`;
+const adminBack = `<a class="back-link" href="#/me">${ICON.chev}Me</a>`;
 const loadFailed = (what, attr) => `<div class="card empty"><div class="empty-title">Can't load ${what}</div>
   <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" ${attr}>${ICON.refresh}Try again</button></div>`;
 const niceDate = iso => { if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return ''; const d = parseDate(String(iso).slice(0, 10)); return `${d.getDate()} ${mon(d)} ${d.getFullYear()}`; };
@@ -866,7 +833,6 @@ function personForm(p) {
 function keepMeSignedIn(out, admin) {
   session = { pin: out.pin || session.pin, name: out.name || session.name, admin };
   sessionStore.set(session);
-  showCommitteeTab();
 }
 async function savePerson(form) {
   const p = personEdit, btn = form.querySelector('#ppSubmit'), error = form.querySelector('#ppError'), label = btn.textContent;
@@ -887,7 +853,7 @@ async function savePerson(form) {
     if (p.me) keepMeSignedIn(out, person.admin); // before anything else talks to the server
     ADMIN.people = null; ADMIN.peopleNote = out.message || 'Saved.';
     ADMIN.newPin = out.pin ? { name: out.name || person.name, pin: out.pin } : null;
-    go(session.admin ? '#/committee/people' : '#/committee');
+    go(session.admin ? '#/committee/people' : '#/me');
   } catch (err) {
     if (err.signedOut) return;
     btn.disabled = false; btn.textContent = label;
@@ -914,8 +880,10 @@ let msgUnread = null, unreadAt = 0;
 let SAVED = null, savedLoading = false; // saved replies [{title, text}]
 
 function unreadBadge() {
-  return msgUnread ? `<span class="count-badge" aria-label="${msgUnread} unread">${msgUnread}</span>` : '';
+  return msgUnread ? `<span class="count-badge" aria-label="${msgUnread} new messages">${msgUnread} new</span>` : '';
 }
+/* The red dot on the Me button: new messages for the club team */
+function drawDot() { document.getElementById('meDot').hidden = !(session && msgUnread); }
 async function loadUnread(force) {
   if (!session || (!force && Date.now() - unreadAt < 60000)) return;
   unreadAt = Date.now();
@@ -923,7 +891,8 @@ async function loadUnread(force) {
     const n = (await committeeApi('msgCount')).unread || 0;
     if (n === msgUnread) return;
     msgUnread = n;
-    if (currentPage === 'committee') render(true);
+    drawDot();
+    if (currentPage === 'me') render(true);
   } catch (e) { /* the badge is only a hint */ }
 }
 
@@ -964,7 +933,7 @@ async function loadMessages(more) {
 function messagesView() {
   if (!MSG.items && MSG.state !== 'failed' || Date.now() - MSG.at > 60000 && MSG.state !== 'loading') setTimeout(() => loadMessages(), 0);
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Messages</h1></div>
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Messages</h1></div>
     <section class="section">
       <form class="msg-search" id="msgSearch" role="search" novalidate>
         <label class="sr-only" for="msgQuery">Search messages</label>
@@ -1215,7 +1184,7 @@ function resultsForm(item) {
   if (!MEMBERS) loadMembers();
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit results</h1>`
-      : `<a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Post results</h1>`}</div>
+      : `<a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Post results</h1>`}</div>
     <section class="section"><form class="card form" id="resultsForm" novalidate${item ? ' data-mode="edit"' : ''}>
       <label class="field-label" for="rsDate">Competition day</label>
       ${dateField('rsDate', start.date)}
@@ -1254,7 +1223,7 @@ function resultsPosted() {
       <p class="muted">They appear on the website and On Target within about 2 minutes.</p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-big" data-same-day>Add another competition for the same day</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Club team</a>
+        <a class="btn btn-outline btn-big" href="#/me">Back to Me</a>
       </div>
     </div></section>`;
 }
@@ -1380,7 +1349,7 @@ function clearPicked() {
 
 function photosForm() {
   return `
-    <div class="page-title"><a class="back-link" href="#/committee">${ICON.chev}Club team</a><h1>Add photos</h1></div>
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Add photos</h1></div>
     <section class="section"><form class="card form" id="photosForm" novalidate>
       <label class="field-label" for="phAlbum">Album <span class="field-hint">choose one or type a new one</span></label>
       <input class="field" id="phAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="Around the range">
@@ -1410,7 +1379,7 @@ function photosAdded() {
       <div class="btn-row">
         ${ADDED.length ? `<button type="button" class="btn btn-outline btn-big share-added" data-share-added>${ICON.share}Share to Facebook or Instagram</button>` : ''}
         <button type="button" class="btn btn-primary btn-big" data-more-photos>Add more photos</button>
-        <a class="btn btn-outline btn-big" href="#/committee">Back to Club team</a>
+        <a class="btn btn-outline btn-big" href="#/me">Back to Me</a>
       </div>
     </div></section>`;
 }
@@ -1594,9 +1563,11 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person'].includes(sub) ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'details', 'documents'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
-  if (quiet && page === currentPage && view.querySelector('form')) return refreshSuggestions();
+  // (the member sign-in box on Me only counts once something has been typed in it)
+  if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
   if (page !== currentPage) {
     posted = false; sameDay = null; clearPicked(); ADDED = []; sharePick = null;
     if (page !== 'committee/edit') editing = null;
@@ -1605,6 +1576,10 @@ function render(quiet) {
     if (page !== 'committee/payments') ADMIN.payNote = '';
     if (page !== 'committee/members') ADMIN.mem.note = '';
     if (page !== 'committee/person') personEdit = null;
+    if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
+    if (page !== 'me/details') meNote = '';
+    if (page.indexOf('me') !== 0) relinking = false;
+    if (page !== 'me/documents') { DOCS = null; docsState = ''; }
     // A new PIN is shown once: it is forgotten as soon as the People and PINs screen is left
     if (page !== 'committee/people') { ADMIN.newPin = null; ADMIN.peopleNote = ''; }
     // Opening Manage posts afresh: get an up-to-date list (coming back from an edit screen keeps the one just loaded)
@@ -1626,7 +1601,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === page.split('/')[0]) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === ({ committee: 'me', more: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -1639,7 +1614,14 @@ view.addEventListener('click', e => {
   if (t.closest('[data-retry]')) { const k = t.closest('[data-retry]').dataset.retry; FAILED[k] = false; render(true); refresh(k, true); }
   if (t.closest('[data-refresh]')) refreshAll(true);
   if (t.closest('[data-signin]')) openSignIn();
-  if (t.closest('[data-signout]')) signOut();
+  if (t.closest('[data-signout-all]')) signOutAll();
+  if (t.closest('[data-install]')) installApp();
+  if (t.closest('[data-docs-reload]')) { DOCS = null; docsState = ''; render(true); }
+  if (t.closest('[data-me-reload]')) { ME = null; meState = ''; relinking = false; render(true); }
+  if (t.closest('[data-me-relink]')) { relinking = true; render(); }
+  if (t.closest('[data-su-reload]')) { ADMIN.signups = null; ADMIN.signState = ''; ADMIN.signNote = ''; render(true); }
+  if (t.closest('[data-su-link]')) askSignup(Number(t.closest('[data-su-link]').dataset.suLink), true);
+  if (t.closest('[data-su-decline]')) askSignup(Number(t.closest('[data-su-decline]').dataset.suDecline), false);
   if (t.closest('[data-mem-filter]')) { ADMIN.mem.filter = t.closest('[data-mem-filter]').dataset.memFilter; ADMIN.mem.query = ''; ADMIN.mem.items = null; }
   if (t.closest('[data-pay-reload]')) { ADMIN.pending = null; ADMIN.pendingState = ''; ADMIN.payNote = ''; render(true); }
   if (t.closest('[data-mark-paid]')) askMarkPaid(Number(t.closest('[data-mark-paid]').dataset.markPaid));
@@ -1716,7 +1698,10 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'replyForm') { e.preventDefault(); sendReply(e.target); }
   if (e.target.id === 'memSearch') { e.preventDefault(); ADMIN.mem.query = e.target.querySelector('#memQuery').value.trim(); ADMIN.mem.note = ''; loadMembersList(); }
   if (e.target.id === 'personForm') { e.preventDefault(); savePerson(e.target); }
+  if (e.target.id === 'linkForm') { e.preventDefault(); linkMe(e.target); }
+  if (e.target.id === 'meEmailForm') { e.preventDefault(); requestCode(e.target); }
 });
+view.addEventListener('change', e => { if (e.target.name === 'meNewsChoice' && ME) saveNews(e.target); });
 view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target.value !== '') useSaved(e.target.value); });
 view.addEventListener('change', e => {
   if (e.target.name !== 'ppPin') return;
@@ -1809,12 +1794,6 @@ async function committeeApi(fn, args) {
   }
 }
 
-function showCommitteeTab() {
-  document.getElementById('committeeTab').hidden = !session;
-  document.querySelector('.tabbar').classList.toggle('six', !!session);
-  committeeBtn.setAttribute('aria-label', session ? 'Club team' : 'Club team sign-in');
-}
-
 function signOut() {
   session = null; sessionStore.set(null);
   MEMBERS = null; membersFailed = false;
@@ -1827,15 +1806,14 @@ function signOut() {
   const rs = document.getElementById('resultsForm');
   if (rs) rs.remove(); // nothing left to ask about
   clearPicked();
-  showCommitteeTab();
-  if (location.hash.indexOf('#/committee') === 0) location.hash = '#/home'; else render(true);
+  drawDot();
+  if (/^#\/(committee|me\/)/.test(location.hash)) location.hash = '#/me'; else render();
 }
 
 /* Sheets (simple dialogs) */
 const sheet = document.getElementById('sheet'), leaveSheet = document.getElementById('leaveSheet');
-const confirmSheet = document.getElementById('confirmSheet'), shareSheet = document.getElementById('shareSheet');
-const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet];
-const committeeBtn = document.getElementById('committeeBtn');
+const confirmSheet = document.getElementById('confirmSheet'), shareSheet = document.getElementById('shareSheet'), installSheet = document.getElementById('installSheet');
+const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet, installSheet];
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
 let sheetOpener = null;
@@ -1852,14 +1830,14 @@ function closeSheets() {
   if (sheetOpener && document.contains(sheetOpener)) sheetOpener.focus();
   sheetOpener = null;
 }
-function openSignIn(note) {
-  leaveSheet.hidden = true; confirmSheet.hidden = true; shareSheet.hidden = true; endShare();
+/* The sign-in sheet: the club team's PIN, or (step = 'code') the code a member has just been emailed */
+function openSignIn(note, step) {
+  leaveSheet.hidden = true; confirmSheet.hidden = true; shareSheet.hidden = true; installSheet.hidden = true; endShare();
   pinBox.value = ''; signInError.hidden = true;
   signInNote.textContent = note || ''; signInNote.hidden = !note;
-  openSheet(sheet, pinBox);
+  openSheet(sheet, signInStep(step === 'code' ? 'code' : 'pin'));
 }
 
-committeeBtn.addEventListener('click', () => { if (session) location.hash = '#/committee'; else openSignIn(); });
 document.getElementById('sheetClose').addEventListener('click', closeSheets);
 SHEETS.forEach(el => el.addEventListener('click', e => { if (e.target === el) closeSheets(); }));
 document.getElementById('leaveStay').addEventListener('click', closeSheets);
@@ -1873,7 +1851,7 @@ document.getElementById('leaveGo').addEventListener('click', () => {
   const rp = document.getElementById('replyForm');
   if (rp) rp.remove();
   clearPicked();
-  location.hash = to || '#/committee';
+  location.hash = to || '#/me';
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
 
@@ -1890,9 +1868,8 @@ document.getElementById('signInForm').addEventListener('submit', async e => {
     const me = await api('signIn', pin);
     session = { pin, name: me.name, admin: !!me.admin };
     sessionStore.set(session);
-    showCommitteeTab();
     sheetOpener = null; closeSheets();
-    if (location.hash === '#/committee') render(); else location.hash = '#/committee';
+    if (location.hash === '#/me') render(); else location.hash = '#/me';
   } catch (err) {
     fail(err.message);
   } finally {
@@ -2090,12 +2067,490 @@ async function postEvent(form) {
   }
 }
 
-showCommitteeTab();
+
+/* ---------- Member sign-in (email + one-time code) and My membership ----------
+   The sign-in token stays on this phone until Sign out. The member's details come from the server each time
+   and are kept in memory only; the phone remembers just enough to draw the button and the Home strip. */
+const memberStore = {
+  get() { try { const s = JSON.parse(localStorage.getItem('ot:member')); return s && s.token ? s : null; } catch (e) { return null; } },
+  set(s) { try { if (s) localStorage.setItem('ot:member', JSON.stringify(s)); else localStorage.removeItem('ot:member'); } catch (e) { /* storage blocked */ } }
+};
+let member = memberStore.get();   // {token, initials, first, status} while a member is signed in on this device
+let ME = null, meState = '', meNote = '';
+let relinking = false;            // true while someone waiting for the club team is changing the details they sent
+const JOIN_URL = 'https://ravenshoegunclub.com.au/become-a-member';
+const ME_PILL = { current: ['ok', 'Current', ''], notRenewed: ['amber', 'Not renewed yet', ''], waiting: ['amber', 'Waiting for payment', 'Payment being checked'],
+  overdue: ['red', 'Not financial – renewal overdue', ''], expired: ['grey', 'Expired', ''], none: ['grey', 'Not current', ''] };
+const meStatus = d => d.waiting || d.status === 'waiting' ? 'waiting' : ME_PILL[d.status] ? d.status : 'none';
+const mePill = key => `<span class="me-pill me-pill-${ME_PILL[key][0]}">${ME_PILL[key][1]}</span>`;
+const initialsOf = name => { const w = String(name || '').trim().split(/\s+/).filter(Boolean); return ((w[0] || '').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase(); };
+const maskEmail = email => { const [a, b] = String(email).split('@'); return a.charAt(0) + '•••@' + (b || ''); };
+async function memberApi(fn, args) {
+  try {
+    return await api(fn, undefined, [member.token].concat(args || []));
+  } catch (e) {
+    if (/signed out/i.test(e.message)) { e.signedOut = true; forgetMember(); }
+    throw e;
+  }
+}
+function forgetMember() {
+  member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
+  if (location.hash.indexOf('#/me/') === 0) location.hash = '#/me'; else render();
+}
+/* One Sign out for everything: the member sign-in and the club team PIN */
+function signOutAll() {
+  if (member) {
+    api('memberSignOut', undefined, [member.token]).catch(() => { /* the phone forgets the sign-in either way */ });
+    member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
+  }
+  signOut();
+  view.focus();
+}
+async function loadMe() {
+  if (!member || meState === 'loading') return;
+  meState = 'loading';
+  try {
+    ME = await memberApi('memberMe');
+    meState = '';
+    const keep = { token: member.token, initials: ME.linked ? initialsOf(ME.name) : '', first: ME.linked ? ME.first : '', status: ME.linked ? meStatus(ME) : '' };
+    member = keep; memberStore.set(member);
+  } catch (e) {
+    if (e.signedOut) return;
+    meState = 'failed';
+  }
+  if (currentPage.indexOf('me') === 0) render(true);
+}
+
+const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
+const yesNo = (name, value) => `<div class="yesno">
+  <label><input type="radio" name="${name}" value="yes"${value === true ? ' checked' : ''}><span>Yes</span></label>
+  <label><input type="radio" name="${name}" value="no"${value === false ? ' checked' : ''}><span>Sign-in only</span></label></div>`;
+const SITE_URL = 'https://ravenshoegunclub.com.au';
+const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const menuLink = (icon, label, href) => `<a class="menu-row" href="${href}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
+
+/* Me: the one place for signing in, My membership, the club team's tools and the club links */
+function meView(sub) {
+  const linked = !!(member && ME && ME.linked);
+  if (sub === 'documents') { if (member || session) return documentsView(); location.replace('#/me'); return ''; }
+  if (sub && !linked) { if (!member || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
+  else if (sub === 'results') return meResults();
+  else if (sub === 'details') return meDetails();
+  if (session) { loadUnread(); if (session.admin) loadAdminSummary(); }
+  const signedIn = !!(member || session);
+  const first = (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
+  const canSeeDocs = session || (member && member.status);
+  return `
+    <div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1></div>
+    ${memberBlock()}
+    ${session ? clubAdminBlock() : ''}
+    <section class="section">
+      <div class="section-head"><h2 class="caps-head">Club</h2></div>
+      <div class="card list">
+        ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', SITE_URL + '/visit-the-range')}
+        ${menuLink(ICON.help, 'FAQs', SITE_URL + '/faq')}
+        ${signedIn ? '' : menuLink(ICON.web, 'Club website', SITE_URL)}
+        ${menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
+        ${isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`}
+      </div>
+    </section>
+    <section class="section me-foot">
+      ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>
+        <button type="button" class="btn btn-outline btn-big" data-signout-all>Sign out</button>`
+      : `<p class="muted">Club team? <button type="button" class="link-btn" data-signin>Sign in with your PIN</button></p>`}
+    </section>
+    <section class="section me-end">
+      <button type="button" class="link-btn" data-refresh>Refresh club data</button>
+      <p class="muted">On Target v${APP_VERSION}${TEST_SERVER ? ' · TEST SERVER' : ''}</p>
+    </section>`;
+}
+
+/* The top of Me: the sign-in box, or the membership card and its quick buttons */
+function memberBlock() {
+  if (!member) return `
+    <section class="section"><form class="card form" id="meEmailForm" novalidate>
+      <h2 class="form-head">Member sign-in</h2>
+      <p class="muted">Enter your email address and we'll email you a one-time 6-digit code. No password to remember.</p>
+      <label class="field-label" for="memberEmail">Your email address</label>
+      <input class="field" id="memberEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="120" aria-describedby="memberEmailError">
+      <p class="form-error" id="memberEmailError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="memberEmailBtn">Email me a code</button>
+      ${joinLink}
+    </form></section>`;
+  if (!ME) {
+    if (meState !== 'failed' && meState !== 'loading') setTimeout(loadMe, 0);
+    return `<section class="section">${meState === 'failed' ? loadFailed('your membership', 'data-me-reload') : skeletonRows(3)}</section>`;
+  }
+  if (!ME.linked) return ME.pending && !relinking ? mePending() : linkForm();
+  return meCard();
+}
+
+function linkForm() {
+  return `
+    <section class="section"><form class="card form" id="linkForm" novalidate>
+      <h2 class="form-head">Let's find your membership</h2>
+      <p class="muted">First time here? Tell us who you are and we'll link this email to your membership.</p>
+      <label class="field-label" for="lkName">Full name</label>
+      <input class="field" id="lkName" maxlength="80" autocomplete="name" autocapitalize="words">
+      <label class="field-label" for="lkSsaa">SSAA member number</label>
+      <input class="field" id="lkSsaa" maxlength="20" inputmode="numeric" autocomplete="off">
+      <fieldset class="choices">
+        <legend class="field-label">Use this email for club news and renewal reminders?</legend>
+        ${yesNo('lkNews', null)}
+      </fieldset>
+      <p class="form-error" id="lkError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="lkSubmit">Link me up</button>
+      <p class="muted form-foot">If your details match our records you're in straight away. If not, the club team will check and email you.</p>
+      ${joinLink}
+    </form></section>`;
+}
+function mePending() {
+  return `
+    <section class="section"><div class="card empty">
+      <div class="empty-title">Thanks, the club team will check and email you</div>
+      <p class="muted">You don't need to do anything else. Once your email is linked, your membership card will be here.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" data-me-reload>${ICON.refresh}Check again</button>
+        <button type="button" class="btn btn-outline" data-me-relink>Change my details</button>
+      </div>
+    </div></section>`;
+}
+async function linkMe(form) {
+  const btn = form.querySelector('#lkSubmit'), error = form.querySelector('#lkError');
+  if (btn.disabled) return;
+  const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
+  const name = form.querySelector('#lkName').value.trim(), ssaa = form.querySelector('#lkSsaa').value.trim();
+  const news = form.querySelector('input[name="lkNews"]:checked');
+  if (name.split(/\s+/).length < 2) return fail('Please type your full name (first name and surname).', '#lkName');
+  if (!/\d/.test(ssaa)) return fail('Please type your SSAA member number.', '#lkSsaa');
+  if (!news) return fail('Please choose Yes or Sign-in only.');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const out = await memberApi('memberLink', [name, ssaa, news.value === 'yes']);
+    relinking = false;
+    if (out && out.linked) { ME = null; meState = ''; } else ME.pending = true;
+    form.remove(); render();
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = 'Link me up';
+    fail(e.message);
+  }
+}
+
+const scoreNumber = s => { const m = /-?\d+(\.\d+)?/.exec(String(s)); return m ? Number(m[0]) : null; };
+function resultsSummary() {
+  const n = ME.results.length, scores = ME.results.map(r => scoreNumber(r.score)).filter(v => v !== null);
+  return n ? `${n} competition${n === 1 ? '' : 's'}${scores.length ? ' · best ' + Math.max(...scores) : ''}` : 'None yet';
+}
+function meCard() {
+  const key = meStatus(ME), note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2], r = ME.renew || {};
+  const renewTile = r.open ? `<a class="tile" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.fees}</span>Renew<span class="tile-sub">Renew now</span></a>`
+    : `<div class="tile tile-off"><span class="tile-ico">${ICON.fees}</span>Renew<span class="tile-sub">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></div>`;
+  return `
+    <section class="section">
+      <div class="me-card">${ICON.rings}
+        <div class="me-card-club">MEMBER · RAVENSHOE &amp; DISTRICT SPORTING SHOOTERS</div>
+        <div class="me-card-name">${esc(ME.name)}</div>
+        <div class="me-card-facts">
+          <div><span>SSAA no.</span><b>${esc(ME.ssaa) || '–'}</b></div>
+          <div><span>Valid to</span><b>${esc(ME.validToText) || '–'}</b></div>
+        </div>
+        <div class="me-card-status">${mePill(key)}${note ? `<span class="me-card-note">${esc(note)}</span>` : ''}</div>
+      </div>
+      <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
+      ${r.open && key !== 'notRenewed' ? `<a class="btn btn-primary btn-big" href="${esc(r.url)}" target="_blank" rel="noopener">Renew my membership</a>` : ''}
+    </section>
+    <section class="section"><nav class="post-tiles me-tiles" aria-label="My membership">
+      <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>My results<span class="tile-sub">${esc(resultsSummary())}</span></a>
+      ${renewTile}
+      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email and club news</span></a>
+    </nav></section>`;
+}
+
+/* The club team's tools, on Me for anyone signed in with a PIN */
+function clubAdminBlock() {
+  const sum = ADMIN.summary, signCount = ADMIN.signCount;
+  return `
+    <section class="section">
+      <div class="section-head"><h2 class="caps-head">Club admin</h2></div>
+      <div class="card list">
+        <a class="menu-row" href="#/committee/messages"><span class="tile-ico">${ICON.mail}</span>Messages${unreadBadge()}${ICON.chev}</a>
+      </div>
+      <h3 class="sub-head">Post something new</h3>
+      <div class="post-tiles">
+        <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
+        <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
+        <a class="tile" href="#/committee/photos"><span class="tile-ico">${ICON.camera}</span>Photos</a>
+      </div>
+      <div class="card list sub-gap">
+        <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
+      </div>
+      ${session.admin ? `<h3 class="sub-head">Admin</h3>
+        ${sum ? `<div class="admin-counts">
+          ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
+          ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
+          <a class="admin-count" href="#/committee/payments">Payments waiting: <b>${sum.pending}</b></a>
+        </div>` : ''}
+        <div class="card list">
+          <a class="menu-row" href="#/committee/payments"><span class="tile-ico">${ICON.fees}</span>Payments to confirm${sum && sum.pending ? `<span class="count-badge" aria-label="${sum.pending} waiting">${sum.pending}</span>` : ''}${ICON.chev}</a>
+          <a class="menu-row" href="#/committee/signups"><span class="tile-ico">${ICON.join}</span>App sign-ups to check${signCount ? `<span class="count-badge" aria-label="${signCount} waiting">${signCount}</span>` : ''}${ICON.chev}</a>
+          <a class="menu-row" href="#/committee/members"><span class="tile-ico">${ICON.people}</span>Members${ICON.chev}</a>
+          <a class="menu-row" href="#/committee/people"><span class="tile-ico">${ICON.key}</span>People and PINs${ICON.chev}</a>
+        </div>` : ''}
+    </section>`;
+}
+
+/* Club documents: the files in the club's "On Target – Club documents" Drive folder, for members and the club team */
+let DOCS = null, docsState = '';
+async function loadDocs() {
+  if (docsState === 'loading') return;
+  docsState = 'loading';
+  try {
+    const list = session ? await committeeApi('clubDocuments') : await api('clubDocuments', undefined, [member.token]);
+    DOCS = Array.isArray(list) ? list : []; docsState = '';
+  } catch (e) {
+    if (e.signedOut) { docsState = ''; return; }
+    if (/signed out/i.test(e.message)) return forgetMember();
+    docsState = /for members/i.test(e.message) ? 'members' : 'failed';
+  }
+  if (currentPage === 'me/documents') render(true);
+}
+function documentsView() {
+  if (!DOCS && !docsState) setTimeout(loadDocs, 0);
+  return `
+    <div class="page-title">${meBack}<h1>Club documents</h1></div>
+    <section class="section">${DOCS ? (DOCS.length ? `<div class="card list">${DOCS.map(d => /^https:\/\//.test(d.url) ? menuLink(ICON.doc, esc(d.name), esc(d.url)) : '').join('')}</div>`
+        : `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`)
+      : docsState === 'members' ? empty('For members', 'Club documents appear here once your email is linked to your membership.')
+      : docsState === 'failed' ? loadFailed('the club documents', 'data-docs-reload') : skeletonRows(3)}</section>`;
+}
+
+/* "Add On Target to your phone": the browser's own install box where there is one, otherwise the steps */
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
+window.addEventListener('appinstalled', () => { installPrompt = null; closeSheets(); if (currentPage === 'me') render(true); });
+function installApp() {
+  if (installPrompt) { const p = installPrompt; installPrompt = null; p.prompt(); return; }
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1), android = /Android/.test(ua);
+  const steps = ios ? ['Open On Target in Safari.', 'Tap the Share button (the square with an arrow pointing up).', 'Scroll down and tap "Add to Home Screen".', 'Tap Add.']
+    : android ? ['Tap the three dots at the top right of Chrome.', 'Tap "Add to Home screen" or "Install app".', 'Tap Install.']
+    : ['In Chrome or Edge, click the three dots at the top right.', 'Click "Cast, save and share", then "Install page as app" (in Edge: "Apps", then "Install this site as an app").', 'Click Install.'];
+  document.getElementById('installSteps').innerHTML = steps.map(t => `<li>${esc(t)}</li>`).join('');
+  openSheet(installSheet, document.getElementById('installClose'));
+}
+const meBack = `<a class="back-link" href="#/me">${ICON.chev}My membership</a>`;
+function meResults() {
+  const next = events().find(e => /competition/i.test(e.discipline || ''));
+  return `
+    <div class="page-title">${meBack}<h1>My results</h1>${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
+    <section class="section">${ME.results.length ? `<div class="card list">${ME.results.map(r => `
+      <div class="list-row">${dateBlock(r.date)}
+        <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
+          <div class="muted">${[r.place && placeLabel(r.place) + ' place', r.score && 'Score ' + esc(r.score)].filter(Boolean).join(' · ')}</div></div>
+      </div>`).join('')}</div>` : `<div class="card empty">
+      <div class="empty-title">No competition results yet</div>
+      <p class="muted">Fancy having a go? ${next ? `Next competition: ${esc(shortDate(next.date))}${next.start ? ', ' + esc(niceTime(next.start) || next.start) : ''}. ` : ''}All levels welcome.</p>
+      <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
+    </div>`}</section>`;
+}
+function meDetails() {
+  const row = (label, value) => `<div class="detail-row"><span class="muted">${label}</span><b>${esc(value)}</b></div>`;
+  return `
+    <div class="page-title">${meBack}<h1>My details</h1></div>
+    <section class="section">
+      ${meNote ? `<p class="notice" role="status">${esc(meNote)}</p>` : ''}
+      <div class="card form">
+        ${row('Name', ME.name)}
+        ${row('Sign-in email', ME.email)}
+        ${row('Contact email', ME.contactEmail || 'None on our records')}
+        <fieldset class="choices" id="meNews">
+          <legend class="field-label">Use this email for club news and renewal reminders?</legend>
+          ${yesNo('meNewsChoice', !!ME.useForNews)}
+        </fieldset>
+        <p class="form-error" id="meError" role="alert" hidden></p>
+      </div>
+    </section>
+    <section class="section"><div class="card list">
+      <a class="menu-row" href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('Change my details')}"><span class="tile-ico">${ICON.mail}</span>To change other details, message the club${ICON.chev}</a>
+    </div></section>`;
+}
+async function saveNews(input) {
+  const want = input.value === 'yes', boxes = [...view.querySelectorAll('input[name="meNewsChoice"]')], error = document.getElementById('meError');
+  if (want === !!ME.useForNews) return;
+  boxes.forEach(b => { b.disabled = true; });
+  try {
+    ME = await memberApi('memberSetContact', [want]);
+    meNote = want ? 'Saved. We will use this email for club news and renewal reminders.' : 'Saved. This email is for signing in only.';
+    if (currentPage === 'me/details') render(true);
+  } catch (e) {
+    if (e.signedOut) return;
+    boxes.forEach(b => { b.disabled = false; b.checked = (b.value === 'yes') === !!ME.useForNews; });
+    if (error) { error.textContent = e.message; error.hidden = false; }
+  }
+}
+/* ----- signing in: the email box is on Me; the code is typed in the sign-in sheet ----- */
+const memberCodeForm = document.getElementById('memberCodeForm'), pinForm = document.getElementById('signInForm');
+const codeBoxes = [...document.querySelectorAll('.code-box')], codeError = document.getElementById('codeError'), codeBtn = document.getElementById('codeBtn');
+const codeAgain = document.getElementById('codeAgain'), codeText = document.getElementById('codeText');
+let codeEmail = '';
+
+function signInStep(step) {
+  memberCodeForm.hidden = step !== 'code'; pinForm.hidden = step !== 'pin';
+  sheet.setAttribute('aria-labelledby', step === 'code' ? 'codeTitle' : 'sheetTitle');
+  return step === 'code' ? codeBoxes[0] : pinBox;
+}
+const codeSentText = () => `We've sent a code to ${maskEmail(codeEmail)}. It lasts 15 minutes.`;
+function clearCode() { codeBoxes.forEach(b => { b.value = ''; }); }
+function fillCode(from, digits) {
+  digits.split('').forEach((d, k) => { if (codeBoxes[from + k]) codeBoxes[from + k].value = d; });
+  codeBoxes[Math.min(from + digits.length, codeBoxes.length - 1)].focus();
+  if (codeBoxes.every(b => b.value)) checkCode();
+}
+codeBoxes.forEach((box, i) => {
+  box.addEventListener('focus', () => box.select());
+  box.addEventListener('input', e => {
+    codeError.hidden = true;
+    const typed = e.inputType === 'insertText' && /^\d$/.test(e.data || '') ? e.data : box.value.replace(/\D/g, '');
+    box.value = '';
+    if (typed) fillCode(typed.length >= codeBoxes.length ? 0 : i, typed.slice(0, codeBoxes.length)); // a pasted or auto-filled code fills every box
+  });
+  box.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !box.value && i) { e.preventDefault(); codeBoxes[i - 1].value = ''; codeBoxes[i - 1].focus(); }
+    if (e.key === 'ArrowLeft' && i) { e.preventDefault(); codeBoxes[i - 1].focus(); }
+    if (e.key === 'ArrowRight' && i < codeBoxes.length - 1) { e.preventDefault(); codeBoxes[i + 1].focus(); }
+  });
+  box.addEventListener('paste', e => {
+    const digits = ((e.clipboardData && e.clipboardData.getData('text')) || '').replace(/\D/g, '');
+    e.preventDefault();
+    if (digits) { codeError.hidden = true; fillCode(digits.length >= codeBoxes.length ? 0 : i, digits.slice(0, codeBoxes.length)); }
+  });
+});
+
+async function requestCode(form) {
+  const box = form.querySelector('#memberEmail'), error = form.querySelector('#memberEmailError'), btn = form.querySelector('#memberEmailBtn');
+  if (btn.disabled) return;
+  const email = box.value.trim().toLowerCase();
+  const fail = msg => { error.textContent = msg; error.hidden = false; box.focus(); };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('Please check your email address.');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    await api('memberRequestCode', undefined, [email]);
+    codeEmail = email; clearCode(); codeError.hidden = true;
+    codeText.textContent = codeSentText();
+    openSignIn('', 'code');
+  } catch (err) {
+    fail(err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Email me a code';
+  }
+}
+async function checkCode() {
+  if (codeBtn.disabled) return;
+  const code = codeBoxes.map(b => b.value).join('');
+  const fail = msg => { codeError.textContent = msg; codeError.hidden = false; };
+  if (code.length < codeBoxes.length) { fail('Please type all 6 digits of the code.'); return (codeBoxes.find(b => !b.value) || codeBoxes[0]).focus(); }
+  codeError.hidden = true; codeBtn.disabled = true; codeBtn.textContent = 'Signing in…';
+  try {
+    const out = await api('memberVerifyCode', undefined, [codeEmail, code]);
+    member = { token: out.token, initials: '', first: '', status: '' };
+    memberStore.set(member);
+    ME = null; meState = ''; meNote = ''; relinking = false;
+    sheetOpener = null; closeSheets();
+    if (location.hash === '#/me') render(); else location.hash = '#/me';
+    view.focus();
+  } catch (err) {
+    fail(err.message); clearCode(); codeBoxes[0].focus();
+  } finally {
+    codeBtn.disabled = false; codeBtn.textContent = 'Sign in';
+  }
+}
+memberCodeForm.addEventListener('submit', e => { e.preventDefault(); checkCode(); });
+codeAgain.addEventListener('click', async () => {
+  if (codeAgain.disabled) return;
+  codeAgain.disabled = true; codeAgain.textContent = 'Sending…'; codeError.hidden = true;
+  try {
+    await api('memberRequestCode', undefined, [codeEmail]);
+    clearCode();
+    codeText.textContent = 'A new code is on its way. ' + codeSentText();
+    codeBoxes[0].focus();
+  } catch (err) {
+    codeError.textContent = err.message; codeError.hidden = false;
+  } finally {
+    codeAgain.disabled = false; codeAgain.textContent = 'Send a new code';
+  }
+});
+document.querySelectorAll('[data-sheet-close]').forEach(b => b.addEventListener('click', closeSheets));
+if (member) loadMe();
+
+/* ----- club team: "App sign-ups to check" (admins only) ----- */
+const SIGNUP_TAG = { 'Linked automatically': 'replied', 'Linked by the club team': 'replied', 'Not a member': 'tag' };
+async function loadSignups() {
+  if (ADMIN.signState === 'loading') return;
+  ADMIN.signState = 'loading';
+  try {
+    const d = await committeeApi('memberLinkRequests') || {};
+    ADMIN.signups = { requests: Array.isArray(d.requests) ? d.requests : [], members: Array.isArray(d.members) ? d.members : [] };
+    ADMIN.signCount = ADMIN.signups.requests.filter(r => r.waiting).length;
+    ADMIN.signState = '';
+  } catch (e) { if (e.signedOut) { ADMIN.signState = ''; return; } ADMIN.signState = 'failed'; }
+  if (currentPage === 'committee/signups') render(true);
+}
+async function loadSignupCount() {
+  try { const d = await committeeApi('memberLinkCount'); const n = Number(d && d.waiting) || 0; if (n !== ADMIN.signCount) { ADMIN.signCount = n; if (currentPage === 'me') render(true); } }
+  catch (e) { /* the count is only a guide */ }
+}
+function signupsView() {
+  if (!ADMIN.signups && ADMIN.signState !== 'failed') setTimeout(loadSignups, 0);
+  const body = () => {
+    const waiting = ADMIN.signups.requests.filter(r => r.waiting), done = ADMIN.signups.requests.filter(r => !r.waiting);
+    const pick = r => `<option value="">Choose a member…</option>` + ADMIN.signups.members.map(m => `<option value="${esc(m.id)}"${r.guess && r.guess.id === m.id ? ' selected' : ''}>${esc(m.name)}${m.ssaa ? ' (SSAA ' + esc(m.ssaa) + ')' : ''}</option>`).join('');
+    return (waiting.length ? waiting.map((r, i) => `
+      <article class="card pay-card">
+        <h2 class="pay-name">${esc(r.name)}</h2>
+        <div>SSAA number ${esc(r.ssaa)}</div>
+        <div class="pay-contact">${esc(r.email)}</div>
+        <div class="muted">Signed up ${esc(niceDate(r.date) || r.date)} · Club news to this email: ${r.news ? 'Yes' : 'No'}</div>
+        <div class="pay-ref"><span class="muted">Best guess</span>${r.guess ? `<b>${esc(r.guess.name)}</b><span class="muted">${esc(r.guess.why)}${r.guess.ssaa ? ' · SSAA ' + esc(r.guess.ssaa) : ''}${r.guess.linkedTo ? ' · already linked to another email' : ''}</span>` : '<b>No likely match</b>'}</div>
+        <label class="field-label" for="suPick${i}">Link to which member?</label>
+        <select class="field" id="suPick${i}">${pick(r)}</select>
+        <button type="button" class="btn btn-primary btn-big" data-su-link="${i}">Link to member</button>
+        <button type="button" class="btn btn-outline btn-big" data-su-decline="${i}">Not a member</button>
+      </article>`).join('') : empty('No sign-ups to check', 'When someone signs in to On Target and can\'t be matched to a member automatically, they appear here.'))
+      + (done.length ? `<div class="section-head"><h2>Joined On Target</h2></div><div class="card list">${done.map(r => `
+        <div class="list-row"><div class="list-main"><div class="list-title">${esc(r.memberName || r.name)}</div>
+          <div class="muted">${esc(r.email)} · ${esc(niceDate(r.date) || r.date)}</div>
+          <div class="lab-row"><span class="lab lab-${SIGNUP_TAG[r.status] || 'tag'}">${esc(r.status)}</span>${r.emailChanged ? '<span class="lab lab-membership">Email changed</span>' : ''}</div></div></div>`).join('')}</div>` : '');
+  };
+  return `
+    <div class="page-title">${adminBack}<h1>App sign-ups to check</h1><p class="muted">People who have signed in to On Target as a member.</p></div>
+    <section class="section">
+      ${ADMIN.signNote ? `<p class="notice" role="status">${esc(ADMIN.signNote)}</p>` : ''}
+      ${ADMIN.signups ? body() : ADMIN.signState === 'failed' ? loadFailed('the sign-ups', 'data-su-reload') : skeletonRows(3)}
+      ${ADMIN.signups ? `<button type="button" class="btn btn-outline" data-su-reload>${ICON.refresh}Refresh</button>` : ''}
+    </section>`;
+}
+function askSignup(i, link) {
+  const r = ADMIN.signups && ADMIN.signups.requests.filter(x => x.waiting)[i];
+  if (!r) return;
+  const sel = document.getElementById('suPick' + i), who = link && ADMIN.signups.members.find(m => m.id === sel.value);
+  if (link && !who) { ADMIN.signNote = 'Please choose a member from the list first.'; render(true); return document.getElementById('suPick' + i).focus(); }
+  const done = out => { ADMIN.signNote = (out && out.message) || 'Done.'; ADMIN.signups = null; ADMIN.mem.items = null; render(true); loadSignupCount(); };
+  confirmAsk(link ? {
+    title: `Link this email to ${who.name}?`, text: `${r.email} will be able to see ${who.name}'s membership card and results, and will get an email to say so.`,
+    yes: 'Yes, link them', busy: 'Linking…', no: 'No, go back', run: () => committeeApi('memberLinkApprove', [r.id, who.id]), done
+  } : {
+    title: `${r.name} is not a member?`, text: `${r.email} will get a polite email with the Become a Member link.`,
+    yes: 'Yes, send the email', busy: 'Sending…', no: 'No, go back', run: () => committeeApi('memberLinkDecline', [r.id]), done
+  });
+}
+
+drawDot();
 render();
 refreshAll();
 
 /* Check a remembered PIN still works (it may have been changed or removed), and pick up name or admin changes. */
 if (session) {
+  loadUnread();
   committeeApi('signIn').then(me => {
     if (!session || (me.name === session.name && !!me.admin === session.admin)) return;
     session = { pin: session.pin, name: me.name, admin: !!me.admin };
