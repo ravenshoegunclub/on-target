@@ -7,3 +7,7 @@ backend/
 
 # Code blocks for the club website (pasted into GoDaddy by hand). Kept here for copying only.
 website/
+
+# Screenshots for the user guide (demo data). Kept on this machine only.
+guide-screenshots/
+guide-screenshots.zip

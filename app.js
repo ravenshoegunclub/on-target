@@ -1,10 +1,10 @@
-/* On Target v2.4.2 — app shell with live club data and club team tools
+/* On Target v2.4.3 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.4.2';
+const APP_VERSION = '2.4.3';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -410,7 +410,7 @@ function eventForm(item) {
   const v = k => esc(ev[k] || '');
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit event</h1>`
-      : `<a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Post an event</h1>`}</div>
+      : `${postBack}<h1>Post an event</h1>`}</div>
     <section class="section"><form class="card form" id="eventForm" novalidate>
       <label class="field-label" for="evDate">Date</label>
       ${dateField('evDate', item ? ev.date : nextSaturday())}
@@ -546,7 +546,7 @@ function manageView() {
           <img src="${esc(p.thumb)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>`;
   };
   return `
-    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Manage posts</h1></div>
+    <div class="page-title">${adminBack}<h1>Manage posts</h1></div>
     <section class="section">
       ${manageNote ? `<p class="notice" role="status">${esc(manageNote)}</p>` : ''}
       <div class="seg" role="group" aria-label="What to manage">${MANAGE_TABS.map(t => `
@@ -680,6 +680,8 @@ async function loadAdminSummary(force) {
   } catch (e) { /* the counts are only a guide */ }
 }
 const ON_ME = () => currentPage === 'me' || currentPage === 'admin'; // the two screens that show the club team's counts
+/* Posting an event, results or photos starts from Club admin, Post something new */
+const postBack = `<a class="back-link" href="#/admin/post">${ICON.chev}Post something new</a>`;
 const adminBack = `<a class="back-link" href="#/admin">${ICON.chev}Club admin</a>`;
 const loadFailed = (what, attr) => `<div class="card empty"><div class="empty-title">Can't load ${what}</div>
   <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" ${attr}>${ICON.refresh}Try again</button></div>`;
@@ -1013,7 +1015,7 @@ async function loadMessages(more) {
 function messagesView() {
   if (!MSG.items && MSG.state !== 'failed' || Date.now() - MSG.at > 60000 && MSG.state !== 'loading') setTimeout(() => loadMessages(), 0);
   return `
-    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Messages</h1></div>
+    <div class="page-title">${adminBack}<h1>Messages</h1></div>
     <section class="section">
       <form class="msg-search" id="msgSearch" role="search" novalidate>
         <label class="sr-only" for="msgQuery">Search messages</label>
@@ -1264,7 +1266,7 @@ function resultsForm(item) {
   if (!MEMBERS) loadMembers();
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit results</h1>`
-      : `<a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Post results</h1>`}</div>
+      : `${postBack}<h1>Post results</h1>`}</div>
     <section class="section"><form class="card form" id="resultsForm" novalidate${item ? ' data-mode="edit"' : ''}>
       <label class="field-label" for="rsDate">Competition day</label>
       ${dateField('rsDate', start.date)}
@@ -1429,7 +1431,7 @@ function clearPicked() {
 
 function photosForm() {
   return `
-    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Add photos</h1></div>
+    <div class="page-title">${postBack}<h1>Add photos</h1></div>
     <section class="section"><form class="card form" id="photosForm" novalidate>
       <label class="field-label" for="phAlbum">Album <span class="field-hint">choose one or type a new one</span></label>
       <input class="field" id="phAlbum" maxlength="60" list="phAlbumList" autocomplete="off" value="Around the range">
@@ -4010,8 +4012,8 @@ function importRows(grids) {
     const row = { line: head + i + 2, last: get('last'), first: get('first'), ssaa: get('ssaa').replace(/\.0$/, ''), type: get('type'), group: get('group'), paidTo: importDate(get('paidTo')),
       mobile: get('mobile'), email: get('email'), notes: get('notes'), yob: get('yob').replace(/\.0$/, '') };
     if (/^\d{9}$/.test(row.mobile) && /^[2-478]/.test(row.mobile)) row.mobile = '0' + row.mobile; // Excel drops the leading 0 of a number
-    // The template's own example rows ("EXAMPLE – Citizen") are never members
-    if ([row.last, row.first, row.notes].some(v => /^example\b/i.test(v))) examples++;
+    // The template's own example rows are never members: the ones whose surname starts "EXAMPLE –" (any kind of dash)
+    if (/^example\s*[–—-]/i.test(row.last)) examples++;
     else if (row.last || row.first || row.ssaa || row.email) out.push(row);
   });
   if (!out.length) throw new Error(`There are no members under the headings in that file yet${examples ? ' (only the example rows, which are left out)' : ''}. Fill in the template, save it, and choose it again.`);
