@@ -1,4 +1,4 @@
-/* On Target v2.2.1 — club styles */
+/* On Target v2.2.2 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -608,3 +608,18 @@ button.menu-row.install-row .chev { color: #3A0A14; }
 .tick-on { background: var(--green); color: #fff; border: 0; }
 .range-off { padding: 0; font-size: 14px; }
 @media (min-width: 640px) { .opts-3 { flex-direction: row; } .opts-3 .opt { flex: 1 1 0; } }
+
+/* ---------- Handgun shoot calculator (v2.2.2) ---------- */
+#calcForm > p { margin: 0 0 8px; }
+.calc-class { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.calc-held { display: flex; align-items: center; gap: 12px; padding-left: 48px; }
+.calc-held[hidden] { display: none; }
+.calc-held .field { margin: 0; flex: 1 1 auto; }
+.calc-card { scroll-margin-top: 80px; }
+.calc-big { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.calc-big b { font: 800 64px/1 Montserrat, sans-serif; color: var(--gold); }
+.calc-big span { font: 700 18px Montserrat, sans-serif; }
+.calc-n { flex: 0 0 auto; font: 800 22px Montserrat, sans-serif; color: var(--heading); }
+.calc-guide a { display: block; margin-top: 6px; font-weight: 600; }
+#calcResult { scroll-margin-top: 70px; }
+#calcResult:empty { display: none; }

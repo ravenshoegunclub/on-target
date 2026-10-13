@@ -1,10 +1,10 @@
-/* On Target v2.2.1 — app shell with live club data and club team tools
+/* On Target v2.2.2 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.2.2';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -39,6 +39,7 @@ const ICON = {
   card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.5 1.7-2.2 3-2.2s2.4.7 3 2.2M14 10h4M14 14h4"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
   bench: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18M6 9v10M18 9v10M6 14h12M9 9V5h6v4"/></svg>',
+  calc: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/></svg>',
   doc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
@@ -343,6 +344,7 @@ const VIEWS = {
   more() { location.replace('#/me'); return ''; },
 
   me(sub) { return meView(sub); },
+  calculator() { return calculatorView(); },
 
   committee(sub, arg) {
     if (!session) return `
@@ -1670,7 +1672,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === ({ committee: 'me', more: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === ({ committee: 'me', more: 'me', calculator: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -2382,6 +2384,7 @@ function meView(sub) {
       <div class="section-head"><h2 class="caps-head">Club</h2></div>
       <div class="card list">
         ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', VISIT_URL)}
+        ${menuLink(ICON.calc, 'Handgun shoot calculator', '#/calculator')}
         ${menuLink(ICON.help, 'FAQs', FAQ_URL)}
         ${menuLink(ICON.web, 'Club website', SITE_URL)}
         ${menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
@@ -3617,6 +3620,82 @@ view.addEventListener('change', e => {
 });
 /* Today at the range keeps itself up to date while it is on the screen (no-shows free their benches) */
 setInterval(() => { if (!document.hidden && currentPage === 'committee/range' && BENCH.day && BENCH.dayState !== 'loading' && confirmSheet.hidden) loadBenchDay(''); }, 60000);
+
+/* ---------- Handgun shoot calculator (v2.2.2): "How many shoots do I need?" ----------
+   For Category H licence holders, from the Queensland Police participation requirements. Nothing is sent
+   anywhere or saved: it is worked out on the phone. m = whole months the class has been held this financial year.
+   - One class: floor(6 x m / 12) competitions.
+   - Two or more: floor(4 x m / 12) shoots for each class; of the total, the competitions needed are the smaller of
+     the total and floor(6 x longest months / 12); Class C's own number must be accredited events. */
+const QPS_URL = 'https://www.police.qld.gov.au/weapon-licensing/concealable-firearms-class-and-participation-requirements';
+const HANDGUN_CLASSES = [['A', 'Air pistols', 'All air pistols'], ['B', 'Centre-fire up to .38 / 9mm', 'Includes black-powder pistols'],
+  ['C', 'Centre-fire over .38 up to .45', 'High-calibre class'], ['D', 'Rimfire pistols', 'e.g. .22']];
+/* held: [{key, months}] for the classes ticked */
+function shootsNeeded(held) {
+  if (!held.length) return { none: true };
+  if (held.length === 1) { const n = Math.floor(6 * held[0].months / 12); return { total: n, competitions: n, classes: [{ ...held[0], shoots: n }], accredited: null, partYear: false }; }
+  const classes = held.map(h => ({ ...h, shoots: Math.floor(4 * h.months / 12) })), total = classes.reduce((sum, c) => sum + c.shoots, 0);
+  const c = classes.find(x => x.key === 'C');
+  return { total, competitions: Math.min(total, Math.floor(6 * Math.max(...held.map(h => h.months)) / 12)), classes,
+    accredited: c ? c.shoots : null, partYear: held.some(h => h.months < 12) };
+}
+/* The financial year today falls in: 1 July to 30 June */
+function financialYear() { const d = new Date(), from = d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1; return { from, to: from + 1, label: `${from}–${String(from + 1).slice(2)}` }; }
+function calculatorView() {
+  const fy = financialYear();
+  return `
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Handgun shoot calculator</h1><p class="muted">How many shoots do I need? Financial year ${fy.label}.</p></div>
+    <section class="section"><form class="card form" id="calcForm" novalidate>
+      <p>For Category H (handgun) licence holders. Tick each class of pistol you have registered. It doesn't matter how many of each.</p>
+      ${HANDGUN_CLASSES.map(([key, name, hint]) => `<div class="calc-class">
+        <label class="choice"><input type="checkbox" id="calc${key}" data-calc-class="${key}">
+          <span><span class="choice-title">${key} – ${name}</span><span class="choice-text">${hint}</span></span></label>
+        <div class="calc-held" id="calcHeld${key}" hidden><label class="field-label" for="calcMonths${key}">Held</label>
+          <select class="field" id="calcMonths${key}" aria-label="Months you have held class ${key} this financial year">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}"${i === 11 ? ' selected' : ''}>${i + 1} month${i ? 's' : ''}</option>`).join('')}</select></div>
+      </div>`).join('')}
+      <p class="muted">“Held” = whole months you've had that class this financial year (1 July – 30 June). Leave at 12 if you've had it all year.</p>
+      <button type="submit" class="btn btn-primary btn-big">Work it out</button>
+    </form></section>
+    <section class="section" id="calcResult" aria-live="polite"></section>`;
+}
+function calculatorResult(r) {
+  const fy = financialYear(), plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`, name = key => HANDGUN_CLASSES.find(c => c[0] === key)[1];
+  const guide = `<p class="muted calc-guide">A guide only. Based on Queensland Police participation requirements. Only one shoot a day counts. Keep your own participation record signed by a range officer (not yourself). Check with QPS Weapons Licensing if unsure.
+    <a href="${QPS_URL}" target="_blank" rel="noopener">Queensland Police: classes and participation requirements</a></p>`;
+  if (r.none) return `<div class="card empty"><div class="empty-title">No shoot requirement</div>
+    <p class="muted">No shoot requirement, but you must stay a financial member of an approved Queensland pistol club.</p></div>${guide}`;
+  const one = r.classes.length === 1, row = (label, n, note) => `<div class="list-row"><div class="list-main"><div class="list-title">${label}</div>${note ? `<div class="muted">${note}</div>` : ''}</div><b class="calc-n">${n}</b></div>`;
+  return `
+    <div class="me-card calc-card">${ICON.rings}
+      <div class="me-card-club">FINANCIAL YEAR ${fy.label}</div>
+      <div class="calc-big"><b>${r.total}</b><span>${one ? `handgun shooting competition${r.total === 1 ? '' : 's'}` : `handgun shoot${r.total === 1 ? '' : 's'}`}</span></div>
+      <div>${r.total === 1 ? 'B' : 'Each on a different day, b'}etween 1 July ${fy.from} and 30 June ${fy.to}</div>
+    </div>
+    <div class="section-head"><h2 class="caps-head">By class</h2></div>
+    <div class="card list">${r.classes.map(c => row(`${c.key} – ${name(c.key)}`, c.shoots, `Held ${plural(c.months, 'month')}`)).join('')}</div>
+    <div class="section-head"><h2 class="caps-head">Of those</h2></div>
+    <div class="card list">
+      ${row('Competitions', r.competitions, one ? 'Every shoot must be a handgun shooting competition' : 'At least this many must be handgun shooting competitions')}
+      ${r.accredited === null ? '' : row('Class C accredited events', r.accredited, 'Metallic silhouette or single action')}
+    </div>
+    ${r.partYear ? '<p class="notice">Part-year with several classes – please check your exact numbers with QPS Weapons Licensing.</p>' : ''}
+    ${guide}`;
+}
+view.addEventListener('change', e => {
+  const key = e.target.dataset && e.target.dataset.calcClass;
+  if (!key) return;
+  document.getElementById('calcHeld' + key).hidden = !e.target.checked;
+  document.getElementById('calcResult').innerHTML = ''; // the answer on show no longer matches the ticks
+});
+view.addEventListener('submit', e => {
+  if (e.target.id !== 'calcForm') return;
+  e.preventDefault();
+  const held = HANDGUN_CLASSES.map(c => c[0]).filter(key => document.getElementById('calc' + key).checked)
+    .map(key => ({ key, months: Number(document.getElementById('calcMonths' + key).value) || 12 }));
+  const out = document.getElementById('calcResult');
+  out.innerHTML = calculatorResult(shootsNeeded(held));
+  out.scrollIntoView({ block: 'start', behavior: 'smooth' });
+});
 
 drawDot();
 render();
