@@ -1,10 +1,10 @@
-/* On Target v2.1.0 — app shell with live club data and club team tools
+/* On Target v2.1.1 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.1.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -151,6 +151,9 @@ const days = () => (DATA.results && DATA.results.days) || [];
 const photos = () => (DATA.photos && DATA.photos.photos) || [];
 
 /* ---------- Shared bits ---------- */
+/* The club website's pages, each named once. Join and Fees are the same page. */
+const SITE_URL = 'https://ravenshoegunclub.com.au';
+const JOIN_URL = SITE_URL + '/become-a-member', VISIT_URL = SITE_URL + '/visit-the-range', FAQ_URL = SITE_URL + '/faq';
 function skeletonRows(n) {
   return `<div class="card list" aria-busy="true">${Array.from({ length: n }, () =>
     '<div class="list-row"><span class="skel skel-circle"></span><div class="list-main"><span class="skel skel-line"></span><span class="skel skel-line short"></span></div></div>').join('')}</div>`;
@@ -237,10 +240,10 @@ const VIEWS = {
         : `<span class="eyebrow">Next at the range</span><span class="skel skel-line"></span><span class="skel skel-line short"></span>`}
       </section>
       <nav class="tiles" aria-label="Quick links">
-        <a class="tile" href="https://ravenshoegunclub.com.au" target="_blank" rel="noopener"><span class="tile-ico">${ICON.join}</span>Join</a>
-        <a class="tile" href="https://ravenshoegunclub.com.au" target="_blank" rel="noopener"><span class="tile-ico">${ICON.pin}</span>Visit us</a>
-        <a class="tile" href="https://ravenshoegunclub.com.au" target="_blank" rel="noopener"><span class="tile-ico">${ICON.fees}</span>Fees</a>
-        <a class="tile" href="https://ravenshoegunclub.com.au" target="_blank" rel="noopener"><span class="tile-ico">${ICON.help}</span>FAQs</a>
+        <a class="tile" href="${JOIN_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.join}</span>Join</a>
+        <a class="tile" href="${VISIT_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.pin}</span>Visit us</a>
+        <a class="tile" href="${JOIN_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.fees}</span>Fees</a>
+        <a class="tile" href="${FAQ_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.help}</span>FAQs</a>
       </nav>
       <section class="section">
         <div class="section-head"><h2>Latest results</h2><a href="#/results">All results</a></div>
@@ -490,7 +493,7 @@ function manageView() {
         <div class="card list">${evs.slice(split).map((ev, i) => row(ev, split + i)).join('')}</div>` : '');
     }
     if (manageTab === 'results') {
-      return MANAGE.results.length ? `<p class="muted">Share copies a caption with every competition from that day.</p>
+      return MANAGE.results.length ? `<p class="muted">Share makes a picture and a caption with every competition from that day. The picture shows the top 3 in each.</p>
         <div class="card list">${MANAGE.results.map((g, i) => `
         <div class="manage-item"><button type="button" class="list-row manage-row" data-edit="results:${i}"><span class="list-ico">${ICON.trophy}</span>
           <span class="list-main"><span class="list-title">${esc(g.competition || 'No name')}</span>
@@ -1974,7 +1977,7 @@ function photosCaption(list) {
 
 const shareText = document.getElementById('shareText'), shareStatus = document.getElementById('shareStatus'), shareError = document.getElementById('shareError');
 const sharePics = document.getElementById('sharePics'), shareGo = document.getElementById('shareGo'), shareSave = document.getElementById('shareSave'), shareCopy = document.getElementById('shareCopy');
-let SHARE = null, shareRun = 0; // {files: [File], urls: [for the previews]} while the share sheet is open
+let SHARE = null, shareRun = 0; // {files: [File], urls: [for the previews], word: 'picture' | 'photo' | 'photos'} while the share sheet is open
 
 function endShare() {
   if (SHARE) SHARE.urls.forEach(u => URL.revokeObjectURL(u));
@@ -1990,48 +1993,61 @@ async function copyCaption() {
   }
 }
 
-/* o: {text, photos: [{row, fp}] to fetch from the club Drive, or blobs: [Blob] already here, note} */
+/* o: {text, note, and one of: photos: [{row, fp}] to fetch from the club Drive, blobs: [Blob] already here,
+   or picture: {make, name} for the club-colours picture of an event or a day's results, which is drawn here} */
 async function openShare(o) {
   endShare();
-  const run = shareRun, count = (o.photos || o.blobs || []).length, word = count === 1 ? 'photo' : 'photos';
-  SHARE = { files: [], urls: [] };
+  const run = shareRun, count = o.picture ? 1 : (o.photos || o.blobs || []).length;
+  const word = o.picture ? 'picture' : count === 1 ? 'photo' : 'photos';
+  SHARE = { files: [], urls: [], word };
   shareText.value = o.text;
-  shareError.hidden = true; sharePics.hidden = !count;
+  shareError.hidden = true; sharePics.hidden = !count; sharePics.classList.toggle('share-card', !!o.picture);
   shareGo.hidden = true; shareSave.hidden = true;
   shareCopy.className = 'btn btn-big ' + (count ? 'btn-outline' : 'btn-primary');
   shareStatus.textContent = count ? `Getting the ${word} ready…` : '';
   openSheet(shareSheet, shareCopy);
   shareSheet.querySelector('.sheet-panel').scrollTop = 0;
-  const addFile = (blob, mime) => {
+  const addFile = (blob, mime, name) => {
     const ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : 'jpg';
-    const file = new File([blob], `rdss-photo-${SHARE.files.length + 1}.${ext}`, { type: mime || 'image/jpeg' });
+    const file = new File([blob], name || `rdss-photo-${SHARE.files.length + 1}.${ext}`, { type: mime || 'image/jpeg' });
     const url = URL.createObjectURL(file);
     SHARE.files.push(file); SHARE.urls.push(url);
-    sharePics.insertAdjacentHTML('beforeend', `<img src="${url}" alt="Photo ${SHARE.files.length} to share">`);
+    sharePics.insertAdjacentHTML('beforeend', `<img src="${url}" alt="${o.picture ? 'The picture' : 'Photo ' + SHARE.files.length} to share">`);
+  };
+  // Nothing to share but the words: the caption is the whole job
+  const captionOnly = why => {
+    sharePics.hidden = true; shareCopy.className = 'btn btn-big btn-primary';
+    shareStatus.textContent = (why ? why + ' ' : '') + 'Tap Copy caption, then paste it into a new post on Facebook or Instagram.';
   };
 
-  if (!count) { // events and results: the caption is the whole job
-    shareStatus.textContent = await copyCaption() ? 'The caption is copied. Paste it into a new post on Facebook or Instagram.' : 'Tap Copy caption, then paste it into a new post on Facebook or Instagram.';
-    return;
-  }
-  try {
-    (o.blobs || []).forEach(b => addFile(b, b.type));
-    for (const [i, ph] of (o.photos || []).entries()) {
-      shareStatus.textContent = `Getting photo ${i + 1} of ${count}…`;
-      const r = await committeeApi('photoForShare', [ph.row, ph.fp]);
-      if (run !== shareRun) return; // the sheet was closed meanwhile
-      addFile(await (await fetch(`data:${r.mime || 'image/jpeg'};base64,${r.b64}`)).blob(), r.mime || 'image/jpeg');
+  if (!count) return captionOnly();
+  if (o.picture) {
+    let blob = null;
+    try { blob = await o.picture.make(); } catch (e) { /* this device can't draw it: the caption still works */ }
+    if (run !== shareRun) return; // the sheet was closed meanwhile
+    if (!blob) return captionOnly('The picture could not be made on this device.');
+    addFile(blob, 'image/jpeg', o.picture.name);
+  } else {
+    try {
+      (o.blobs || []).forEach(b => addFile(b, b.type));
+      for (const [i, ph] of (o.photos || []).entries()) {
+        shareStatus.textContent = `Getting photo ${i + 1} of ${count}…`;
+        const r = await committeeApi('photoForShare', [ph.row, ph.fp]);
+        if (run !== shareRun) return; // the sheet was closed meanwhile
+        addFile(await (await fetch(`data:${r.mime || 'image/jpeg'};base64,${r.b64}`)).blob(), r.mime || 'image/jpeg');
+      }
+    } catch (err) {
+      if (err.signedOut || run !== shareRun) return;
+      if (CONFLICT.test(err.message)) { sheetOpener = null; closeSheets(); changed('photos', CONFLICT_NOTE); return go('#/committee/manage'); }
+      shareStatus.textContent = '';
+      shareError.textContent = err.message; shareError.hidden = false;
+      return;
     }
-  } catch (err) {
-    if (err.signedOut || run !== shareRun) return;
-    if (CONFLICT.test(err.message)) { sheetOpener = null; closeSheets(); changed('photos', CONFLICT_NOTE); return go('#/committee/manage'); }
-    shareStatus.textContent = '';
-    shareError.textContent = err.message; shareError.hidden = false;
-    return;
   }
-  // Phones and tablets hand the photos to the share sheet; laptops save them
+  // Phones and tablets hand the photos to the share sheet, and can save them too; laptops save them
   const phone = matchMedia('(pointer: coarse)').matches && !!navigator.canShare && navigator.canShare({ files: SHARE.files });
-  shareGo.hidden = !phone; shareSave.hidden = phone;
+  shareGo.hidden = !phone; shareSave.hidden = false;
+  shareSave.className = 'btn btn-big ' + (phone ? 'btn-outline' : 'btn-primary');
   shareGo.textContent = `Share ${word}`; shareSave.textContent = `Save ${word}`;
   shareStatus.textContent = (o.note ? o.note + ' ' : '') + (phone
     ? `Tap Share ${word} and choose Facebook or Instagram. The caption is copied for you: press and hold in the text box of your post, then tap Paste.`
@@ -2049,7 +2065,6 @@ shareGo.addEventListener('click', () => {
   copyCaption(); // not waited for: the share sheet must open straight from the tap
   navigator.share({ files: SHARE.files }).catch(err => {
     if (err && err.name === 'AbortError') return; // closed without sharing
-    shareSave.hidden = false;
     shareError.textContent = `Sharing isn't available here. Tap ${shareSave.textContent} instead, then add ${SHARE && SHARE.files.length === 1 ? 'it' : 'them'} to your post.`; shareError.hidden = false;
   });
 });
@@ -2062,8 +2077,119 @@ shareSave.addEventListener('click', () => {
     document.body.appendChild(a); a.click(); a.remove();
   }, i * 400));
   const n = SHARE.files.length;
-  shareStatus.textContent = `${n === 1 ? 'The photo is' : 'The ' + n + ' photos are'} saved where this device keeps downloads. Now tap Copy caption.`;
+  shareStatus.textContent = `${n === 1 ? 'The ' + SHARE.word + ' is' : 'The ' + n + ' photos are'} saved where this device keeps downloads. Now tap Copy caption.`
+    + (shareGo.hidden ? '' : ` On an iPhone, Share ${SHARE.word} then "Save Image" puts ${n === 1 ? 'it' : 'them'} in Photos.`);
 });
+
+/* ---------- The club-colours picture for an event or a day's results ----------
+   Drawn on a canvas, 1080 x 1350 (the shape Facebook and Instagram both take). Nothing is fetched to make it,
+   so it works without a connection and the canvas can always be saved as a picture. */
+const PIC_W = 1080, PIC_H = 1350;
+function picFit(x, text, maxW) {
+  text = String(text == null ? '' : text);
+  if (x.measureText(text).width <= maxW) return text;
+  while (text.length > 1 && x.measureText(text + '…').width > maxW) text = text.slice(0, -1);
+  return text + '…';
+}
+function picWrap(x, text, maxW, maxLines) {
+  let lines = [], cur = '';
+  String(text || '').replace(/\s+/g, ' ').trim().split(' ').forEach(w => {
+    const t = cur ? cur + ' ' + w : w;
+    if (x.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+  });
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) { lines = lines.slice(0, maxLines); lines[maxLines - 1] = picFit(x, lines[maxLines - 1] + ' …', maxW); }
+  return lines;
+}
+function picRound(x, l, t, w, h, r) {
+  x.beginPath(); x.moveTo(l + r, t);
+  x.arcTo(l + w, t, l + w, t + h, r); x.arcTo(l + w, t + h, l, t + h, r); x.arcTo(l, t + h, l, t, r); x.arcTo(l, t, l + w, t, r);
+  x.closePath();
+}
+/* The club's fonts must be loaded before a canvas can write with them; without them (no connection) it still draws */
+function picFonts() {
+  if (!document.fonts) return Promise.resolve();
+  const all = ['700 26px Montserrat', '800 52px Montserrat', '400 36px Poppins', '500 25px Poppins', '600 30px Poppins'].map(f => document.fonts.load(f));
+  return Promise.race([Promise.all(all), new Promise(ok => setTimeout(ok, 3000))]).catch(() => {});
+}
+/* The top and bottom of every picture: maroon band with the target rings, gold line, footer */
+function picFrame(x, kicker, title, footer) {
+  const W = PIC_W, H = PIC_H;
+  x.fillStyle = '#F6F2EE'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#5C0F1F'; x.fillRect(0, 0, W, 250);
+  x.fillStyle = '#E9B44C'; x.fillRect(0, 250, W, 8);
+  x.strokeStyle = '#E9B44C';
+  x.lineWidth = 22; x.beginPath(); x.arc(130, 125, 68, 0, Math.PI * 2); x.stroke();
+  x.lineWidth = 9; x.beginPath(); x.arc(130, 125, 36, 0, Math.PI * 2); x.stroke();
+  x.beginPath(); x.arc(130, 125, 15, 0, Math.PI * 2); x.fill();
+  x.font = '700 26px Montserrat, sans-serif'; x.fillText(kicker, 245, 92);
+  x.fillStyle = '#fff'; x.font = '800 52px Montserrat, sans-serif'; x.fillText(picFit(x, title, W - 290), 245, 152);
+  x.fillStyle = '#F0D5DA'; x.font = '500 25px Poppins, sans-serif'; x.fillText('Ravenshoe & District Sporting Shooters · SSAA Q48', 245, 198);
+  x.fillStyle = '#5C0F1F'; x.fillRect(0, H - 100, W, 100);
+  x.fillStyle = '#E9B44C'; x.fillRect(0, H - 10, W, 10);
+  x.fillStyle = '#fff'; x.font = '700 30px Montserrat, sans-serif'; x.textAlign = 'center';
+  x.fillText(picFit(x, footer, W - 80), W / 2, H - 42); x.textAlign = 'left';
+}
+/* A white card with a crimson top edge */
+function picPanel(x, l, t, w, h) {
+  x.save(); x.shadowColor = 'rgba(0,0,0,.08)'; x.shadowBlur = 18; x.shadowOffsetY = 4;
+  picRound(x, l, t, w, h, 22); x.fillStyle = '#fff'; x.fill(); x.restore();
+  x.save(); picRound(x, l, t, w, h, 22); x.clip(); x.fillStyle = '#9B1B35'; x.fillRect(l, t, w, 10); x.restore();
+}
+async function picMake(draw) {
+  await picFonts();
+  const c = document.createElement('canvas'); c.width = PIC_W; c.height = PIC_H;
+  draw(c.getContext('2d'));
+  return new Promise((ok, bad) => c.toBlob(b => b ? ok(b) : bad(new Error('no picture')), 'image/jpeg', 0.92));
+}
+/* One event: type, title, when, and as much of the description as fits */
+function eventPicture(ev) {
+  return picMake(x => {
+    const pad = 40, top = 300, h = PIC_H - 130 - top - 10, tw = PIC_W - pad * 2 - 100, when = timeRange(ev);
+    picFrame(x, 'COMING UP', longDate(ev.date), 'Visitors welcome · ' + SITE);
+    x.font = '800 64px Montserrat, sans-serif'; const title = picWrap(x, ev.title, tw, 3);
+    x.font = '400 36px Poppins, sans-serif'; const desc = ev.description ? picWrap(x, ev.description, tw, 7) : [];
+    // measured first, so the words sit in the middle of the card
+    const block = 40 + title.length * 76 + 40 + 60 + (desc.length ? 40 + desc.length * 52 : 0);
+    let y = top + Math.max(70, (h - block) / 2) + 30;
+    picPanel(x, pad, top, PIC_W - pad * 2, h);
+    x.fillStyle = '#9B1B35'; x.font = '700 28px Montserrat, sans-serif'; x.fillText(picFit(x, String(ev.discipline || 'Club event').toUpperCase(), tw), pad + 50, y); y += 82;
+    x.fillStyle = '#5C0F1F'; x.font = '800 64px Montserrat, sans-serif';
+    title.forEach(l => { x.fillText(l, pad + 50, y); y += 76; });
+    x.fillStyle = '#E9B44C'; x.fillRect(pad + 50, y - 30, 100, 7); y += 34;
+    x.fillStyle = '#1E1E1E'; x.font = '600 40px Poppins, sans-serif';
+    x.fillText(picFit(x, longDate(ev.date) + (when ? ' · ' + when : ''), tw), pad + 50, y);
+    x.fillStyle = '#4A4A4A'; x.font = '400 36px Poppins, sans-serif'; y += 80;
+    desc.forEach(l => { x.fillText(l, pad + 50, y); y += 52; });
+  });
+}
+/* One competition day: up to 6 competitions, the top 3 in each (the caption lists everyone) */
+function resultsPicture(date) {
+  const comps = MANAGE.results.filter(g => g.date === date);
+  return picMake(x => {
+    const list = comps.slice(0, 6), more = comps.length - list.length;
+    picFrame(x, 'COMPETITION RESULTS', longDate(date), (more > 0 ? `+${more} more competition${more === 1 ? '' : 's'} · ` : '') + 'Full results: ' + SITE + '/results');
+    const cols = list.length === 1 ? 1 : 2, rows = Math.ceil(list.length / cols), top = 290, bottom = PIC_H - 130, gap = 26, pad = 40;
+    const w = (PIC_W - pad * 2 - gap * (cols - 1)) / cols, h = Math.min(400, (bottom - top - gap * (rows - 1)) / rows);
+    const medal = ['#E9B44C', '#C9C9C9', '#CD7F32'];
+    list.forEach((g, k) => {
+      const l = pad + (k % cols) * (w + gap), t = top + Math.floor(k / cols) * (h + gap), step = Math.min(70, (h - 170) / 3);
+      picPanel(x, l, t, w, h);
+      x.fillStyle = '#5C0F1F'; x.font = '800 34px Montserrat, sans-serif'; x.fillText(picFit(x, g.competition, w - 56), l + 28, t + 66);
+      x.fillStyle = '#9B1B35'; x.font = '700 20px Montserrat, sans-serif'; x.fillText(picFit(x, String(g.discipline || 'Competition').toUpperCase(), w - 56), l + 28, t + 98);
+      g.rows.slice(0, 3).forEach((r, i) => {
+        const p = Number(r.place) || i + 1, y = t + 150 + i * step, score = String(r.score == null ? '' : r.score);
+        x.beginPath(); x.arc(l + 50, y - 11, 22, 0, Math.PI * 2); x.fillStyle = medal[p - 1] || '#EEE'; x.fill();
+        x.fillStyle = p === 3 ? '#fff' : '#5C0F1F'; x.font = '800 22px Montserrat, sans-serif'; x.textAlign = 'center'; x.fillText(String(p), l + 50, y - 3); x.textAlign = 'left';
+        x.font = '600 30px Poppins, sans-serif';
+        const sw = x.measureText(score).width;
+        x.fillStyle = '#1E1E1E'; x.fillText(picFit(x, r.shooter, w - 140 - sw - 20), l + 88, y);
+        x.fillStyle = '#5C0F1F'; x.textAlign = 'right'; x.fillText(score, l + w - 28, y); x.textAlign = 'left';
+      });
+      if (g.rows.length > 3) { x.fillStyle = '#6B6B6B'; x.font = '500 20px Poppins, sans-serif'; x.fillText(`+ ${g.rows.length - 3} more`, l + 28, t + h - 22); }
+    });
+  });
+}
 
 /* The Share button on an event or a result in Manage posts */
 function sharePost(what) {
@@ -2071,7 +2197,9 @@ function sharePost(what) {
   const item = (kind === 'event' ? manageEvents() : MANAGE.results)[Number(i)];
   if (!item) return;
   if (kind === 'event' && item.audience !== 'Everyone') return; // private and hidden events are never shared
-  openShare({ text: kind === 'event' ? eventCaption(item) : resultsCaption(item.date) });
+  openShare(kind === 'event'
+    ? { text: eventCaption(item), picture: { make: () => eventPicture(item), name: `rdss-event-${item.date}.jpg` } }
+    : { text: resultsCaption(item.date), picture: { make: () => resultsPicture(item.date), name: `rdss-results-${item.date}.jpg` } });
 }
 /* Manage posts, Photos: ticking photos to share */
 function togglePick(tile) {
@@ -2144,7 +2272,6 @@ const memberStore = {
 let member = memberStore.get();   // {token, initials, first, status} while a member is signed in on this device
 let ME = null, meState = '', meNote = '';
 let relinking = false;            // true while someone waiting for the club team is changing the details they sent
-const JOIN_URL = 'https://ravenshoegunclub.com.au/become-a-member';
 const ME_PILL = { current: ['ok', 'Current', ''], notRenewed: ['amber', 'Not renewed yet', ''], waiting: ['amber', 'Waiting for payment', 'Payment being checked'],
   overdue: ['red', 'Not financial – renewal overdue', ''], expired: ['grey', 'Expired', ''], none: ['grey', 'Not current', ''] };
 const meStatus = d => d.waiting || d.status === 'waiting' ? 'waiting' : ME_PILL[d.status] ? d.status : 'none';
@@ -2200,7 +2327,6 @@ async function loadMe() {
 }
 
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
-const SITE_URL = 'https://ravenshoegunclub.com.au';
 const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
 const menuLink = (icon, label, href) => `<a class="menu-row" href="${href}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
 
@@ -2225,8 +2351,8 @@ function meView(sub) {
     <section class="section">
       <div class="section-head"><h2 class="caps-head">Club</h2></div>
       <div class="card list">
-        ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', SITE_URL + '/visit-the-range')}
-        ${menuLink(ICON.help, 'FAQs', SITE_URL + '/faq')}
+        ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', VISIT_URL)}
+        ${menuLink(ICON.help, 'FAQs', FAQ_URL)}
         ${menuLink(ICON.web, 'Club website', SITE_URL)}
         ${menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
         ${isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`}

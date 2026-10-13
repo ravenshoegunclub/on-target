@@ -1,4 +1,4 @@
-/* On Target v2.1.0 — club styles */
+/* On Target v2.1.1 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -483,6 +483,7 @@ select.field { -webkit-appearance: none; appearance: none; background-image: lin
 .share-panel .btn[hidden] { display: none; }
 .share-pics img { height: 96px; width: 96px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: var(--tint); }
 .share-pics img:only-child { width: 100%; height: auto; max-height: 200px; object-fit: contain; }
+.share-pics.share-card img:only-child { max-height: 34vh; border-radius: 12px; box-shadow: 0 0 0 1px var(--line); }
 .sheet-hint { font-size: 14px; text-align: center; }
 .empty .btn-row .share-added { flex-basis: 100%; }
 
