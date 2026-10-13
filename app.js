@@ -1,10 +1,10 @@
-/* On Target v2.1.2 — app shell with live club data and club team tools
+/* On Target v2.2.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.1.2';
+const APP_VERSION = '2.2.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -38,6 +38,7 @@ const ICON = {
   help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg>',
   card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.5 1.7-2.2 3-2.2s2.4.7 3 2.2M14 10h4M14 14h4"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
+  bench: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18M6 9v10M18 9v10M6 14h12M9 9V5h6v4"/></svg>',
   doc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
@@ -226,6 +227,8 @@ function homeMember() {
 }
 /* The four buttons on Home. Renew takes the place of Documents once a member needs to renew. */
 const RENEW_DUE = ['notRenewed', 'overdue', 'expired'];
+const BOOK_OK = ['current', 'notRenewed']; // financial members: the ones who can book a bench
+const homeLink = (icon, label, href) => `<a class="menu-row" href="${href}"><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
 function homeTiles(mine) {
   const tile = (icon, label, href) => `<a class="tile" href="${esc(href)}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}</a>`;
   if (!mine) return tile(ICON.join, 'Join', JOIN_URL) + tile(ICON.pin, 'Visit us', VISIT_URL) + tile(ICON.fees, 'Fees', JOIN_URL) + tile(ICON.help, 'FAQs', FAQ_URL);
@@ -262,6 +265,7 @@ const VIEWS = {
       <nav class="tiles" aria-label="Quick links">
         ${homeTiles(mine)}
       </nav>
+      ${mine && BOOK_OK.includes(mine.status) ? `<section class="section"><div class="card list">${homeLink(ICON.bench, 'Book a bench', '#/me/book')}</div></section>` : ''}
       <section class="section">
         <div class="section-head"><h2>Latest results</h2><a href="#/results">All results</a></div>
         ${state('results', 2, () => latest ? `
@@ -354,6 +358,10 @@ const VIEWS = {
     if (sub === 'manage') return manageView();
     if (sub === 'emergency') return emergencyView();
     if (sub === 'documents') return docsAdminView();
+    if (sub === 'range') return rangeView();
+    if (sub === 'walkin') return walkInView();
+    if (sub === 'reserve') return reserveView();
+    if (sub === 'requests') return benchRequestsView();
     if (sub === 'document') {
       if (!docEdit) { location.replace('#/committee/documents'); return ''; } // e.g. the page was reloaded
       return docForm(docEdit);
@@ -938,7 +946,7 @@ function unreadBadge() {
   return msgUnread ? `<span class="count-badge" aria-label="${msgUnread} new messages">${msgUnread} new</span>` : '';
 }
 /* The red dot on the Me button: new messages for the club team */
-function drawDot() { document.getElementById('meDot').hidden = !(session && msgUnread); }
+function drawDot() { document.getElementById('meDot').hidden = !(session && (msgUnread || BENCH.waiting)); }
 async function loadUnread(force) {
   if (!session || (!force && Date.now() - unreadAt < 60000)) return;
   unreadAt = Date.now();
@@ -1618,8 +1626,8 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'details', 'email', 'documents'].includes(sub) ? '/' + sub : '');
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request'].includes(sub) ? '/' + sub : '');
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -1633,6 +1641,7 @@ function render(quiet) {
     if (page !== 'committee/person') personEdit = null;
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
+    benchLeave(page);
     if (page !== 'me/email') emailChange = null;
     if (page !== 'committee/emergency') EMERG = blankEmerg();
     if (page !== 'committee/document') { docEdit = null; docFile = null; docBusy = false; }
@@ -1881,7 +1890,7 @@ function signOut() {
   session = null; sessionStore.set(null);
   if (!member) { ME = null; meState = ''; meNote = ''; } // the membership their PIN was showing
   EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; docFile = null; DOCS = null; docsState = '';
-  MEMBERS = null; membersFailed = false;
+  MEMBERS = null; membersFailed = false; BENCH = blankBench();
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = ''; sharePick = null; ADDED = [];
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
   msgOpen = null; msgOpenState = ''; msgUnread = null; unreadAt = 0; SAVED = null;
@@ -2312,6 +2321,7 @@ async function memberApi(fn, args) {
   }
 }
 function forgetMember() {
+  BENCH = blankBench();
   member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
   if (location.hash.indexOf('#/me/') === 0) location.hash = '#/me'; else render();
 }
@@ -2355,7 +2365,10 @@ function meView(sub) {
   else if (sub === 'results') return meResults();
   else if (sub === 'details') return meDetails();
   else if (sub === 'email') return meEmail();
-  if (session) { loadUnread(); if (session.admin) loadAdminSummary(); }
+  else if (sub === 'book') return bookView();
+  else if (sub === 'bookings') return bookingsView();
+  else if (sub === 'request') return requestView();
+  if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); }
   const first = (linked && ME.first) || (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
   const canSeeDocs = session || linked || (member && member.status);
   // Signed in with a PIN that no admin has linked to a membership yet
@@ -2481,7 +2494,11 @@ function meCard() {
       <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>My results<span class="tile-sub">${esc(resultsSummary())}</span></a>
       ${renewTile}
       <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email, mobile, emergency contact</span></a>
-    </nav></section>`;
+    </nav>
+    ${canBook() ? `<div class="card list">
+      ${menuLink(ICON.bench, 'Book a bench', '#/me/book')}
+      ${menuLink(ICON.calendar, 'My bookings', '#/me/bookings')}
+    </div>` : ''}</section>`;
 }
 
 /* The club team's tools, on Me for anyone signed in with a PIN */
@@ -2503,6 +2520,12 @@ function clubAdminBlock() {
       <div class="card list sub-gap">
         <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
         <a class="menu-row" href="#/committee/documents"><span class="tile-ico">${ICON.doc}</span>Club documents${ICON.chev}</a>
+      </div>
+      <h3 class="sub-head">Bench bookings</h3>
+      <div class="card list">
+        <a class="menu-row" href="#/committee/range"><span class="tile-ico">${ICON.check}</span>Today at the range${ICON.chev}</a>
+        <a class="menu-row" href="#/committee/reserve"><span class="tile-ico">${ICON.trophy}</span>Reserve for a competition${ICON.chev}</a>
+        <a class="menu-row" href="#/committee/requests"><span class="tile-ico">${ICON.calendar}</span>Booking requests${BENCH.waiting ? `<span class="count-badge" aria-label="${BENCH.waiting} waiting">${BENCH.waiting}</span>` : ''}${ICON.chev}</a>
       </div>
       ${session.admin ? `<h3 class="sub-head">Admin</h3>
         ${sum ? `<div class="admin-counts">
@@ -3059,6 +3082,523 @@ function askSignup(i, link) {
     yes: 'Yes, send the email', busy: 'Sending…', no: 'No, go back', run: () => committeeApi('memberLinkDecline', [r.id]), done
   });
 }
+
+/* ---------- Bench booking (v2.2.0) ----------
+   Members book a bench for a range day and ask for one on an appointment day. The club team reserves benches
+   for competitions, ticks people in, adds walk-ins and answers requests. The settings (benches, range days,
+   session times) live on the server and arrive with the data: nothing about them is written here.
+   Everything is kept in memory only. */
+const blankBench = () => ({ info: null, infoState: '', infoError: '', note: '', error: '', busy: false,
+  pick: { date: '', range: '', session: '', bench: 0 }, map: null, mapState: '', mapError: '', mapRun: 0,
+  day: null, dayState: '', dayRun: 0, dayNote: '', events: null, eventsState: '', allEvents: false, res: null,
+  reqs: null, reqState: '', reqNote: '', answers: {}, waiting: 0, countAt: 0 });
+let BENCH = blankBench();
+const SESSION_KEYS = ['early', 'late', 'whole'];
+/* Only financial members can book: the same two statuses the server allows */
+const canBook = () => !!(ME && ME.linked && BOOK_OK.includes(meStatus(ME)));
+const benchDayLabel = iso => { const d = parseDate(iso); return `${DAYS_LONG[d.getDay()]} ${d.getDate()} ${mon(d)}`; };
+const sessionTimes = t => t && t[0] ? `${niceTime(t[0])} to ${niceTime(t[1])}` : '';
+const rangeOf = (list, key) => (list || []).find(r => r.key === key) || { key, name: key, benches: 0, big: [] };
+const sessionsClash = (a, b) => a === b || a === 'whole' || b === 'whole';
+const benchList = ns => ns.length > 1 ? ns.slice(0, -1).join(', ') + ' and ' + ns[ns.length - 1] : String(ns[0] || '');
+const stepHead = (n, text) => `<h2 class="step-head"><span class="step-n">${n}</span>${text}</h2>`;
+const benchFailed = () => /reach the club/i.test(BENCH.infoError) || !BENCH.infoError ? loadFailed('bench booking', 'data-bench-reload')
+  : `<div class="card empty"><div class="empty-title">Bench booking isn't open to you yet</div><p class="muted">${esc(BENCH.infoError)}</p></div>`;
+const benchLegend = (items, big) => `<ul class="bench-legend">${items.map(([cls, text]) => `<li><span class="bench-key ${cls}"></span>${text}</li>`).join('')}
+  ${big ? '<li><span class="bench-key bench-big"></span>Big calibres and muzzle brakes</li>' : ''}</ul>`;
+
+/* Leaving the bench screens: messages are forgotten, and lists are fetched afresh next time */
+function benchLeave(page) {
+  if (page !== 'me/book' && page !== 'me/bookings' && page !== 'me/request') { BENCH.info = null; BENCH.infoState = ''; BENCH.note = ''; }
+  if (page !== 'me/book') { BENCH.pick = { date: '', range: '', session: '', bench: 0 }; BENCH.map = null; BENCH.mapState = ''; BENCH.error = ''; BENCH.mapRun++; }
+  if (page !== 'committee/range' && page !== 'committee/walkin' && page !== 'committee/reserve') { BENCH.day = null; BENCH.dayState = ''; BENCH.dayRun++; }
+  if (page !== 'committee/range') BENCH.dayNote = '';
+  if (page !== 'committee/reserve') { BENCH.res = null; BENCH.events = null; BENCH.eventsState = ''; BENCH.allEvents = false; }
+  if (page !== 'committee/requests') { BENCH.reqs = null; BENCH.reqState = ''; BENCH.reqNote = ''; BENCH.answers = {}; }
+}
+
+/* ----- Members ----- */
+async function loadBenchInfo() {
+  if (BENCH.infoState === 'loading') return;
+  BENCH.infoState = 'loading';
+  const auth = meAuth();
+  try {
+    const d = await memberApi('benchInfo');
+    if (auth !== meAuth()) { BENCH.infoState = ''; return; }
+    BENCH.info = d; BENCH.infoState = '';
+  } catch (e) { if (e.signedOut) return; BENCH.infoState = 'failed'; BENCH.infoError = e.message; }
+  if (['me/book', 'me/bookings', 'me/request'].includes(currentPage)) render(true);
+}
+async function loadBenchMap() {
+  const { date, range } = BENCH.pick, run = ++BENCH.mapRun;
+  if (!date || !range) return;
+  BENCH.map = null; BENCH.mapState = 'loading';
+  try {
+    const d = await memberApi('benchMap', [date, range]);
+    if (run !== BENCH.mapRun) return;
+    BENCH.map = d; BENCH.mapState = '';
+  } catch (e) { if (e.signedOut || run !== BENCH.mapRun) return; BENCH.mapState = 'failed'; BENCH.mapError = e.message; }
+  if (currentPage === 'me/book') render(true);
+}
+/* A bench for the chosen session: 'free', 'taken', 'competition' or 'mine'. A whole session needs Early and Late both free. */
+function benchState(b, session) {
+  const s = session === 'whole' ? [b.early, b.late] : [b[session]];
+  return s.includes('mine') ? 'mine' : s.includes('competition') ? 'competition' : s.includes('taken') ? 'taken' : 'free';
+}
+const BENCH_WORD = { free: 'free', taken: 'taken', competition: 'kept for a competition', mine: 'yours' };
+
+function bookView() {
+  if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
+  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Book a bench</h1></div>`;
+  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(3)}</section>`;
+  const info = BENCH.info, p = BENCH.pick, day = info.days.find(d => d.date === p.date), range = rangeOf(info.ranges, p.range), map = BENCH.map;
+  if (!info.days.length) return head + `<section class="section">${empty('No range days to book', 'Please check back soon.')}</section>`;
+  const freeIn = s => map.benches.filter(b => benchState(b, s) === 'free').length;
+  const over = s => !!(map && map.ended && map.ended.early && s === 'early');
+  const sessions = () => SESSION_KEYS.map(s => {
+    const free = map ? freeIn(s) : null, off = over(s) || free === 0;
+    return `<button type="button" class="opt" data-bk-session="${s}" aria-pressed="${p.session === s}"${off ? ' disabled' : ''}>
+      <span class="opt-title">${esc(info.sessions[s])}</span>
+      <span class="opt-text">${esc(sessionTimes(day.times[s]))}${over(s) ? ' · finished' : free === null ? '' : free ? ` · ${free} bench${free === 1 ? '' : 'es'} free` : ' · full'}</span></button>`;
+  }).join('');
+  const benches = () => `<div class="bench-map" role="group" aria-label="Benches on the ${esc(range.name)}">${map.benches.map(b => {
+    const st = benchState(b, p.session), on = p.bench === b.n;
+    return `<button type="button" class="bench bench-${st}${b.big ? ' bench-big' : ''}" data-bk-bench="${b.n}" aria-pressed="${on}"${st === 'free' ? '' : ' disabled'}
+      aria-label="Bench ${b.n}, ${BENCH_WORD[st]}${b.big ? ', for big calibres and muzzle brakes' : ''}"><b>${b.n}</b><span>${st === 'taken' ? 'Taken' : st === 'competition' ? 'Comp' : st === 'mine' ? 'Yours' : on ? 'Chosen' : 'Free'}</span></button>`;
+  }).join('')}</div>
+    ${benchLegend([['bench-free', 'Free'], ['bench-taken', 'Taken'], ['bench-competition', 'Competition']], range.big.length)}
+    ${range.big.length ? `<p class="muted bench-note">Benches ${benchList(range.big)}: ${esc(info.bigNote.charAt(0).toLowerCase() + info.bigNote.slice(1))}.</p>` : ''}`;
+  const mine = map && map.mine;
+  return `${head}
+    <section class="section">
+      ${stepHead(1, 'Which day?')}
+      <div class="chips">${info.days.map(d => `<button type="button" class="chip-btn" data-bk-day="${d.date}" aria-pressed="${p.date === d.date}">${shortDate(d.date)}</button>`).join('')}</div>
+      <p class="muted">You can book up to ${info.weeksAhead} weeks ahead.</p>
+    </section>
+    ${day ? `<section class="section">
+      ${stepHead(2, 'Which range?')}
+      <div class="seg" role="group" aria-label="Range">${info.ranges.map(r => `<button type="button" data-bk-range="${r.key}" aria-pressed="${p.range === r.key}">${esc(r.name.replace(/ range$/, ''))}</button>`).join('')}</div>
+    </section>` : ''}
+    ${day && p.range ? `<section class="section">
+      ${map ? (mine ? `<p class="notice" role="status">You already have bench ${mine.bench} (${esc(info.sessions[mine.session])}) on the ${esc(range.name)} this day. To choose a different one, cancel it in <a href="#/me/bookings">My bookings</a> first.</p>`
+        : `${stepHead(3, 'Which session?')}<div class="opts">${sessions()}</div>`)
+      : BENCH.mapState === 'failed' ? `<div class="card empty"><div class="empty-title">Can't load the benches</div><p class="muted">${esc(BENCH.mapError)}</p>
+        <button type="button" class="btn btn-outline" data-bk-map>${ICON.refresh}Try again</button></div>` : skeletonRows(2)}
+    </section>` : ''}
+    ${day && map && !mine && p.session ? `<section class="section">
+      ${stepHead(4, 'Choose a bench')}
+      ${benches()}
+      ${BENCH.error ? `<p class="form-error" role="alert">${esc(BENCH.error)}</p>` : ''}
+      <div class="pick-bar"><button type="button" class="btn btn-primary btn-big" data-bk-go${p.bench && !BENCH.busy ? '' : ' disabled'}>${BENCH.busy ? 'Booking…' : p.bench ? `Book bench ${p.bench} · ${esc(info.sessions[p.session])}` : 'Choose a bench'}</button></div>
+    </section>` : ''}`;
+}
+async function bookBench() {
+  const p = BENCH.pick;
+  if (BENCH.busy || !p.bench) return;
+  BENCH.busy = true; BENCH.error = ''; render(true);
+  try {
+    const out = await memberApi('benchBook', [p.date, p.range, p.session, p.bench]);
+    BENCH.busy = false; BENCH.info = null; BENCH.infoState = ''; BENCH.note = (out && out.message) || 'Your bench is booked.';
+    go('#/me/bookings');
+  } catch (e) {
+    BENCH.busy = false;
+    if (e.signedOut) return;
+    BENCH.error = e.message; BENCH.pick.bench = 0;
+    render(true); loadBenchMap(); // someone else may have just taken it: show the benches as they are now
+  }
+}
+
+const bookingStarted = b => { const now = new Date(), t = time24(b.start) || '00:00'; return b.date < todayIso() || (b.date === todayIso() && now.getHours() * 60 + now.getMinutes() >= Number(t.slice(0, 2)) * 60 + Number(t.slice(3))); };
+function bookingsView() {
+  if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
+  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>My bookings</h1></div>`;
+  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(2)}</section>`;
+  const info = BENCH.info, what = x => `${esc(info.sessions[x.session])}${x.start ? ' · ' + esc(sessionTimes([x.start, x.end])) : ''}`;
+  const pill = { Waiting: 'amber', Declined: 'grey' };
+  return `${head}
+    <section class="section">
+      ${BENCH.note ? `<p class="notice" role="status">${esc(BENCH.note)}</p>` : ''}
+      ${info.bookings.length ? info.bookings.map((b, i) => `
+        <article class="card book-card">
+          <div class="event-row">${dateBlock(b.date)}
+            <div><div class="event-title">Bench ${b.bench} · ${esc(rangeOf(info.ranges, b.range).name)}</div>
+              <div class="muted">${esc(DAYS_LONG[parseDate(b.date).getDay()])} · ${what(b)}</div>
+              ${b.status === 'Arrived' ? '<span class="me-pill me-pill-ok">You are ticked in</span>' : ''}</div></div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-outline" data-bk-cal="${i}">${ICON.calendar}Add to calendar</button>
+            ${bookingStarted(b) ? '' : `<button type="button" class="btn btn-outline" data-bk-cancel="${i}">${ICON.close}Cancel</button>`}
+          </div>
+        </article>`).join('') : empty('No bookings coming up', 'When you book a bench it appears here.')}
+      <a class="btn btn-primary btn-big" href="#/me/book">${ICON.bench}Book a bench</a>
+      <p class="muted">Please arrive on time: a bench nobody has been ticked in to is given to someone else ${info.noShowMinutes} minutes after the session starts.</p>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2>Another day?</h2></div>
+      <p class="muted">On a Tuesday, Thursday or Friday the range opens by appointment. Ask for a bench and a range officer will answer by email.</p>
+      ${info.requests.length ? `<div class="card list">${info.requests.map((r, i) => `
+        <div class="list-row"><div class="list-main"><div class="list-title">${esc(benchDayLabel(r.date))} · ${esc(rangeOf(info.ranges, r.range).name)}</div>
+          <div class="muted">${esc(info.sessions[r.session])}${r.note ? ' · “' + esc(r.note) + '”' : ''}</div>
+          <div class="lab-row"><span class="me-pill me-pill-${pill[r.status] || 'grey'}">${esc(r.status)}</span></div>
+          ${r.answer ? `<div class="muted">Range officer: ${esc(r.answer)}</div>` : ''}</div>
+          ${r.status === 'Waiting' ? `<button type="button" class="link-btn" data-bk-unask="${i}">Cancel</button>` : ''}</div>`).join('')}</div>` : ''}
+      ${info.appointmentDays.length ? `<a class="btn btn-outline btn-big" href="#/me/request">${ICON.calendar}Request a booking</a>` : ''}
+    </section>`;
+}
+function bookingToCalendar(b) {
+  const range = rangeOf(BENCH.info.ranges, b.range).name;
+  addToCalendar({ date: b.date, start: b.start, end: b.end, title: `Bench ${b.bench}, ${range}`, discipline: `${BENCH.info.sessions[b.session]}: bench ${b.bench} on the ${range}`, description: 'Booked in On Target.' });
+}
+function askCancelBooking(i) {
+  const b = BENCH.info && BENCH.info.bookings[i];
+  if (!b) return;
+  confirmAsk({ title: 'Cancel this booking?', text: `Bench ${b.bench} on the ${rangeOf(BENCH.info.ranges, b.range).name}, ${benchDayLabel(b.date)}. The bench goes back for someone else to book.`,
+    yes: 'Yes, cancel it', busy: 'Cancelling…', no: 'No, keep it', run: () => memberApi('benchCancel', [b.id]),
+    done: out => { BENCH.note = (out && out.message) || 'Cancelled.'; BENCH.info = null; BENCH.infoState = ''; render(true); } });
+}
+function askCancelRequest(i) {
+  const r = BENCH.info && BENCH.info.requests[i];
+  if (!r) return;
+  confirmAsk({ title: 'Cancel this request?', text: `${benchDayLabel(r.date)}, ${rangeOf(BENCH.info.ranges, r.range).name}.`,
+    yes: 'Yes, cancel it', busy: 'Cancelling…', no: 'No, keep it', run: () => memberApi('benchRequestCancel', [r.id]),
+    done: out => { BENCH.note = (out && out.message) || 'Cancelled.'; BENCH.info = null; BENCH.infoState = ''; render(true); } });
+}
+
+const radios = (name, list, picked) => list.map(([value, title, text]) => `<label class="choice"><input type="radio" name="${name}" value="${esc(value)}"${value === picked ? ' checked' : ''}>
+  <span><span class="choice-title">${esc(title)}</span>${text ? `<span class="choice-text">${esc(text)}</span>` : ''}</span></label>`).join('');
+function requestView() {
+  if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
+  const head = `<div class="page-title"><a class="back-link" href="#/me/bookings">${ICON.chev}My bookings</a><h1>Request a booking</h1>
+    <p class="muted">For a Tuesday, Thursday or Friday. A range officer will answer by email.</p></div>`;
+  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(3)}</section>`;
+  const info = BENCH.info, days = info.appointmentDays;
+  if (!days.length) return head + `<section class="section">${empty('No days to ask for', 'Please check back soon.')}</section>`;
+  return `${head}
+    <section class="section"><form class="card form" id="benchReqForm" novalidate>
+      <label class="field-label" for="rqDay">Which day?</label>
+      <select class="field" id="rqDay"><option value="">Choose a day…</option>${days.map(d => `<option value="${d.date}">${esc(benchDayLabel(d.date))}</option>`).join('')}</select>
+      <fieldset class="choices"><legend class="field-label">Which range?</legend>${radios('rqRange', info.ranges.map(r => [r.key, r.name]), '')}</fieldset>
+      <fieldset class="choices"><legend class="field-label">Which session?</legend>${radios('rqSession', SESSION_KEYS.map(s => [s, info.sessions[s], sessionTimes(days[0].times[s])]), '')}</fieldset>
+      <label class="field-label" for="rqNote">Anything the range officer should know? <span class="field-hint">optional</span></label>
+      <textarea class="field" id="rqNote" rows="3" maxlength="300"></textarea>
+      <p class="form-error" id="rqError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="rqSubmit">Send request</button>
+    </form></section>`;
+}
+async function sendBenchRequest(form) {
+  const btn = form.querySelector('#rqSubmit'), error = form.querySelector('#rqError');
+  if (btn.disabled) return;
+  const pick = n => (form.querySelector(`input[name="${n}"]:checked`) || {}).value || '';
+  const d = { date: form.querySelector('#rqDay').value, range: pick('rqRange'), session: pick('rqSession'), note: form.querySelector('#rqNote').value.trim() };
+  const fail = msg => { error.textContent = msg; error.hidden = false; };
+  if (!d.date) return fail('Please choose a day.');
+  if (!d.range) return fail('Please choose Pistol or Rifle.');
+  if (!d.session) return fail('Please choose Early, Late or Whole session.');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const out = await memberApi('benchRequest', [d]);
+    BENCH.info = null; BENCH.infoState = ''; BENCH.note = (out && out.message) || 'Your request has been sent.';
+    go('#/me/bookings');
+  } catch (e) { if (e.signedOut) return; btn.disabled = false; btn.textContent = 'Send request'; fail(e.message); }
+}
+
+/* ----- Club team ----- */
+const rangeBack = `<a class="back-link" href="#/committee/range">${ICON.chev}Today at the range</a>`;
+async function loadBenchDay(date) {
+  const run = ++BENCH.dayRun;
+  BENCH.dayState = 'loading';
+  try {
+    const d = await committeeApi('benchDay', [date || '']);
+    if (run !== BENCH.dayRun) return;
+    BENCH.day = d; BENCH.dayState = '';
+    if (BENCH.res && BENCH.res.event) resetReserve();
+  } catch (e) { if (e.signedOut || run !== BENCH.dayRun) return; BENCH.dayState = 'failed'; }
+  if (['committee/range', 'committee/reserve'].includes(currentPage)) render(true);
+}
+async function loadBenchCount(force) {
+  if (!session || (!force && Date.now() - BENCH.countAt < 60000)) return;
+  BENCH.countAt = Date.now();
+  try {
+    const n = Number((await committeeApi('benchRequestCount')).waiting) || 0;
+    if (n === BENCH.waiting) return;
+    BENCH.waiting = n; drawDot();
+    if (currentPage === 'me') render(true);
+  } catch (e) { /* the count is only a guide */ }
+}
+/* The bookings holding a bench on the day that is loaded (no-shows have let theirs go) */
+const holding = b => b.status === 'Booked' || b.status === 'Arrived';
+const freeBenches = (range, session) => Array.from({ length: range.benches }, (_, i) => i + 1)
+  .filter(n => !BENCH.day.bookings.some(b => b.range === range.key && b.bench === n && holding(b) && sessionsClash(b.session, session)));
+const WALK_TAG = { 'Walk-in (member)': 'Walk-in', 'Walk-in (visitor)': 'Visitor' };
+
+function rangeView() {
+  const day = BENCH.day;
+  if ((!day || !day.today) && BENCH.dayState !== 'failed' && BENCH.dayState !== 'loading') setTimeout(() => loadBenchDay(''), 0);
+  const head = `<div class="page-title">${adminBack}<h1>Today at the range</h1>${day && day.today ? `<p class="muted">${esc(benchDayLabel(day.date))} · as at ${esc(niceTime(day.now))}</p>` : ''}</div>`;
+  if (!day || !day.today) return head + `<section class="section">${BENCH.dayState === 'failed' ? loadFailed('today\'s bookings', 'data-range-reload') : skeletonRows(4)}</section>`;
+  const person = b => {
+    const tag = WALK_TAG[b.kind], gone = b.status === 'No-show', here = b.status === 'Arrived';
+    return `<div class="range-row${gone ? ' range-gone' : ''}"><span class="bench-no" aria-hidden="true">${b.bench}</span>
+      <div class="list-main"><div class="list-title">${esc(b.name)}</div>
+        <div class="muted"><span class="sr-only">Bench ${b.bench}. </span>${esc(day.sessions[b.session])}${tag ? ' · ' + tag : ''}</div>
+        ${gone ? '<span class="me-pill me-pill-grey">No-show: bench freed</span>' : here ? '' : `<div class="muted">Bench is freed at ${esc(niceTime(b.freeAt))} if not ticked in</div>`}
+        ${tag && here ? `<button type="button" class="link-btn range-off" data-range-off="${esc(b.id)}">Take off the bench</button>` : ''}</div>
+      ${here ? `<button type="button" class="btn tick tick-on" data-range-untick="${esc(b.id)}" aria-pressed="true">${ICON.check}Here</button>`
+        : `<button type="button" class="btn btn-outline tick" data-range-tick="${esc(b.id)}" aria-pressed="false">Tick in</button>`}</div>`;
+  };
+  const ranges = day.ranges.map(r => {
+    const all = day.bookings.filter(b => b.range === r.key), comps = all.filter(b => b.kind === 'Competition'), people = all.filter(b => b.kind !== 'Competition')
+      .sort((a, b) => a.bench - b.bench || SESSION_KEYS.indexOf(a.session) - SESSION_KEYS.indexOf(b.session));
+    const groups = {};
+    comps.forEach(b => { const k = b.name + '|' + b.session; (groups[k] = groups[k] || { name: b.name, session: b.session, benches: [] }).benches.push(b.bench); });
+    const free = ['early', 'late'].map(s => [s, freeBenches(r, s)]);
+    return `<div class="section-head"><h2>${esc(r.name)}</h2></div>
+      ${Object.values(groups).map(g => `<p class="notice comp-note"><b>Competition: ${esc(g.name)}</b><br>Bench${g.benches.length === 1 ? '' : 'es'} ${benchList(g.benches.sort((a, b) => a - b))} · ${esc(day.sessions[g.session])}</p>`).join('')}
+      ${people.length ? `<div class="card list">${people.map(person).join('')}</div>` : comps.length ? '' : '<p class="muted">Nobody is booked on this range today.</p>'}
+      <p class="muted">${free.map(([s, ns]) => `Free, ${esc(day.sessions[s]).toLowerCase()}: ${ns.length === r.benches ? 'all ' + r.benches + ' benches' : ns.length ? benchList(ns) : 'none'}`).join('<br>')}</p>`;
+  }).join('');
+  return `${head}
+    <section class="section">
+      ${BENCH.dayNote ? `<p class="notice" role="status">${esc(BENCH.dayNote)}</p>` : ''}
+      <a class="btn btn-primary btn-big" href="#/committee/walkin">${ICON.plus}Add a walk-in</a>
+      ${ranges}
+      <button type="button" class="btn btn-outline" data-range-reload>${ICON.refresh}Refresh</button>
+    </section>`;
+}
+async function tickIn(btn, id, arrived) {
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = arrived ? 'Ticking in…' : 'Unticking…';
+  try { BENCH.dayNote = ((await committeeApi('benchArrive', [id, arrived])) || {}).message || ''; }
+  catch (e) { if (e.signedOut) return; BENCH.dayNote = e.message; }
+  loadBenchDay('');
+}
+function askTakeOff(id) {
+  const b = BENCH.day && BENCH.day.bookings.find(x => x.id === id);
+  if (!b) return;
+  confirmAsk({ title: `Take ${b.name} off bench ${b.bench}?`, text: 'The bench becomes free for someone else.', yes: 'Yes, free the bench', busy: 'Freeing…', no: 'No, go back',
+    run: () => committeeApi('benchRelease', [id]), done: out => { BENCH.dayNote = (out && out.message) || 'Done.'; loadBenchDay(''); } });
+}
+
+function walkInView() {
+  const day = BENCH.day;
+  if (!day || !day.today) { location.replace('#/committee/range'); return ''; } // e.g. the page was reloaded
+  const mins = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3)), session = mins(day.now) >= mins(day.times.early[1]) ? 'late' : 'early', range = day.ranges[day.ranges.length - 1];
+  return `
+    <div class="page-title">${rangeBack}<h1>Add a walk-in</h1><p class="muted">Someone who has turned up without a booking. They are ticked in straight away.</p></div>
+    <section class="section"><form class="card form" id="walkInForm" novalidate>
+      <label class="field-label" for="wkName">Their name</label>
+      <input class="field" id="wkName" maxlength="60" autocomplete="off" autocapitalize="words">
+      <fieldset class="choices"><legend class="field-label">Member or visitor?</legend>${radios('wkKind', [['member', 'Member'], ['visitor', 'Visitor']], 'member')}</fieldset>
+      <fieldset class="choices"><legend class="field-label">Which range?</legend>${radios('wkRange', day.ranges.map(r => [r.key, r.name]), range.key)}</fieldset>
+      <fieldset class="choices"><legend class="field-label">Which session?</legend>${radios('wkSession', SESSION_KEYS.map(s => [s, day.sessions[s], sessionTimes(day.times[s])]), session)}</fieldset>
+      <label class="field-label" for="wkBench">Which bench? <span class="field-hint">only free benches are listed</span></label>
+      <select class="field" id="wkBench">${walkInBenches(range.key, session)}</select>
+      <p class="form-error" id="wkError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="wkSubmit">Add to the bench</button>
+    </form></section>`;
+}
+function walkInBenches(rangeKey, session) {
+  const range = rangeOf(BENCH.day.ranges, rangeKey), free = freeBenches(range, session);
+  return free.length ? '<option value="">Choose a bench…</option>' + free.map(n => `<option value="${n}">Bench ${n}${range.big.includes(n) ? ' (' + esc(BENCH.day.bigLabel.toLowerCase()) + ')' : ''}</option>`).join('')
+    : '<option value="">No benches are free for this session</option>';
+}
+async function addWalkIn(form) {
+  const btn = form.querySelector('#wkSubmit'), error = form.querySelector('#wkError');
+  if (btn.disabled) return;
+  const pick = n => (form.querySelector(`input[name="${n}"]:checked`) || {}).value || '';
+  const d = { name: form.querySelector('#wkName').value.trim(), visitor: pick('wkKind') === 'visitor', range: pick('wkRange'), session: pick('wkSession'), bench: Number(form.querySelector('#wkBench').value) };
+  const fail = msg => { error.textContent = msg; error.hidden = false; };
+  if (!d.name) return fail('Please type their name.');
+  if (!d.bench) return fail('Please choose a bench.');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    const out = await committeeApi('benchWalkIn', [d]);
+    BENCH.day = null; BENCH.dayNote = (out && out.message) || 'Added.';
+    go('#/committee/range');
+  } catch (e) { if (e.signedOut) return; btn.disabled = false; btn.textContent = 'Add to the bench'; fail(e.message); }
+}
+
+/* Reserve for a competition: pick the event, then tap the benches it needs */
+async function loadBenchEvents() {
+  if (BENCH.eventsState === 'loading') return;
+  BENCH.eventsState = 'loading';
+  try { BENCH.events = await committeeApi('benchEvents') || []; BENCH.eventsState = ''; }
+  catch (e) { if (e.signedOut) { BENCH.eventsState = ''; return; } BENCH.eventsState = 'failed'; }
+  if (currentPage === 'committee/reserve') render(true);
+}
+const isCompetition = ev => /competition|\bcomp\b|championship|\bshoot\b/i.test(ev.discipline + ' ' + ev.title);
+/* The benches already reserved for this event's range and session become the starting point */
+function resetReserve() {
+  const res = BENCH.res, day = BENCH.day;
+  if (!res || !res.event || !day || day.date !== res.event.date) return;
+  res.benches = day.bookings.filter(b => b.kind === 'Competition' && holding(b) && b.range === res.range && b.session === res.session).map(b => b.bench);
+  res.saved = res.benches.slice().sort((a, b) => a - b).join(',');
+}
+function reserveView() {
+  const res = BENCH.res || (BENCH.res = { event: null, range: 'rifle', session: 'whole', benches: [], saved: '', busy: false, note: '', error: '' });
+  const back = `<div class="page-title">${adminBack}<h1>Reserve for a competition</h1>`;
+  if (!res.event) {
+    if (!BENCH.events && BENCH.eventsState !== 'failed') setTimeout(loadBenchEvents, 0);
+    const all = BENCH.events || [], comps = all.filter(isCompetition), list = BENCH.allEvents || !comps.length ? all : comps;
+    return `${back}<p class="muted">Choose the competition, then tap the benches it needs. Members see those benches as “Competition” and can't book them.</p></div>
+      <section class="section">
+        ${res.note ? `<p class="notice" role="status">${esc(res.note)}</p>` : ''}
+        ${!BENCH.events ? (BENCH.eventsState === 'failed' ? loadFailed('the events', 'data-res-events') : skeletonRows(3))
+        : list.length ? `<div class="card list">${list.map(ev => `<button type="button" class="list-row manage-row" data-res-event="${all.indexOf(ev)}">${dateBlock(ev.date)}
+            <span class="list-main"><span class="list-title">${esc(ev.title)}</span><span class="muted">${joinDot(shortDate(ev.date), ev.discipline, timeRange(ev))}</span></span>${ICON.chev}</button>`).join('')}</div>`
+          : empty('No events coming up', 'Post the competition as an event first, then come back here.')}
+        ${BENCH.events && comps.length && comps.length < all.length ? `<button type="button" class="btn btn-outline" data-res-all>${BENCH.allEvents ? 'Show competitions only' : 'Show all events'}</button>` : ''}
+      </section>`;
+  }
+  const ev = res.event, day = BENCH.day && BENCH.day.date === ev.date ? BENCH.day : null;
+  if (!day && BENCH.dayState !== 'failed' && BENCH.dayState !== 'loading') setTimeout(() => loadBenchDay(ev.date), 0);
+  const head = `${back}</div>
+    <section class="section"><div class="card res-event"><div class="event-row">${dateBlock(ev.date)}<div><div class="event-title">${esc(ev.title)}</div><div class="muted">${joinDot(benchDayLabel(ev.date), timeRange(ev))}</div></div></div>
+      <button type="button" class="link-btn" data-res-change>Choose a different event</button></div></section>`;
+  if (!day) return head + `<section class="section">${BENCH.dayState === 'failed' ? loadFailed('the benches', 'data-res-day') : skeletonRows(3)}</section>`;
+  const range = rangeOf(day.ranges, res.range), changed = res.benches.slice().sort((a, b) => a - b).join(',') !== res.saved, n = res.benches.length;
+  const bench = k => {
+    const on = res.benches.includes(k), big = range.big.includes(k);
+    const other = day.bookings.find(b => b.range === range.key && b.bench === k && holding(b) && sessionsClash(b.session, res.session) && !(b.kind === 'Competition' && b.session === res.session));
+    return other ? `<button type="button" class="bench bench-taken${big ? ' bench-big' : ''}" disabled aria-label="Bench ${k}, booked by ${esc(other.name)}"><b>${k}</b><span>${esc(other.kind === 'Competition' ? 'Comp' : other.name.split(' ')[0])}</span></button>`
+      : `<button type="button" class="bench ${on ? 'bench-competition' : 'bench-free'}${big ? ' bench-big' : ''}" data-res-bench="${k}" aria-pressed="${on}" aria-label="Bench ${k}, ${on ? 'reserved for the competition' : 'free'}"><b>${k}</b><span>${on ? 'Reserved' : 'Free'}</span></button>`;
+  };
+  return `${head}
+    <section class="section">
+      ${res.note ? `<p class="notice" role="status">${esc(res.note)}</p>` : ''}
+      <div class="seg" role="group" aria-label="Range">${day.ranges.map(r => `<button type="button" data-res-range="${r.key}" aria-pressed="${res.range === r.key}">${esc(r.name.replace(/ range$/, ''))}</button>`).join('')}</div>
+      <div class="opts opts-3">${SESSION_KEYS.map(s => `<button type="button" class="opt" data-res-session="${s}" aria-pressed="${res.session === s}"><span class="opt-title">${esc(day.sessions[s])}</span><span class="opt-text">${esc(sessionTimes(day.times[s]))}</span></button>`).join('')}</div>
+      <p class="muted">Tap the benches the competition needs. Tap one again to release it.</p>
+      <div class="bench-map" role="group" aria-label="Benches on the ${esc(range.name)}">${Array.from({ length: range.benches }, (_, i) => bench(i + 1)).join('')}</div>
+      ${benchLegend([['bench-free', 'Free'], ['bench-competition', 'Reserved for the competition'], ['bench-taken', 'Already booked']], range.big.length)}
+      ${res.error ? `<p class="form-error" role="alert">${esc(res.error)}</p>` : ''}
+      <div class="pick-bar"><button type="button" class="btn btn-primary btn-big" data-res-save${changed && !res.busy ? '' : ' disabled'}>${res.busy ? 'Saving…' : !changed ? (n ? `${n} bench${n === 1 ? '' : 'es'} reserved` : 'No benches reserved')
+        : n ? `Reserve ${n} bench${n === 1 ? '' : 'es'} · ${esc(day.sessions[res.session])}` : 'Release all the benches'}</button></div>
+    </section>`;
+}
+async function saveReserve() {
+  const res = BENCH.res;
+  if (!res || res.busy || !res.event) return;
+  res.busy = true; res.error = ''; res.note = ''; render(true);
+  try {
+    const out = await committeeApi('benchReserve', [{ date: res.event.date, range: res.range, session: res.session, benches: res.benches, title: res.event.title }]);
+    res.note = (out && out.message) || 'Saved.';
+  } catch (e) { if (e.signedOut) return; res.error = e.message; }
+  res.busy = false;
+  loadBenchDay(res.event.date); // also when it failed: show the benches as they are now
+}
+
+/* Booking requests for appointment days */
+async function loadBenchRequests() {
+  if (BENCH.reqState === 'loading') return;
+  BENCH.reqState = 'loading';
+  try {
+    const d = await committeeApi('benchRequests') || {};
+    BENCH.reqs = { requests: Array.isArray(d.requests) ? d.requests : [], ranges: d.ranges || [], sessions: d.sessions || {} };
+    const n = BENCH.reqs.requests.filter(r => r.waiting).length;
+    if (n !== BENCH.waiting) { BENCH.waiting = n; drawDot(); }
+    BENCH.reqState = '';
+  } catch (e) { if (e.signedOut) { BENCH.reqState = ''; return; } BENCH.reqState = 'failed'; }
+  if (currentPage === 'committee/requests') render(true);
+}
+function benchRequestsView() {
+  if (!BENCH.reqs && BENCH.reqState !== 'failed') setTimeout(loadBenchRequests, 0);
+  const body = () => {
+    const q = BENCH.reqs, waiting = q.requests.filter(r => r.waiting), done = q.requests.filter(r => !r.waiting);
+    const what = r => `${esc(rangeOf(q.ranges, r.range).name)} · ${esc(q.sessions[r.session] || r.session)}${sessionTimes(r.times) ? ' · ' + esc(sessionTimes(r.times)) : ''}`;
+    return (waiting.length ? waiting.map(r => {
+      const a = BENCH.answers[r.id] || {}, range = rangeOf(q.ranges, r.range);
+      return `<article class="card pay-card">
+        <h2 class="pay-name">${esc(r.name)}</h2>
+        <div><b>${esc(benchDayLabel(r.date))}</b></div>
+        <div>${what(r)}</div>
+        ${r.note ? `<div class="pay-ref"><span class="muted">Their note</span><span>${esc(r.note)}</span></div>` : ''}
+        <label class="field-label" for="rqBench${esc(r.id)}">Which bench?</label>
+        <select class="field" id="rqBench${esc(r.id)}" data-req-bench="${esc(r.id)}">${r.free.length ? '<option value="">Choose a bench…</option>' + r.free.map(n => `<option value="${n}"${Number(a.bench) === n ? ' selected' : ''}>Bench ${n}${range.big.includes(n) ? ' (big calibre / muzzle brake)' : ''}</option>`).join('') : '<option value="">No benches are free</option>'}</select>
+        <label class="field-label" for="rqAns${esc(r.id)}">A note for them <span class="field-hint">optional, goes in the email</span></label>
+        <textarea class="field" id="rqAns${esc(r.id)}" data-req-note="${esc(r.id)}" rows="2" maxlength="300">${esc(a.note || '')}</textarea>
+        <button type="button" class="btn btn-primary btn-big" data-req-yes="${esc(r.id)}">Approve</button>
+        <button type="button" class="btn btn-outline btn-big" data-req-no="${esc(r.id)}">Decline</button>
+      </article>`;
+    }).join('') : empty('No requests waiting', 'When a member asks for a bench on a Tuesday, Thursday or Friday, it appears here.'))
+      + (done.length ? `<div class="section-head"><h2>Answered</h2></div><div class="card list">${done.map(r => `
+        <div class="list-row"><div class="list-main"><div class="list-title">${esc(r.name)} · ${esc(benchDayLabel(r.date))}</div>
+          <div class="muted">${what(r)}${r.bench ? ' · bench ' + esc(r.bench) : ''}</div>
+          <div class="lab-row"><span class="lab lab-${r.status === 'Approved' ? 'replied' : 'tag'}">${esc(r.status)}</span>${r.by ? `<span class="muted">by ${esc(r.by)}</span>` : ''}</div>
+          ${r.answer ? `<div class="muted">“${esc(r.answer)}”</div>` : ''}</div></div>`).join('')}</div>` : '');
+  };
+  return `
+    <div class="page-title">${adminBack}<h1>Booking requests</h1><p class="muted">Members asking for a bench on a Tuesday, Thursday or Friday.</p></div>
+    <section class="section">
+      ${BENCH.reqNote ? `<p class="notice" role="status">${esc(BENCH.reqNote)}</p>` : ''}
+      ${BENCH.reqs ? body() : BENCH.reqState === 'failed' ? loadFailed('the requests', 'data-req-reload') : skeletonRows(3)}
+      ${BENCH.reqs ? `<button type="button" class="btn btn-outline" data-req-reload>${ICON.refresh}Refresh</button>` : ''}
+    </section>`;
+}
+function askBenchRequest(id, approve) {
+  const r = BENCH.reqs && BENCH.reqs.requests.find(x => x.id === id && x.waiting);
+  if (!r) return;
+  const a = BENCH.answers[id] || {}, bench = Number(a.bench) || 0, note = String(a.note || '').trim(), day = benchDayLabel(r.date);
+  if (approve && !bench) { BENCH.reqNote = 'Please choose a bench first.'; render(true); return document.getElementById('rqBench' + id).focus(); }
+  const done = out => { BENCH.reqNote = (out && out.message) || 'Done.'; BENCH.reqs = null; delete BENCH.answers[id]; render(true); };
+  confirmAsk(approve ? { title: `Give ${r.name} bench ${bench}?`, text: `${day}. They will get an email to say it is booked${note ? ', with your note' : ''}.`,
+    yes: 'Yes, approve', busy: 'Approving…', no: 'No, go back', run: () => committeeApi('benchRequestApprove', [id, bench, note]), done }
+    : { title: `Decline ${r.name}'s request?`, text: `${day}. They will get an email to say it can't be done${note ? ', with your note' : ''}.`,
+      yes: 'Yes, decline', busy: 'Declining…', no: 'No, go back', run: () => committeeApi('benchRequestDecline', [id, note]), done });
+}
+
+view.addEventListener('click', e => {
+  let el, v; // the button that was tapped and the value it carries
+  const hit = attr => { const x = e.target.closest(`[${attr}]`); if (!x || x.disabled) return null; v = x.getAttribute(attr); return x; };
+  // Members
+  if (hit('data-bench-reload')) { BENCH.info = null; BENCH.infoState = ''; render(true); }
+  if ((el = hit('data-bk-day'))) { Object.assign(BENCH.pick, { date: v, bench: 0 }); BENCH.error = ''; BENCH.map = null; render(true); loadBenchMap(); }
+  if ((el = hit('data-bk-range'))) { Object.assign(BENCH.pick, { range: v, bench: 0 }); BENCH.error = ''; render(true); loadBenchMap(); }
+  if ((el = hit('data-bk-session'))) { Object.assign(BENCH.pick, { session: v, bench: 0 }); BENCH.error = ''; render(true); const step = view.querySelector('.bench-map'); if (step) step.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  if ((el = hit('data-bk-bench'))) { BENCH.pick.bench = BENCH.pick.bench === Number(v) ? 0 : Number(v); BENCH.error = ''; render(true); }
+  if (hit('data-bk-map')) { render(true); loadBenchMap(); }
+  if (hit('data-bk-go')) bookBench();
+  if ((el = hit('data-bk-cal')) && BENCH.info && BENCH.info.bookings[Number(v)]) bookingToCalendar(BENCH.info.bookings[Number(v)]);
+  if ((el = hit('data-bk-cancel'))) askCancelBooking(Number(v));
+  if ((el = hit('data-bk-unask'))) askCancelRequest(Number(v));
+  // Club team
+  if (hit('data-range-reload')) { BENCH.dayNote = ''; BENCH.day = null; BENCH.dayState = ''; render(true); }
+  if ((el = hit('data-range-tick'))) tickIn(el, v, true);
+  if ((el = hit('data-range-untick'))) tickIn(el, v, false);
+  if ((el = hit('data-range-off'))) askTakeOff(v);
+  if (hit('data-res-events')) { BENCH.eventsState = ''; render(true); }
+  if (hit('data-res-day')) { BENCH.dayState = ''; render(true); }
+  if (hit('data-res-all')) { BENCH.allEvents = !BENCH.allEvents; render(true); }
+  if ((el = hit('data-res-event')) && BENCH.events && BENCH.res) { Object.assign(BENCH.res, { event: BENCH.events[Number(v)], benches: [], saved: '', note: '', error: '' }); BENCH.day = null; BENCH.dayState = ''; render(); }
+  if (hit('data-res-change') && BENCH.res) { Object.assign(BENCH.res, { event: null, error: '' }); render(); }
+  if ((el = hit('data-res-range')) && BENCH.res) { Object.assign(BENCH.res, { range: v, error: '', note: '' }); resetReserve(); render(true); }
+  if ((el = hit('data-res-session')) && BENCH.res) { Object.assign(BENCH.res, { session: v, error: '', note: '' }); resetReserve(); render(true); }
+  if ((el = hit('data-res-bench')) && BENCH.res && !BENCH.res.busy) { const k = Number(v), at = BENCH.res.benches.indexOf(k); if (at < 0) BENCH.res.benches.push(k); else BENCH.res.benches.splice(at, 1); BENCH.res.error = ''; render(true); }
+  if (hit('data-res-save')) saveReserve();
+  if (hit('data-req-reload')) { BENCH.reqs = null; BENCH.reqState = ''; BENCH.reqNote = ''; render(true); }
+  if ((el = hit('data-req-yes'))) askBenchRequest(v, true);
+  if ((el = hit('data-req-no'))) askBenchRequest(v, false);
+});
+view.addEventListener('submit', e => {
+  if (e.target.id === 'benchReqForm') { e.preventDefault(); sendBenchRequest(e.target); }
+  if (e.target.id === 'walkInForm') { e.preventDefault(); addWalkIn(e.target); }
+});
+/* What is typed into a request's answer is kept, so fresh club data arriving doesn't wipe it */
+const keepAnswer = e => {
+  const t = e.target, id = t.dataset && (t.dataset.reqBench || t.dataset.reqNote);
+  if (id) (BENCH.answers[id] = BENCH.answers[id] || {})[t.dataset.reqBench ? 'bench' : 'note'] = t.value;
+};
+view.addEventListener('input', keepAnswer);
+view.addEventListener('change', e => {
+  keepAnswer(e);
+  // Add a walk-in: the list of free benches follows the range and the session
+  const form = e.target.closest && e.target.closest('#walkInForm');
+  if (form && BENCH.day && (e.target.name === 'wkRange' || e.target.name === 'wkSession')) {
+    const pick = n => (form.querySelector(`input[name="${n}"]:checked`) || {}).value || '';
+    form.querySelector('#wkBench').innerHTML = walkInBenches(pick('wkRange'), pick('wkSession'));
+  }
+});
+/* Today at the range keeps itself up to date while it is on the screen (no-shows free their benches) */
+setInterval(() => { if (!document.hidden && currentPage === 'committee/range' && BENCH.day && BENCH.dayState !== 'loading' && confirmSheet.hidden) loadBenchDay(''); }, 60000);
 
 drawDot();
 render();

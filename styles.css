@@ -1,4 +1,4 @@
-/* On Target v2.1.2 — club styles */
+/* On Target v2.2.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -563,3 +563,44 @@ button.menu-row.install-row .chev { color: #3A0A14; }
 .doc-bar { padding: 4px 0 10px; }
 .doc-bar .ph-bar { background: var(--line); }
 .doc-type { display: block; font-size: 13px; font-weight: 400; }
+
+/* ---------- Bench booking (v2.2.0) ---------- */
+.step-head { display: flex; align-items: center; gap: 10px; font: 800 17px Montserrat, sans-serif; color: var(--heading); }
+.step-n { flex: 0 0 28px; height: 28px; border-radius: 14px; background: var(--maroon); color: #fff; font: 800 14px/28px Montserrat, sans-serif; text-align: center; }
+.opts { display: flex; flex-direction: column; gap: 8px; }
+.opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 60px; padding: 10px 16px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); font-family: Poppins, sans-serif; text-align: left; cursor: pointer; }
+.opt-title { font-weight: 700; font-size: 16px; }
+.opt-text { font-size: 13px; color: var(--text-2); }
+.opt[aria-pressed="true"] { background: var(--maroon); border-color: var(--maroon); color: #fff; }
+.opt[aria-pressed="true"] .opt-text { color: #F0D5DA; }
+.opt[disabled] { opacity: .55; cursor: default; }
+.bench-map { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.bench { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 64px; padding: 4px 0; border-radius: 14px; border: 2px solid var(--line); background: #fff; color: #2A1A1E; font-family: Poppins, sans-serif; cursor: pointer; }
+.bench b { font: 800 20px/1.1 Montserrat, sans-serif; }
+.bench span { font-size: 11px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.bench-big { border-style: dashed; border-color: var(--accent); }
+.bench-taken, .bench-key.bench-taken { background: #CFC6C8; border-color: #CFC6C8; color: #4A3B40; cursor: default; }
+.bench-competition, .bench-key.bench-competition { background: var(--gold); border-color: var(--gold); color: #3A2A00; }
+.bench-competition[disabled] { cursor: default; }
+.bench-mine { background: var(--ok-soft); border-color: var(--green); color: var(--ok-text); cursor: default; }
+.bench-free[aria-pressed="true"] { background: var(--maroon); border-color: var(--maroon); border-style: solid; color: #fff; }
+.bench-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--text-2); }
+.bench-legend li { display: flex; align-items: center; gap: 6px; }
+.bench-key { width: 18px; height: 18px; border-radius: 6px; border: 2px solid var(--line); background: #fff; }
+.bench-key.bench-big { border-style: dashed; border-color: var(--accent); background: none; }
+.bench-note { margin: 0; }
+.pick-bar .btn:only-child { flex: 1 1 auto; }
+.book-card, .res-event { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.book-card .btn-row .btn { flex: 1 1 0; }
+.res-event .link-btn { align-self: flex-start; padding: 0; }
+.section > .notice { margin: 0; }
+.comp-note { margin: 0; }
+.range-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.range-row:last-child { border-bottom: 0; }
+.range-row .list-title { overflow-wrap: anywhere; }
+.range-gone .list-title { color: var(--text-2); text-decoration: line-through; }
+.bench-no { flex: 0 0 44px; height: 44px; border-radius: 12px; background: var(--tint); color: var(--heading); font: 800 20px/44px Montserrat, sans-serif; text-align: center; }
+.tick { flex: 0 0 auto; min-width: 96px; min-height: 52px; }
+.tick-on { background: var(--green); color: #fff; border: 0; }
+.range-off { padding: 0; font-size: 14px; }
+@media (min-width: 640px) { .opts-3 { flex-direction: row; } .opts-3 .opt { flex: 1 1 0; } }
