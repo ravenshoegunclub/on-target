@@ -1,10 +1,10 @@
-/* On Target v2.2.0 — app shell with live club data and club team tools
+/* On Target v2.2.1 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -2557,12 +2557,22 @@ async function loadDocs() {
   }
   if (currentPage === 'me/documents') render(true);
 }
+/* Grouped by type, in this order; a group with nothing in it isn't shown */
+const DOC_GROUPS = [['Form', 'Forms'], ['Policy', 'Policies'], ['Minutes', 'Minutes'], ['Other', 'Other']];
 function documentsView() {
   if (!DOCS && !docsState) setTimeout(loadDocs, 0);
+  const row = d => `<a class="menu-row doc-row" href="${esc(d.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.doc}</span>
+    <span class="list-main"><b class="doc-name">${esc(d.name)}</b>${d.what ? `<span class="doc-what">${esc(d.what)}</span>` : ''}${d.who ? `<span class="doc-who">${esc(d.who)}</span>` : ''}</span>${ICON.chev}</a>`;
+  const groups = () => {
+    const list = DOCS.filter(d => /^https:\/\//.test(d.url)), known = DOC_GROUPS.map(g => g[0]);
+    return DOC_GROUPS.map(([type, title]) => {
+      const docs = list.filter(d => d.type === type || (type === 'Other' && !known.includes(d.type)));
+      return docs.length ? `<div class="section-head"><h2>${title}</h2></div><div class="card list">${docs.map(row).join('')}</div>` : '';
+    }).join('');
+  };
   return `
-    <div class="page-title">${meBack}<h1>Club documents</h1></div>
-    <section class="section">${DOCS ? (DOCS.length ? `<div class="card list">${DOCS.map(d => /^https:\/\//.test(d.url) ? `<a class="menu-row" href="${esc(d.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.doc}</span>
-          <span class="list-main">${esc(d.name)}<span class="muted doc-type">${esc(d.type || '')}</span></span>${ICON.chev}</a>` : '').join('')}</div>`
+    <div class="page-title">${meBack}<h1>Club documents</h1><p class="muted">Forms and club papers. Tap one to open it.</p></div>
+    <section class="section">${DOCS ? (DOCS.length ? groups()
         : `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`)
       : docsState === 'members' ? empty('For members', 'Club documents appear here once your email is linked to your membership.')
       : docsState === 'failed' ? loadFailed('the club documents', 'data-docs-reload') : skeletonRows(3)}</section>`;
@@ -2817,7 +2827,7 @@ function docsAdminView() {
       <button type="button" class="btn btn-primary btn-big" data-doc="new">${ICON.plus}Add a document</button>
       ${DOCADMIN.list ? (DOCADMIN.list.length ? `<div class="card list">${DOCADMIN.list.map((d, i) => `
         <button type="button" class="list-row manage-row" data-doc="${i}"><span class="list-ico">${ICON.doc}</span>
-          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}</span></span>${ICON.chev}</button>`).join('')}</div>`
+          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}${d.what ? ' · ' + esc(d.what) : ' · no description yet'}</span></span>${ICON.chev}</button>`).join('')}</div>`
           : empty('No documents yet', 'Until you add one, members see "Coming soon: club policies and forms will be here."'))
         : DOCADMIN.state === 'failed' ? loadFailed('the club documents', 'data-docadmin-reload') : skeletonRows(3)}
     </section>`;
@@ -2832,8 +2842,15 @@ function docForm(d) {
       ${isNew ? `<span class="field-label">File <span class="field-hint">a PDF, a Word document or a photo, up to ${DOC_MAX_MB} MB</span></span>
       <button type="button" class="btn btn-outline btn-big" data-doc-choose>${ICON.doc}<span id="dcChooseText">${docFile ? 'Choose a different file' : 'Choose a file'}</span></button>
       <p class="muted" id="dcFileName" role="status">${esc(fileLine)}</p>` : ''}
-      <label class="field-label" for="dcTitle">Title <span class="field-hint">what members see</span></label>
-      <input class="field" id="dcTitle" maxlength="100" autocomplete="off" value="${esc(d.name || '')}">
+      <label class="field-label" for="dcTitle">Name</label>
+      <p class="muted" id="dcTitleHint">Short and plain. Start with the form number if it has one.</p>
+      <input class="field" id="dcTitle" maxlength="100" autocomplete="off" aria-describedby="dcTitleHint" value="${esc(d.name || '')}">
+      <label class="field-label" for="dcWhat">What it's for</label>
+      <p class="muted" id="dcWhatHint">One sentence a new member would understand.</p>
+      <textarea class="field" id="dcWhat" rows="2" maxlength="160" aria-describedby="dcWhatHint">${esc(d.what || '')}</textarea>
+      <label class="field-label" for="dcWho">Who it's for</label>
+      <p class="muted" id="dcWhoHint">Keep it short, e.g. “Visitors without a licence”.</p>
+      <input class="field" id="dcWho" maxlength="60" autocomplete="off" aria-describedby="dcWhoHint" value="${esc(d.who || '')}">
       <label class="field-label" for="dcType">Type</label>
       <select class="field" id="dcType">${DOC_TYPES.map(t => `<option${(d.type || 'Policy') === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
       ${isNew ? bar : ''}
@@ -2842,7 +2859,7 @@ function docForm(d) {
       ${isNew ? '' : `
       ${/^https:\/\//.test(d.url) ? `<a class="btn btn-outline btn-big" href="${esc(d.url)}" target="_blank" rel="noopener">${ICON.doc}Open the document</a>` : ''}
       <h2 class="form-head">A newer version</h2>
-      <p class="muted">Choose the newer file (a PDF, a Word document or a photo). It takes this document's place; the title and type stay the same.</p>
+      <p class="muted">Choose the newer file (a PDF, a Word document or a photo). It takes this document's place; the name, type and descriptions stay the same.</p>
       <p class="muted" id="dcFileName" role="status">${esc(fileLine)}</p>
       ${bar}
       <button type="button" class="btn btn-outline btn-big" data-doc-replace id="dcReplace">${docFile ? 'Replace with this file' : 'Replace with a newer version'}</button>
@@ -2900,9 +2917,10 @@ async function saveDoc(form) {
   const d = docEdit, btn = form.querySelector('#dcSubmit'), error = form.querySelector('#dcError');
   if (btn.disabled || docBusy) return;
   const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
-  const meta = { title: form.querySelector('#dcTitle').value.trim(), type: form.querySelector('#dcType').value };
+  const text = id => form.querySelector(id).value.replace(/\s+/g, ' ').trim();
+  const meta = { title: text('#dcTitle'), type: form.querySelector('#dcType').value, what: text('#dcWhat'), who: text('#dcWho') };
   if (!d.id && !docFile) return fail('Please choose a file first.', form.querySelector('[data-doc-choose]'));
-  if (!meta.title) return fail('Please give the document a title.', form.querySelector('#dcTitle'));
+  if (!meta.title) return fail('Please give the document a name.', form.querySelector('#dcTitle'));
   if (!d.id) return sendDoc(form, btn, 'Uploading…', data => committeeApi('docAdd', [{ ...meta, fileName: docFile.name }, data]), 'Try again');
   error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try { doneDoc(await committeeApi('docSave', [d.id, meta])); }

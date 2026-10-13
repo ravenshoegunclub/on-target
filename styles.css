@@ -1,4 +1,4 @@
-/* On Target v2.2.0 — club styles */
+/* On Target v2.2.1 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -562,7 +562,11 @@ button.menu-row.install-row .chev { color: #3A0A14; }
 .em-card .pay-name { font-size: 22px; }
 .doc-bar { padding: 4px 0 10px; }
 .doc-bar .ph-bar { background: var(--line); }
-.doc-type { display: block; font-size: 13px; font-weight: 400; }
+.doc-row { align-items: flex-start; }
+.doc-row .chev { align-self: center; }
+.doc-name { display: block; font-weight: 700; overflow-wrap: anywhere; }
+.doc-what { display: block; font-size: 14px; font-weight: 400; color: var(--text-2); margin-top: 2px; }
+.doc-who { display: inline-block; margin-top: 6px; font: 600 12px Poppins, sans-serif; padding: 2px 10px; border-radius: 10px; background: var(--maroon); color: #fff; }
 
 /* ---------- Bench booking (v2.2.0) ---------- */
 .step-head { display: flex; align-items: center; gap: 10px; font: 800 17px Montserrat, sans-serif; color: var(--heading); }

@@ -89,6 +89,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
   - **Manage posts, events:** upcoming first (soonest at the top), then "Past events" (newest first).
   - **No "Refresh club data" button.** Club data is fetched again once it is 2 minutes old while On Target is on the screen, and when it comes back to the screen (`visibilitychange`). There is no pull-down to refresh.
   - The one-time code logic is shared (`newCode_`, `takeCode_`, `sendCode_`): kind `''` is signing in, `'x'` is confirming a new email; both count towards the same limits.
+- **Clearer club documents (v2.2.1):** each document has a name, "What it's for" (one sentence) and "Who it's for" (short), as well as its type. They are kept in the file's Drive description, one per line: type, what, who (`docMeta_`, `docDesc_`); older files hold only the type and show just the name until someone edits them. `clubDocuments` sends `what` and `who`; `docAdd` and `docSave` take them; `docReplace` carries them over. A phone on an older version that saves without them leaves them as they were. Members see the list grouped Forms, Policies, Minutes, Other (empty groups hidden), with "Who it's for" as a maroon tag.
 - **Club documents (v2.0.0):** `clubDocuments(pin, token)` lists the files in the Drive folder "On Target – Club documents" (owned by the club account; made the first time, ID kept in Script Properties) for the club team (PIN) and linked members (token). Each file is set to "anyone with the link can view" when it is listed, because members aren't signed in to Google as the club: only put things there that members may see.
 - **Testing against a test copy of the server:** a copy of On Target on `localhost` or a Codespace address (never the live address) can be pointed at a test deployment by opening it once with `?server=<deployment ID>`, and back with `?server=live`; More then shows "TEST SERVER". A test deployment is the one time a plain `clasp deploy -d "TEST ..."` is right, and only when Carl asks for one. It still uses the club's real Sheets and Gmail. `clasp deployments` lists them.
 - **Never refer to something in `Code.js` from the top level of `Api.js`** (only inside functions). Files load in order, and a top-level reference to a file not yet loaded would break the whole web app, feeds included.
@@ -112,7 +113,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **2.2.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **2.2.1**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.
