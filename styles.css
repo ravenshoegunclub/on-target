@@ -1,4 +1,4 @@
-/* On Target v2.3.0 — club styles */
+/* On Target v2.4.2 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -639,3 +639,22 @@ button.menu-row.install-row .chev { color: #3A0A14; }
 .btn-admin-badge { flex: 0 0 auto; background: #fff; color: #14592B; font: 700 13px/26px Poppins, sans-serif; height: 26px; padding: 0 10px; border-radius: 13px; white-space: nowrap; }
 .btn-admin .chev { flex: 0 0 18px; width: 18px; height: 18px; }
 .manage-row .badge { margin-top: 4px; align-self: flex-start; }
+
+/* ---------- Shared emails (v2.3.1) ---------- */
+.share-note { margin: 4px 0 0; font-size: 14px; }
+.share-line { color: var(--gold-text); font-weight: 600; margin-top: 2px; }
+.form .family-line { text-align: left; font-size: 13px; margin: 8px 0 0; }
+
+/* ---------- Families (v2.4.0) ---------- */
+.junior-tag { display: inline-block; font: 700 11px/1 Poppins, sans-serif; padding: 4px 8px; border-radius: 9px; background: var(--gold); color: #3A2A00; vertical-align: middle; }
+.fam-chips-wrap { padding-top: 12px; }
+.fam-chips .chip-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 48px; font-size: 15px; }
+.viewing-line { margin: 0; font-size: 15px; color: var(--text); }
+.page-title .viewing-line { margin-top: 4px; }
+.me-card-status .junior-tag { font-size: 12px; }
+a.mem-row { text-decoration: none; color: var(--text); }
+.mbadge-fam { background: var(--maroon); color: #fff; }
+.mem-row > .btn { flex: 0 0 auto; }
+.list-main > .mem-badges { justify-content: flex-start; margin-top: 4px; }
+.import-bad { color: var(--red-text); }
+#faNew[hidden], #faOld[hidden] { display: none; }

@@ -1,10 +1,10 @@
-/* On Target v2.3.0 — app shell with live club data and club team tools
+/* On Target v2.4.2 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.2';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -377,10 +377,12 @@ const VIEWS = {
       if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
       return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
     }
-    if (['payments', 'members', 'people', 'person', 'signups'].includes(sub)) {
+    if (['payments', 'members', 'people', 'person', 'signups', 'member', 'import'].includes(sub)) {
       if (!session.admin) return `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Admin</h1></div>
         <section class="section">${empty('Admins only', 'Only admins can use this part of On Target.')}</section>`;
       if (sub === 'person' && !personEdit) { location.replace('#/committee/people'); return ''; } // e.g. the page was reloaded
+      if (sub === 'member') return memberAdminView(arg);
+      if (sub === 'import') return importView();
       return sub === 'signups' ? signupsView() : sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
     }
     location.replace('#/admin'); return ''; // the club team's home is the Club admin screen
@@ -685,11 +687,18 @@ const niceDate = iso => { if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return ''
 /* 30 June that a payment confirmed today runs to (payments from 1 April count towards the next year, as on the server) */
 const paidToYear = () => { const d = new Date(); return d.getFullYear() + (d.getMonth() >= 3 ? 1 : 0); };
 
+/* A family sharing one email: one sign-in email links to one membership, so admins are told (v2.3.1) */
+const sharesNote = name => `Shares an email with ${name} – will need their own email for the app, or be added to ${name}'s family.`;
+
 /* ----- payments to confirm ----- */
 async function loadPending() {
   if (ADMIN.pendingState === 'loading') return;
   ADMIN.pendingState = 'loading';
-  try { const list = await committeeApi('adminPending'); ADMIN.pending = Array.isArray(list) ? list : []; ADMIN.pendingState = ''; }
+  try {
+    // Who shares an email with a member already using it to sign in: a note only, so the payments still show if it can't be fetched
+    const [list, shares] = await Promise.all([committeeApi('adminPending'), committeeApi('pendingShares').catch(e => { if (e.signedOut) throw e; return {}; })]);
+    ADMIN.pending = (Array.isArray(list) ? list : []).map(a => ({ ...a, shares: (shares && shares[a.id]) || '' })); ADMIN.pendingState = '';
+  }
   catch (e) { if (e.signedOut) { ADMIN.pendingState = ''; return; } ADMIN.pendingState = 'failed'; }
   if (currentPage === 'committee/payments') render(true);
 }
@@ -703,6 +712,7 @@ function paymentsView() {
       <div class="pay-ref"><span class="muted">Bank reference</span><b>${esc(a.reference)}</b></div>
       <div class="pay-contact">${esc((a.items || [])[1])}</div>
       ${a.ssaa ? `<div class="muted">SSAA number ${esc(a.ssaa)}</div>` : ''}
+      ${a.shares ? `<p class="notice share-note">${esc(sharesNote(a.shares))}</p>` : ''}
       <button type="button" class="btn btn-primary btn-big" data-mark-paid="${i}">Mark paid</button>
     </article>`).join('')
     : empty('No payments waiting', 'New applications appear here when someone joins or renews on the website.');
@@ -730,7 +740,7 @@ function askMarkPaid(i) {
 }
 
 /* ----- members ----- */
-const MEM_FILTERS = [['all', 'All'], ['current', 'Current'], ['waiting', 'Waiting for payment'], ['notRenewed', 'Not renewed yet'], ['overdue', 'Not financial – renewal overdue'], ['expired', 'Expired']];
+const MEM_FILTERS = [['all', 'All'], ['family', 'Families'], ['current', 'Current'], ['waiting', 'Waiting for payment'], ['notRenewed', 'Not renewed yet'], ['overdue', 'Not financial – renewal overdue'], ['expired', 'Expired']];
 const MEM_BADGE = { current: ['ok', 'Current'], notRenewed: ['amber', 'Not renewed yet'], overdue: ['red', 'Not financial'], expired: ['red-line', 'Expired – not financial'], waiting: ['grey', 'Waiting for payment'], none: ['grey', 'No membership'] };
 /* "Not renewed yet" is only offered from 1 May to 30 June, and "Not financial" only in July: the server says which season it is */
 const memFilters = () => MEM_FILTERS.filter(f => (f[0] !== 'notRenewed' || ADMIN.mem.season === 'renew') && (f[0] !== 'overdue' || ADMIN.mem.season === 'followup'));
@@ -759,7 +769,7 @@ async function loadSheetUrl() {
 function membersView() {
   setTimeout(() => { if (!ADMIN.mem.items && ADMIN.mem.state !== 'loading') loadMembersList(); loadSheetUrl(); }, 0);
   return `
-    <div class="page-title">${adminBack}<h1>Members</h1></div>
+    <div class="page-title">${adminBack}<h1>All members &amp; status</h1><p class="muted">Tap a member to see or change their family.</p></div>
     <section class="section">
       <form class="msg-search" id="memSearch" role="search" novalidate>
         <label class="sr-only" for="memQuery">Search members by name, email or SSAA number</label>
@@ -776,11 +786,13 @@ function drawMembers() {
   const mem = ADMIN.mem, exportable = mem.filter === 'notRenewed' || mem.filter === 'overdue';
   const rows = (mem.items || []).map(m => {
     const b = MEM_BADGE[m.status] || MEM_BADGE.none;
-    return `<div class="mem-row${m.financial ? '' : ' not-financial'}">
+    const fam = m.family ? `<span class="mbadge mbadge-fam">${m.family.primary ? 'Family · pays' : m.family.junior ? 'Family · junior' : 'Family'}</span>` : m.familyToSetUp ? '<span class="mbadge mbadge-amber">Family to set up</span>' : '';
+    return `<${m.id ? `a href="#/committee/member/${encodeURIComponent(m.id)}"` : 'div'} class="mem-row mem-link${m.financial ? '' : ' not-financial'}">
       <div class="list-main"><div class="list-title">${esc(m.name || m.email || 'No name')}</div>
-        <div class="muted">${joinDot(m.type, m.expiry ? (m.financial ? 'Expires ' : 'Expired ') + niceDate(m.expiry) : 'No expiry date')}</div></div>
-      <div class="mem-badges"><span class="mbadge mbadge-${b[0]}">${b[1]}</span>${m.waiting && m.status !== 'waiting' ? '<span class="mbadge mbadge-grey">Payment waiting</span>' : ''}</div>
-    </div>`;
+        <div class="muted">${joinDot(m.type, m.expiry ? (m.financial ? 'Expires ' : 'Expired ') + niceDate(m.expiry) : 'No expiry date')}</div>
+        ${m.shares ? `<div class="muted share-line">${esc(sharesNote(m.shares))}</div>` : ''}</div>
+      <div class="mem-badges"><span class="mbadge mbadge-${b[0]}">${b[1]}</span>${m.waiting && m.status !== 'waiting' ? '<span class="mbadge mbadge-grey">Payment waiting</span>' : ''}${fam}</div>
+    </${m.id ? 'a' : 'div'}>`;
   }).join('');
   box.innerHTML = `
     <div class="chips" role="group" aria-label="Which members">${memFilters().map(f => `
@@ -1631,8 +1643,8 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
@@ -1648,6 +1660,7 @@ function render(quiet) {
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
     benchLeave(page);
+    familyLeave(page);
     if (page !== 'me/email') emailChange = null;
     if (page !== 'committee/emergency') EMERG = blankEmerg();
     if (page !== 'committee/document') { docEdit = null; docFile = null; docBusy = false; }
@@ -1896,7 +1909,7 @@ function signOut() {
   session = null; sessionStore.set(null);
   if (!member) { ME = null; meState = ''; meNote = ''; } // the membership their PIN was showing
   EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; docFile = null; DOCS = null; docsState = '';
-  MEMBERS = null; membersFailed = false; BENCH = blankBench();
+  MEMBERS = null; membersFailed = false; BENCH = blankBench(); if (!member) VIEW_AS = '';
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = ''; sharePick = null; ADDED = [];
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
   msgOpen = null; msgOpenState = ''; msgUnread = null; unreadAt = 0; SAVED = null;
@@ -2307,17 +2320,30 @@ let relinking = false;            // true while someone waiting for the club tea
 const ME_PILL = { current: ['ok', 'Current', ''], notRenewed: ['amber', 'Not renewed yet', ''], waiting: ['amber', 'Waiting for payment', 'Payment being checked'],
   overdue: ['red', 'Not financial – renewal overdue', ''], expired: ['grey', 'Expired', ''], none: ['grey', 'Not current', ''] };
 const meStatus = d => d.waiting || d.status === 'waiting' ? 'waiting' : ME_PILL[d.status] ? d.status : 'none';
-const mePill = key => `<span class="me-pill me-pill-${ME_PILL[key][0]}">${ME_PILL[key][1]}</span>`;
+const mePill = (key, extra) => `<span class="me-pill me-pill-${ME_PILL[key][0]}">${ME_PILL[key][1]}${extra || ''}</span>`;
 const initialsOf = name => { const w = String(name || '').trim().split(/\s+/).filter(Boolean); return ((w[0] || '').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase(); };
 const maskEmail = email => { const [a, b] = String(email).split('@'); return a.charAt(0) + '•••@' + (b || ''); };
 /* Who is asking for their own membership: a member's sign-in token, or the PIN of a club team member
    (the server shows them the membership an admin has linked their PIN to in People and PINs). */
-const meAuth = () => member ? member.token : session ? 'pin:' + session.pin : '';
-async function memberApi(fn, args) {
+const selfAuth = () => member ? member.token : session ? 'pin:' + session.pin : '';
+/* Families (v2.4.0): VIEW_AS is the family member being viewed ('' = yourself). The server checks it on every request. */
+let VIEW_AS = '';
+const meAuth = () => selfAuth() + (VIEW_AS && selfAuth() ? '|as:' + VIEW_AS : '');
+const viewingOther = () => !!(ME && ME.viewing && !ME.viewing.self);
+/* "Viewing: Sam" under a page heading, while looking at a family member */
+const viewingLine = () => viewingOther() ? `<p class="viewing-line">Viewing: <b>${esc(ME.viewing.first)}</b>${ME.viewing.junior ? ' <span class="junior-tag">Junior</span>' : ''}</p>` : '';
+function viewAs(key) {
+  if (key === VIEW_AS) return;
+  VIEW_AS = key; ME = null; meState = ''; meNote = ''; BENCH = Object.assign(blankBench(), { waiting: BENCH.waiting, countAt: BENCH.countAt });
+  render(true);
+}
+async function memberApi(fn, args, asSelf) {
   const viaPin = !member;
   try {
-    return await api(fn, undefined, [meAuth()].concat(args || []));
+    return await api(fn, undefined, [asSelf ? selfAuth() : meAuth()].concat(args || []));
   } catch (e) {
+    // Taken out of the family, or hidden, while this phone was viewing them: back to yourself
+    if (/no longer view that family member/i.test(e.message) && VIEW_AS) { e.signedOut = true; viewAs(''); if (location.hash !== '#/me') location.hash = '#/me'; throw e; }
     if (viaPin && e.badPin) {
       signOut();
       openSignIn('You have been signed out because your PIN is no longer recognised. It may have been changed. Please sign in with your new PIN.');
@@ -2327,7 +2353,7 @@ async function memberApi(fn, args) {
   }
 }
 function forgetMember() {
-  BENCH = blankBench();
+  BENCH = blankBench(); VIEW_AS = '';
   member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
   if (location.hash.indexOf('#/me/') === 0) location.hash = '#/me'; else render();
 }
@@ -2335,7 +2361,7 @@ function forgetMember() {
 function signOutAll() {
   if (member) {
     api('memberSignOut', undefined, [member.token]).catch(() => { /* the phone forgets the sign-in either way */ });
-    member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
+    member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = ''; VIEW_AS = '';
   }
   signOut();
   view.focus();
@@ -2348,7 +2374,8 @@ async function loadMe() {
     const me = await memberApi('memberMe');
     if (auth !== meAuth()) { meState = ''; return; } // signed out, or signed in as someone else, meanwhile
     ME = me; meState = '';
-    if (member) {
+    if (ME.familyReset || (VIEW_AS && !viewingOther())) VIEW_AS = ''; // they can no longer be viewed
+    if (member && !viewingOther()) {
       member = { token: member.token, initials: ME.linked ? initialsOf(ME.name) : '', first: ME.linked ? ME.first : '', status: ME.linked ? meStatus(ME) : '' };
       memberStore.set(member);
     }
@@ -2378,6 +2405,7 @@ function meView(sub) {
   else if (sub === 'book') return bookView();
   else if (sub === 'bookings') return bookingsView();
   else if (sub === 'request') return requestView();
+  else if (sub === 'family') return familyView();
   loadAdminCounts();
   const first = (linked && ME.first) || (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
   // Signed in with a PIN that no admin has linked to a membership yet
@@ -2442,7 +2470,7 @@ function adminView(sub) {
       ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
       ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
-        + row(ICON.key, 'People and PINs', '#/committee/people'))}
+        + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet'))}
         ${sum && (sum.season === 'renew' || sum.season === 'followup') ? `<div class="admin-counts">
           ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
           ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
@@ -2461,6 +2489,7 @@ function memberBlock() {
       <input class="field" id="memberEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="120" aria-describedby="memberEmailError">
       <p class="form-error" id="memberEmailError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="memberEmailBtn">Email me a code</button>
+      <p class="muted form-foot family-line">Sharing an email with a family member? One family member can sign in for everyone on a family membership. Anyone else needs their own email to sign in.</p>
       ${joinLink}
     </form></section>`;
   if (!ME) {
@@ -2524,12 +2553,21 @@ function resultsSummary() {
   const n = ME.results.length, scores = ME.results.map(r => scoreNumber(r.score)).filter(v => v !== null);
   return n ? `${n} competition${n === 1 ? '' : 's'}${scores.length ? ' · best ' + Math.max(...scores) : ''}` : 'None yet';
 }
+/* The family's name chips: tap one to see that person's card, results and bookings */
+function familyChips() {
+  if (!ME.family || ME.family.length < 2) return '';
+  return `<section class="section fam-chips-wrap"><div class="chips fam-chips" role="group" aria-label="Whose membership to show">${ME.family.map(f => `
+    <button type="button" class="chip-btn" data-view-as="${esc(f.key)}" aria-pressed="${f.key === (ME.viewing.self ? '' : ME.viewing.key)}">${esc(f.first)}${f.junior ? ' <span class="junior-tag">Junior</span>' : ''}</button>`).join('')}</div>
+    ${viewingLine()}</section>`;
+}
 function meCard() {
+  const other = viewingOther(), whose = other ? esc(ME.viewing.first) + "'s" : 'My';
   const key = meStatus(ME), note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2], r = ME.renew || {};
   // One wide Renew row: a button once renewals are open for this member, otherwise it says when they open
   const renew = r.open ? `<a class="btn btn-primary btn-big renew-row" href="${esc(r.url)}" target="_blank" rel="noopener">${ICON.refresh}Renew my membership</a>`
     : `<div class="renew-row renew-off"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew<span class="muted">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></span></div>`;
   return `
+    ${familyChips()}
     <section class="section">
       <div class="me-card">${ICON.rings}
         <div class="me-card-club">MEMBER · RAVENSHOE &amp; DISTRICT SPORTING SHOOTERS</div>
@@ -2538,14 +2576,14 @@ function meCard() {
           <div><span>SSAA no.</span><b>${esc(ME.ssaa) || '–'}</b></div>
           <div><span>Valid to</span><b>${esc(ME.validToText) || '–'}</b></div>
         </div>
-        <div class="me-card-status">${mePill(key)}${note ? `<span class="me-card-note">${esc(note)}</span>` : ''}</div>
+        <div class="me-card-status">${mePill(key, ME.inFamily ? ' · Family' : '')}${ME.junior ? '<span class="junior-tag">Junior</span>' : ''}${note ? `<span class="me-card-note">${esc(note)}</span>` : ''}</div>
       </div>
       <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
     </section>
     <section class="section"><nav class="post-tiles me-tiles" aria-label="My membership">
-      <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>My results<span class="tile-sub">${esc(resultsSummary())}</span></a>
-      <a class="tile" href="#/me/bookings"><span class="tile-ico">${ICON.calendar}</span>My bookings<span class="tile-sub">Benches you have booked</span></a>
-      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email, mobile, emergency contact</span></a>
+      <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>${whose} results<span class="tile-sub">${esc(resultsSummary())}</span></a>
+      <a class="tile" href="#/me/bookings"><span class="tile-ico">${ICON.calendar}</span>${whose} bookings<span class="tile-sub">${other ? 'Benches booked for ' + esc(ME.viewing.first) : 'Benches you have booked'}</span></a>
+      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>${whose} details<span class="tile-sub">${other ? (ME.viewing.details ? 'Mobile, emergency contact' : 'Private to ' + esc(ME.viewing.first)) : 'Email, mobile, emergency contact'}</span></a>
     </nav>
     ${renew}</section>`;
 }
@@ -2606,7 +2644,7 @@ const meBack = `<a class="back-link" href="#/me">${ICON.chev}My membership</a>`;
 function meResults() {
   const next = events().find(e => /competition/i.test(e.discipline || ''));
   return `
-    <div class="page-title">${meBack}<h1>My results</h1>${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
+    <div class="page-title">${meBack}<h1>${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} results</h1>${viewingLine()}${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
     <section class="section">${ME.results.length ? `<div class="card list">${ME.results.map(r => `
       <div class="list-row">${dateBlock(r.date)}
         <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
@@ -2621,52 +2659,64 @@ function meResults() {
    Name and SSAA number are the two things only the club can change. */
 function meDetails() {
   const row = (label, value) => `<div class="detail-row"><span class="muted">${label}</span><b>${esc(value)}</b></div>`;
-  const em = ME.emergency || {};
+  const em = ME.emergency || {}, other = viewingOther(), who = other ? ME.viewing.first : '';
+  // Another adult's contact details are theirs alone; a junior's are looked after by the adults in the family
+  if (other && !ME.viewing.details) return `
+    <div class="page-title">${meBack}<h1>${esc(who)}'s details</h1>${viewingLine()}</div>
+    <section class="section">
+      <div class="card form">${row('Name', ME.name)}${row('SSAA number', ME.ssaa || 'None on our records')}</div>
+      ${empty(`Private to ${who}`, `${who}'s email, mobile and emergency contact are private. Only ${who} can see or change them, after signing in with their own email.`)}
+      <a class="btn btn-outline btn-big" href="#/me/family">${ICON.people}My family</a>
+    </section>`;
   return `
-    <div class="page-title">${meBack}<h1>My details</h1></div>
+    <div class="page-title">${meBack}<h1>${other ? esc(who) + "'s" : 'My'} details</h1>${viewingLine()}</div>
     <section class="section">
       ${meNote ? `<p class="notice" role="status">${esc(meNote)}</p>` : ''}
       <div class="card form">
         ${row('Name', ME.name)}
         ${row('SSAA number', ME.ssaa || 'None on our records')}
-        <p class="muted">To change your name or SSAA number, <a href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('Change my details')}">ask the club</a>.</p>
-        ${row('Email', ME.email || 'None on our records')}
-        <a class="btn btn-outline btn-big" href="#/me/email">${ICON.mail}Change my email</a>
+        <p class="muted">To change ${other ? 'their' : 'your'} name or SSAA number, <a href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('Change my details')}">ask the club</a>.</p>
+        ${other ? '' : `${row('Email', ME.email || 'None on our records')}
+        <a class="btn btn-outline btn-big" href="#/me/email">${ICON.mail}Change my email</a>`}
       </div>
+      ${ME.inFamily && !other ? `<a class="btn btn-outline btn-big" href="#/me/family">${ICON.people}My family</a>` : ''}
     </section>
     <section class="section"><form class="card form" id="detailsForm" novalidate>
       <label class="field-label" for="mdMobile">Mobile <span class="field-hint">optional</span></label>
-      <input class="field" id="mdMobile" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" value="${esc(ME.mobile || '')}">
+      <input class="field" id="mdMobile" type="tel" inputmode="tel" autocomplete="${other ? 'off' : 'tel'}" maxlength="30" value="${esc(ME.mobile || '')}">
       <h2 class="form-head">Emergency contact <span class="field-hint">optional</span></h2>
-      <p class="muted">Only the club team can see this, and only to call them if something happens to you at the range.</p>
+      <p class="muted">Only the club team can see this, and only to call them if something happens to ${other ? esc(who) : 'you'} at the range.</p>
       <label class="field-label" for="mdEmName">Contact name</label>
       <input class="field" id="mdEmName" maxlength="60" autocomplete="off" autocapitalize="words" value="${esc(em.name || '')}">
-      <label class="field-label" for="mdEmRelation">Who are they to you? <span class="field-hint">wife, son, friend…</span></label>
+      <label class="field-label" for="mdEmRelation">Who are they to ${other ? esc(who) : 'you'}? <span class="field-hint">${other ? 'mother, father, guardian…' : 'wife, son, friend…'}</span></label>
       <input class="field" id="mdEmRelation" maxlength="40" autocomplete="off" value="${esc(em.relation || '')}">
       <label class="field-label" for="mdEmPhone">Their phone</label>
       <input class="field" id="mdEmPhone" type="tel" inputmode="tel" autocomplete="off" maxlength="30" value="${esc(em.phone || '')}">
-      <label class="choice"><input type="checkbox" id="mdNews"${ME.news ? ' checked' : ''}>
-        <span><span class="choice-title">Send me club news and renewal reminders</span><span class="choice-text">Sent to your email address above.</span></span></label>
+      ${other ? '' : `<label class="choice"><input type="checkbox" id="mdNews"${ME.news ? ' checked' : ''}>
+        <span><span class="choice-title">Send me club news and renewal reminders</span><span class="choice-text">Sent to your email address above.</span></span></label>`}
+      ${ME.inFamily && !other && !ME.junior ? `<label class="choice"><input type="checkbox" id="mdHide"${ME.hide ? ' checked' : ''}>
+        <span><span class="choice-title">Hide me from my family's view</span><span class="choice-text">Your family won't see your card, results or bookings when they sign in. You still see theirs.</span></span></label>` : ''}
       <p class="form-error" id="mdError" role="alert" hidden></p>
-      <button type="submit" class="btn btn-primary btn-big" id="mdSubmit">Save my details</button>
+      <button type="submit" class="btn btn-primary btn-big" id="mdSubmit">Save ${other ? esc(who) + "'s" : 'my'} details</button>
     </form></section>`;
 }
 async function saveDetails(form) {
   const btn = form.querySelector('#mdSubmit'), error = form.querySelector('#mdError'), val = id => form.querySelector(id).value.trim();
   if (btn.disabled) return;
   const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
-  const d = { mobile: val('#mdMobile'), emName: val('#mdEmName'), emRelation: val('#mdEmRelation'), emPhone: val('#mdEmPhone'), news: form.querySelector('#mdNews').checked };
-  if ((d.emName || d.emRelation || d.emPhone) && !d.emName) return fail("Please type your emergency contact's name.", '#mdEmName');
-  if (d.emName && !d.emPhone) return fail("Please type your emergency contact's phone number.", '#mdEmPhone');
+  const tick = id => { const box = form.querySelector(id); return box ? box.checked : undefined; }, label = btn.textContent;
+  const d = { mobile: val('#mdMobile'), emName: val('#mdEmName'), emRelation: val('#mdEmRelation'), emPhone: val('#mdEmPhone'), news: !!tick('#mdNews'), hide: tick('#mdHide') };
+  if ((d.emName || d.emRelation || d.emPhone) && !d.emName) return fail("Please type the emergency contact's name.", '#mdEmName');
+  if (d.emName && !d.emPhone) return fail("Please type the emergency contact's phone number.", '#mdEmPhone');
   error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try {
     ME = await memberApi('memberSaveDetails', [d]);
-    meNote = 'Saved. Your details are up to date.';
+    meNote = viewingOther() ? `Saved. ${ME.viewing.first}'s details are up to date.` : 'Saved. Your details are up to date.';
     form.remove(); render();
     view.focus();
   } catch (e) {
     if (e.signedOut) return;
-    btn.disabled = false; btn.textContent = 'Save my details';
+    btn.disabled = false; btn.textContent = label;
     fail(e.message);
   }
 }
@@ -2705,12 +2755,13 @@ async function changeEmail(form) {
   error.hidden = true; btn.disabled = true; btn.textContent = emailChange ? 'Checking…' : 'Sending…';
   try {
     if (!emailChange) {
-      await memberApi('memberChangeEmail', [email]);
+      await memberApi('memberChangeEmail', [email], true);
       emailChange = { email };
       form.remove(); render();
       return document.getElementById('ecCode').focus();
     }
-    ME = await memberApi('memberConfirmEmail', [email, code]);
+    await memberApi('memberConfirmEmail', [email, code], true);
+    ME = null; meState = '';
     emailChange = null;
     meNote = `Done. Your email is now ${email}. Use it to sign in to On Target from now on.`;
     form.remove(); go('#/me/details');
@@ -3180,7 +3231,7 @@ const BENCH_WORD = { free: 'free', taken: 'taken', competition: 'kept for a comp
 
 function bookView() {
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
-  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Book a bench</h1></div>`;
+  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Book a bench</h1>${viewingOther() ? viewingLine() + `<p class="muted">This booking will be in ${esc(ME.viewing.first)}'s name.</p>` : ''}</div>`;
   if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(3)}</section>`;
   const info = BENCH.info, p = BENCH.pick, day = info.days.find(d => d.date === p.date), range = rangeOf(info.ranges, p.range), map = BENCH.map;
   if (!info.days.length) return head + `<section class="section">${empty('No range days to book', 'Please check back soon.')}</section>`;
@@ -3242,7 +3293,7 @@ async function bookBench() {
 const bookingStarted = b => { const now = new Date(), t = time24(b.start) || '00:00'; return b.date < todayIso() || (b.date === todayIso() && now.getHours() * 60 + now.getMinutes() >= Number(t.slice(0, 2)) * 60 + Number(t.slice(3))); };
 function bookingsView() {
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
-  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>My bookings</h1></div>`;
+  const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} bookings</h1>${viewingLine()}</div>`;
   if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(2)}</section>`;
   const info = BENCH.info, what = x => `${esc(info.sessions[x.session])}${x.start ? ' · ' + esc(sessionTimes([x.start, x.end])) : ''}`;
   const pill = { Waiting: 'amber', Declined: 'grey' };
@@ -3298,7 +3349,7 @@ const radios = (name, list, picked) => list.map(([value, title, text]) => `<labe
   <span><span class="choice-title">${esc(title)}</span>${text ? `<span class="choice-text">${esc(text)}</span>` : ''}</span></label>`).join('');
 function requestView() {
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
-  const head = `<div class="page-title"><a class="back-link" href="#/me/bookings">${ICON.chev}My bookings</a><h1>Request a booking</h1>
+  const head = `<div class="page-title"><a class="back-link" href="#/me/bookings">${ICON.chev}My bookings</a><h1>Request a booking</h1>${viewingLine()}
     <p class="muted">For a Tuesday, Thursday or Friday. A range officer will answer by email.</p></div>`;
   if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(3)}</section>`;
   const info = BENCH.info, days = info.appointmentDays;
@@ -3705,6 +3756,340 @@ view.addEventListener('submit', e => {
   const out = document.getElementById('calcResult');
   out.innerHTML = calculatorResult(shootsNeeded(held));
   out.scrollIntoView({ block: 'start', behavior: 'smooth' });
+});
+
+/* ---------- Families (v2.4.0) ----------
+   One sign-in covers a family membership. The name chips on Me choose whose card, results and bookings are on
+   show (VIEW_AS); the server decides on every request who may be viewed, so nothing here is trusted.
+   Admins set families up in All members & status, and can bring in the club's members list spreadsheet. */
+let FAM = { key: '', name: '', email: '' };          // My family: adding a family member's own email ({email} once a code has gone)
+let MEMADMIN = { id: '', data: null, state: '', note: '', error: '' };   // All members & status: the member that is open
+let IMPORT = { name: '', rows: null, report: null, state: '', error: '', note: '' };   // memory only, like all member details
+function familyLeave(page) {
+  if (page !== 'me/family') FAM = { key: '', name: '', email: '' };
+  if (page !== 'committee/member') MEMADMIN = { id: '', data: null, state: '', note: '', error: '' };
+  if (page !== 'committee/import') IMPORT = { name: '', rows: null, report: null, state: '', error: '', note: '' };
+}
+
+/* ----- My family (from My details) ----- */
+function familyView() {
+  const back = `<div class="page-title"><a class="back-link" href="#/me/details">${ICON.chev}My details</a><h1>My family</h1>`;
+  if (FAM.key) return `${back}</div>
+    <section class="section"><form class="card form" id="famEmailForm" novalidate>
+      <h2 class="form-head">${esc(FAM.name)}'s own email</h2>
+      ${FAM.email ? `
+      <p class="notice" role="status">We've sent a code to ${esc(FAM.email)}. It lasts 15 minutes.</p>
+      <label class="field-label" for="feCode">The 6-digit code from that email</label>
+      <input class="field pin-box" id="feCode" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6">
+      <p class="form-error" id="feError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="feSubmit">Confirm ${esc(FAM.name)}'s email</button>
+      <button type="button" class="btn btn-outline btn-big" data-fam-back>Use a different address</button>` : `
+      <p class="muted">With their own email, ${esc(FAM.name)} can sign in to On Target separately. They still show in your family view, and you in theirs.</p>
+      <label class="field-label" for="feEmail">${esc(FAM.name)}'s email address</label>
+      <input class="field" id="feEmail" type="email" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120">
+      <p class="muted">We'll email a 6-digit code to that address. Nothing changes until the code is typed in here.</p>
+      <p class="form-error" id="feError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="feSubmit">Email them a code</button>
+      <button type="button" class="btn btn-outline btn-big" data-fam-cancel>Cancel</button>`}
+    </form></section>`;
+  const fam = (ME.family || []), self = !viewingOther();
+  return `${back}<p class="muted">Everyone on your family membership. On Me, tap a name to see that person's card, results and bookings.</p></div>
+    <section class="section">
+      ${meNote ? `<p class="notice" role="status">${esc(meNote)}</p>` : ''}
+      ${fam.length ? `<div class="card list">${fam.map(f => `
+        <div class="list-row"><div class="list-main"><div class="list-title">${esc(f.name)}${f.self ? ' <span class="lab lab-tag">You</span>' : ''}${f.junior ? ' <span class="junior-tag">Junior</span>' : ''}</div>
+          <div class="muted">${f.self || f.ownEmail ? 'Signs in with their own email' : 'Uses the family sign-in'}</div></div>
+          ${!f.self && !f.ownEmail ? `<button type="button" class="btn btn-outline" data-fam-email="${esc(f.key)}">Add their own email</button>` : ''}</div>`).join('')}</div>`
+        : empty('Just you for now', 'Nobody else is on your family membership yet.')}
+      <p class="muted">A family member who has chosen “Hide me from my family's view” isn't listed. To add or remove a family member, <a href="mailto:info@ravenshoegunclub.com.au?subject=${encodeURIComponent('My family membership')}">ask the club</a>.</p>
+    </section>`;
+}
+async function familyEmail(form) {
+  const btn = form.querySelector('#feSubmit'), error = form.querySelector('#feError'), label = btn.textContent;
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const box = form.querySelector(FAM.email ? '#feCode' : '#feEmail');
+  const email = FAM.email || box.value.trim().toLowerCase(), code = FAM.email ? box.value.replace(/\D/g, '') : '';
+  if (!FAM.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('Please check the email address.', box);
+  if (FAM.email && code.length !== 6) return fail('Please type all 6 digits of the code.', box);
+  error.hidden = true; btn.disabled = true; btn.textContent = FAM.email ? 'Checking…' : 'Sending…';
+  try {
+    if (!FAM.email) {
+      await memberApi('familyEmailStart', [FAM.key, email], true);
+      FAM.email = email;
+      form.remove(); render();
+      return document.getElementById('feCode').focus();
+    }
+    await memberApi('familyEmailConfirm', [FAM.key, email, code], true);
+    meNote = `Done. ${FAM.name} can now sign in to On Target with ${email}.`;
+    FAM = { key: '', name: '', email: '' }; ME = null; meState = '';
+    form.remove(); render();
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    fail(e.message, box);
+  }
+}
+
+/* ----- Admins: one member, and their family ("Add to family" / "Remove from family") ----- */
+const membersBack = `<a class="back-link" href="#/committee/members">${ICON.chev}All members &amp; status</a>`;
+async function loadMemberAdmin(id) {
+  if (MEMADMIN.state === 'loading') return;
+  MEMADMIN.id = id; MEMADMIN.state = 'loading';
+  try { MEMADMIN.data = await committeeApi('familyGet', [id]); MEMADMIN.state = ''; }
+  catch (e) { if (e.signedOut) { MEMADMIN.state = ''; return; } MEMADMIN.state = 'failed'; MEMADMIN.error = e.message; }
+  if (currentPage === 'committee/member') render(true);
+}
+function memberAdminView(arg) {
+  const id = decodeURIComponent(arg || '');
+  if (!id) { location.replace('#/committee/members'); return ''; }
+  if (MEMADMIN.id !== id) MEMADMIN = { id, data: null, state: '', note: MEMADMIN.note, error: '' };
+  if (!MEMADMIN.data && MEMADMIN.state !== 'failed') setTimeout(() => loadMemberAdmin(id), 0);
+  const d = MEMADMIN.data;
+  if (!d) return `<div class="page-title">${membersBack}<h1>Member</h1></div><section class="section">${MEMADMIN.state === 'failed'
+    ? `<div class="card empty"><div class="empty-title">Can't open that member</div><p class="muted">${esc(MEMADMIN.error)}</p><button type="button" class="btn btn-outline" data-memadmin-reload>${ICON.refresh}Try again</button></div>` : skeletonRows(3)}</section>`;
+  const b = MEM_BADGE[d.status] || MEM_BADGE.none, fam = d.family, year = new Date().getFullYear();
+  const tags = m => `<span class="mbadge mbadge-fam">${m.role === 'Primary' ? 'Pays' : m.role}${m.yob ? ', born ' + m.yob : ''}</span>${m.ownEmail ? '<span class="mbadge mbadge-grey">Own sign-in</span>' : ''}${m.hidden ? '<span class="mbadge mbadge-grey">Hidden from family</span>' : ''}`;
+  const others = fam ? fam.members.filter(m => m.id !== d.id) : [], me = fam ? fam.members.find(m => m.id === d.id) : null;
+  return `
+    <div class="page-title">${membersBack}<h1>${esc(d.name)}</h1></div>
+    <section class="section">
+      ${MEMADMIN.note ? `<p class="notice" role="status">${esc(MEMADMIN.note)}</p>` : ''}
+      <div class="card form">
+        <div class="detail-row"><span class="muted">SSAA number</span><b>${esc(d.ssaa || 'None on our records')}</b></div>
+        <div class="detail-row"><span class="muted">Membership</span><b>${esc(d.type || 'None')}${d.expiry ? ' · ' + (d.status === 'expired' ? 'expired ' : 'to ') + niceDate(d.expiry) : ''}</b></div>
+        <div class="mem-badges"><span class="mbadge mbadge-${b[0]}">${b[1]}</span>${me ? tags(me) : ''}</div>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2 class="caps-head">Family</h2></div>
+      ${fam ? `<p class="muted">${fam.isPrimary ? `${esc(d.name)} pays for this family membership. Everyone in it has the same status.` : fam.primary ? `In ${esc(fam.primary.name)}'s family. <a href="#/committee/member/${encodeURIComponent(fam.primary.id)}">Open ${esc(fam.primary.name)}</a> to add people.` : 'In a family whose paying member can no longer be found.'}</p>
+        ${others.length ? `<div class="card list">${others.map(m => `<div class="mem-row"><div class="list-main"><div class="list-title">${esc(m.name)}</div><div class="mem-badges">${tags(m)}</div></div>
+          ${m.role === 'Primary' ? '' : `<button type="button" class="btn btn-outline" data-fam-remove="${esc(m.id)}">Remove from family</button>`}</div>`).join('')}</div>` : '<p class="muted">Nobody else is in this family yet.</p>'}
+        ${!fam.isPrimary || !others.length ? `<button type="button" class="btn btn-danger" data-fam-remove="${esc(d.id)}">Remove ${esc(d.name)} from ${fam.isPrimary ? 'the' : 'this'} family</button>` : ''}`
+      : `<p class="muted">${esc(d.name)} is not in a family.</p>`}
+      ${d.familyText && d.canAdd ? `<p class="notice">On their form, the family members were given as: <b>${esc(d.familyText)}</b></p>` : ''}
+    </section>
+    ${d.canAdd ? `<section class="section"><form class="card form" id="famAddForm" novalidate>
+      <h2 class="form-head">Add to ${esc(d.name)}'s family</h2>
+      <p class="muted">${esc(d.name)} is the one who pays. Each family member gets their own membership card, and the family's status.</p>
+      <fieldset class="choices"><legend class="field-label">Who are you adding?</legend>${radios('faWho', [['new', 'Someone new', 'Not in the members list yet, e.g. a child'], ['old', 'Someone already in the members list', 'They keep their results and details']], 'new')}</fieldset>
+      <div id="faNew">
+        <label class="field-label" for="faFirst">First name</label><input class="field" id="faFirst" maxlength="40" autocomplete="off" autocapitalize="words">
+        <label class="field-label" for="faLast">Surname</label><input class="field" id="faLast" maxlength="40" autocomplete="off" autocapitalize="words">
+        <label class="field-label" for="faSsaa">SSAA number <span class="field-hint">if they have one</span></label><input class="field" id="faSsaa" maxlength="20" autocomplete="off">
+      </div>
+      <div id="faOld" hidden>
+        <label class="field-label" for="faPick">Which member?</label>
+        <select class="field" id="faPick"><option value="">Choose a member…</option>${d.candidates.map(m => `<option value="${esc(m.id)}">${esc(m.name)}${m.ssaa ? ' (SSAA ' + esc(m.ssaa) + ')' : ''}</option>`).join('')}</select>
+      </div>
+      <label class="field-label" for="faYob">Year of birth <span class="field-hint">juniors (under 18) only; leave empty for an adult</span></label>
+      <input class="field" id="faYob" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. ${year - 12}">
+      <p class="form-error" id="faError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="faSubmit">Add to family</button>
+    </form></section>` : ''}`;
+}
+async function addToFamily(form) {
+  const btn = form.querySelector('#faSubmit'), error = form.querySelector('#faError'), val = id => form.querySelector(id).value.trim();
+  if (btn.disabled) return;
+  const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
+  const old = (form.querySelector('input[name="faWho"]:checked') || {}).value === 'old', yob = val('#faYob');
+  const d = old ? { memberId: val('#faPick'), yob } : { first: val('#faFirst'), last: val('#faLast'), ssaa: val('#faSsaa'), yob };
+  if (old && !d.memberId) return fail('Please choose a member from the list.', '#faPick');
+  if (!old && !d.first) return fail('Please type their first name.', '#faFirst');
+  if (!old && !d.last) return fail('Please type their surname.', '#faLast');
+  if (yob && !/^\d{4}$/.test(yob)) return fail('Please type the year of birth as four digits, or leave it empty for an adult.', '#faYob');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    const out = await committeeApi('familyAdd', [MEMADMIN.id, d]);
+    MEMADMIN.note = (out && out.message) || 'Added.'; MEMADMIN.data = null; ADMIN.mem.items = null;
+    form.remove(); render();
+  } catch (e) { if (e.signedOut) return; btn.disabled = false; btn.textContent = 'Add to family'; fail(e.message); }
+}
+function askRemoveFromFamily(id) {
+  const d = MEMADMIN.data, m = d && d.family && d.family.members.find(x => x.id === id);
+  if (!m) return;
+  confirmAsk({ title: `Remove ${m.name} from the family?`, text: `It takes effect straight away, even on phones already signed in: the family no longer sees ${m.name}, and ${m.name} no longer has the family's membership.`,
+    yes: 'Yes, remove them', busy: 'Removing…', no: 'No, go back', run: () => committeeApi('familyRemove', [id]),
+    done: out => { MEMADMIN.note = (out && out.message) || 'Removed.'; MEMADMIN.data = null; ADMIN.mem.items = null; render(); } });
+}
+
+/* ----- Admins: import the club's members list spreadsheet -----
+   The file is read here, on the admin's own device (an Excel .xlsx or a .csv), and only the rows are sent.
+   The server first says what WOULD happen to every row; nothing is added until the admin agrees. */
+const IMPORT_COLS = [['last', /^(surname|last name|family name)\b/], ['first', /^(first name|given name|first)\b/], ['ssaa', /ssaa/], ['type', /single or family|^membership/], ['group', /family group/],
+  ['paidTo', /paid up to|paid to|^expiry/], ['mobile', /mobile|phone/], ['email', /e ?mail/], ['notes', /^notes?\b/], ['yob', /year of birth|birth year|\byob\b/]];
+/* A heading as typed ("Surname *", "SURNAME:", "First Name (required)") -> plain lower-case words, so small differences don't matter */
+const importHead = v => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/* A date as typed in the spreadsheet -> yyyy-mm-dd, or the text itself when it can't be read (the server then says so) */
+function importDate(v) {
+  const t = String(v == null ? '' : v).trim(), pad = n => String(n).padStart(2, '0'), iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+  let m;
+  if (!t) return '';
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t))) return iso(m[1], m[2], m[3]);
+  if ((m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(t))) return iso(m[3], m[2], m[1]); // day first, as written in Australia
+  if ((m = /^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})$/.exec(t))) { const at = MONTHS.indexOf(m[2].toUpperCase()); if (at >= 0) return iso(m[3], at + 1, m[1]); }
+  if (/^\d{5}(\.\d+)?$/.test(t)) { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(Number(t)) * 86400000); return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()); } // Excel's day number
+  return t;
+}
+function csvCells(text) {
+  const rows = [[]]; let cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') quoted = false; else cell += ch; }
+    else if (ch === '"') quoted = true;
+    else if (ch === ',') { rows[rows.length - 1].push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; rows[rows.length - 1].push(cell); cell = ''; rows.push([]); }
+    else cell += ch;
+  }
+  rows[rows.length - 1].push(cell);
+  return rows;
+}
+/* An .xlsx file is a zip of XML files. This opens every sheet with what the browser already has: no library.
+   Gives back one grid of cells for each sheet, in the files' own order. */
+async function xlsxCells(buf) {
+  const view = new DataView(buf), bytes = new Uint8Array(buf), text = new TextDecoder();
+  let end = buf.byteLength - 22;
+  while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) throw new Error('not a zip');
+  const files = {};
+  for (let at = view.getUint32(end + 16, true), n = view.getUint16(end + 10, true); n > 0; n--) {
+    const nameLen = view.getUint16(at + 28, true), local = view.getUint32(at + 42, true);
+    files[text.decode(bytes.subarray(at + 46, at + 46 + nameLen))] = { method: view.getUint16(at + 10, true), size: view.getUint32(at + 20, true), local };
+    at += 46 + nameLen + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  const read = async name => {
+    const f = files[name];
+    if (!f) return '';
+    const start = f.local + 30 + view.getUint16(f.local + 26, true) + view.getUint16(f.local + 28, true), data = bytes.subarray(start, start + f.size);
+    if (f.method === 0) return text.decode(data);
+    return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  };
+  const xml = async name => new DOMParser().parseFromString(await read(name), 'application/xml');
+  const all = (node, tag) => [...node.getElementsByTagNameNS('*', tag)]; // whatever prefix the file's maker gave the tags
+  // Phonetic guides (rPh) are left out of a cell's text
+  const words = node => all(node, 't').filter(t => !(t.parentNode && t.parentNode.localName === 'rPh')).map(t => t.textContent).join('');
+  const shared = all(await xml('xl/sharedStrings.xml'), 'si').map(words);
+  const sheets = Object.keys(files).filter(n => /^xl\/worksheets\/[^\/]+\.xml$/.test(n)).sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 0) - (parseInt(b.replace(/\D/g, ''), 10) || 0));
+  if (!sheets.length) throw new Error('no sheet');
+  const grids = [];
+  for (const sheet of sheets) {
+    const rows = [];
+    all(await xml(sheet), 'row').forEach((row, i) => {
+      const at = (Number(row.getAttribute('r')) || i + 1) - 1, cells = rows[at] = [];
+      all(row, 'c').forEach((c, j) => {
+        let col = 0;
+        for (const ch of (c.getAttribute('r') || '').replace(/[^A-Za-z]/g, '').toUpperCase()) col = col * 26 + ch.charCodeAt(0) - 64;
+        const v = all(c, 'v')[0], type = c.getAttribute('t');
+        cells[(col || j + 1) - 1] = type === 's' ? shared[Number(v && v.textContent)] || '' : type === 'inlineStr' ? words(c) : v ? v.textContent : '';
+      });
+    });
+    grids.push(Array.from(rows, r => Array.from(r || [], c => c == null ? '' : c)));
+  }
+  return grids;
+}
+/* The sheets' cells -> the rows the server takes. The members are on the first sheet that has a heading row with
+   "Surname" in it (a template often has a notes or instructions sheet first, and a title above the headings). */
+function importRows(grids) {
+  const clean = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim(), is = n => c => IMPORT_COLS[n][1].test(importHead(c));
+  // The heading row has "Surname" AND "First name" in it: a line of instructions that only mentions one of them isn't it
+  let cells = null, head = -1;
+  for (const g of grids) { head = g.findIndex(r => r && r.some(is(0)) && r.some(is(1))); if (head >= 0) { cells = g; break; } }
+  if (!cells) {
+    // Say what was found, so it is plain what to change
+    const first = (grids.find(g => g.some(r => r && r.some(c => clean(c)))) || []).find(r => r && r.some(c => clean(c))) || [];
+    const seen = first.map(clean).filter(Boolean).slice(0, 8).join(', ');
+    throw new Error(`That file has no row of headings with "Surname" and "First name" in it. Please use the RDSS Members list template.${seen ? ` The first row On Target can read is: ${seen}.` : ' On Target could not read any words in it.'}`);
+  }
+  const at = {};
+  cells[head].forEach((h, i) => { const hit = IMPORT_COLS.find(([key, re]) => !(key in at) && re.test(importHead(h))); if (hit) at[hit[0]] = i; });
+  const out = [];
+  let examples = 0;
+  cells.slice(head + 1).forEach((r, i) => {
+    const get = key => key in at && r ? clean(r[at[key]]) : '';
+    const row = { line: head + i + 2, last: get('last'), first: get('first'), ssaa: get('ssaa').replace(/\.0$/, ''), type: get('type'), group: get('group'), paidTo: importDate(get('paidTo')),
+      mobile: get('mobile'), email: get('email'), notes: get('notes'), yob: get('yob').replace(/\.0$/, '') };
+    if (/^\d{9}$/.test(row.mobile) && /^[2-478]/.test(row.mobile)) row.mobile = '0' + row.mobile; // Excel drops the leading 0 of a number
+    // The template's own example rows ("EXAMPLE – Citizen") are never members
+    if ([row.last, row.first, row.notes].some(v => /^example\b/i.test(v))) examples++;
+    else if (row.last || row.first || row.ssaa || row.email) out.push(row);
+  });
+  if (!out.length) throw new Error(`There are no members under the headings in that file yet${examples ? ' (only the example rows, which are left out)' : ''}. Fill in the template, save it, and choose it again.`);
+  out.examples = examples;
+  return out;
+}
+async function chooseImport(file) {
+  IMPORT = { name: file.name, rows: null, report: null, state: 'reading', error: '', note: '' };
+  render(true);
+  try {
+    const grids = /\.csv$/i.test(file.name) ? [csvCells((await file.text()).replace(/^\uFEFF/, ''))] : await xlsxCells(await file.arrayBuffer());
+    IMPORT.rows = importRows(grids);
+    IMPORT.examples = IMPORT.rows.examples || 0;
+  } catch (e) {
+    IMPORT.state = 'failed';
+    console.warn('Import', e);
+    IMPORT.error = /template|no members|headings/.test(e.message) ? e.message : "That file can't be read. Please choose the members list saved as an Excel workbook (.xlsx) or as CSV.";
+    return render(true);
+  }
+  checkImport();
+}
+async function checkImport() {
+  IMPORT.state = 'checking'; render(true);
+  try { IMPORT.report = await committeeApi('membersImport', [IMPORT.rows, false]); IMPORT.state = ''; }
+  catch (e) { if (e.signedOut) return; IMPORT.state = 'failed'; IMPORT.error = e.message; }
+  if (currentPage === 'committee/import') render(true);
+}
+function importView() {
+  const r = IMPORT.report, n = (k, one, many) => `<div class="admin-count"><span>${r[k] === 1 ? one : many}</span><b>${r[k]}</b></div>`;
+  const rows = r ? r.rows.slice().sort((a, b) => (b.problem ? 1 : 0) - (a.problem ? 1 : 0) || a.line - b.line) : [];
+  return `
+    <div class="page-title">${adminBack}<h1>Import members list</h1><p class="muted">Brings the club's members list spreadsheet into On Target.</p></div>
+    <section class="section">
+      ${IMPORT.note ? `<p class="notice" role="status">${esc(IMPORT.note)}</p>` : ''}
+      <div class="card form">
+        <p>Use the <b>RDSS Members list – template</b>. Its headings are: Surname, First name, SSAA member number, Single or Family, Family group, Paid up to, Mobile, Email, Notes, Year of birth (juniors only).</p>
+        <p class="muted">Give everyone in one family the same name under “Family group”. The first adult listed in a family is taken as the one who pays.</p>
+        <input type="file" id="imFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <button type="button" class="btn ${r ? 'btn-outline' : 'btn-primary'} btn-big" data-import-choose${IMPORT.state === 'reading' || IMPORT.state === 'checking' ? ' disabled' : ''}>${ICON.doc}${IMPORT.name ? 'Choose a different file' : 'Choose the file'}</button>
+        ${IMPORT.name ? `<p class="muted" role="status">${IMPORT.state === 'reading' ? 'Reading ' : IMPORT.state === 'checking' ? 'Checking ' : 'Chosen: '}${esc(IMPORT.name)}${IMPORT.state === 'reading' || IMPORT.state === 'checking' ? '…' : ''}</p>` : ''}
+        ${IMPORT.state === 'failed' ? `<p class="form-error" role="alert">${esc(IMPORT.error)}</p>` : ''}
+      </div>
+      ${IMPORT.state === 'checking' ? skeletonRows(3) : ''}
+      ${r ? `<div class="admin-counts">${n('added', 'New member', 'New members')}${n('already', 'Already in the list', 'Already in the list')}${n('families', 'Family', 'Families')}
+          ${r.problems ? `<div class="admin-count red"><span>${r.problems === 1 ? 'Row with a problem' : 'Rows with a problem'}</span><b>${r.problems}</b></div>` : ''}</div>
+        ${IMPORT.examples ? `<p class="muted">${IMPORT.examples === 1 ? 'The example row is' : 'The ' + IMPORT.examples + ' example rows are'} left out.</p>` : ''}
+        <p class="muted">Nothing has been added yet. Rows with a problem are left out: fix them in the spreadsheet and choose the file again. Nobody already in the members list is changed, except to be put in their family.</p>
+        ${r.added ? `<button type="button" class="btn btn-primary btn-big" data-import-go>Add ${r.added} new member${r.added === 1 ? '' : 's'}</button>` : '<p class="notice">There is nobody new to add from this file.</p>'}
+        <div class="card list">${rows.map(x => `<div class="mem-row${x.problem ? ' not-financial' : ''}"><div class="list-main"><div class="list-title">${esc(x.name)}</div>
+          <div class="muted">Row ${x.line} · ${x.problem ? `<b class="import-bad">${esc(x.problem)}</b>` : esc(x.note)}</div></div></div>`).join('')}</div>` : ''}
+    </section>`;
+}
+function askImport() {
+  const r = IMPORT.report;
+  if (!r || !r.added) return;
+  confirmAsk({ title: `Add ${r.added} new member${r.added === 1 ? '' : 's'}?`, text: 'They go into the private Members spreadsheet with the "Paid up to" date from your file. No emails are sent.',
+    yes: 'Yes, add them', busy: 'Adding… this can take a minute', no: 'No, go back', run: () => committeeApi('membersImport', [IMPORT.rows, true]),
+    done: out => { IMPORT = { name: '', rows: null, report: null, state: '', error: '', note: (out && out.message) || 'Done.' }; ADMIN.mem.items = null; ADMIN.summaryAt = 0; render(true); } });
+}
+
+view.addEventListener('click', e => {
+  let v; const hit = attr => { const x = e.target.closest(`[${attr}]`); if (!x || x.disabled) return null; v = x.getAttribute(attr); return x; };
+  if (hit('data-view-as')) viewAs(v);
+  if (hit('data-fam-email') && ME && ME.family) { const f = ME.family.find(x => x.key === v); if (f) { FAM = { key: f.key, name: f.first, email: '' }; meNote = ''; render(); } }
+  if (hit('data-fam-cancel')) { FAM = { key: '', name: '', email: '' }; render(); }
+  if (hit('data-fam-back')) { FAM.email = ''; render(); }
+  if (hit('data-memadmin-reload')) { MEMADMIN.state = ''; render(true); }
+  if (hit('data-fam-remove')) askRemoveFromFamily(v);
+  if (hit('data-import-choose')) document.getElementById('imFile').click();
+  if (hit('data-import-go')) askImport();
+});
+view.addEventListener('submit', e => {
+  if (e.target.id === 'famEmailForm') { e.preventDefault(); familyEmail(e.target); }
+  if (e.target.id === 'famAddForm') { e.preventDefault(); addToFamily(e.target); }
+});
+view.addEventListener('change', e => {
+  if (e.target.id === 'imFile' && e.target.files[0]) chooseImport(e.target.files[0]);
+  if (e.target.name === 'faWho') { const old = e.target.value === 'old', form = e.target.form; form.querySelector('#faOld').hidden = !old; form.querySelector('#faNew').hidden = old; }
 });
 
 drawDot();
