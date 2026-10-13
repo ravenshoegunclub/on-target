@@ -71,6 +71,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
   - Member statuses on the card use the same logic as the Admin section (`memberStatus_`, `MEMBER_SEASON_`).
   - Safeguard: when a contact email is replaced without the club team checking (an automatic link with "Yes", or a member switching to "Yes" later), a short notice goes to the OLD address, and the automatic link shows "Email changed" under "App sign-ups to check" (saved as the status "Linked automatically – email changed").
 - **Me (v2.0.0):** the bottom bar is always five buttons: Home, Events, Results, Photos, Me. There is no More tab, no Club team tab and nothing in the top bar (`#/more` and `#/committee` go to `#/me`; the club team's screens are still `#/committee/...`, with "Me" as their back link). Me shows, top to bottom: the member sign-in box or the membership card with My results / Renew / My details (`#/me/results`, `#/me/details`); "Club admin" for anyone signed in with a PIN (Messages with an "x new" badge, Post something new, Manage posts, Admin); "Club" links; one Sign out for both sign-ins; "Club team? Sign in with your PIN" when nobody is signed in; Refresh club data and the version line last. A red dot on Me means new messages for the club team. "Add On Target to your phone" is a gold row, hidden when running as an installed app.
+- **Home when signed in (v2.1.2, front end only):** a linked member (email sign-in, or a PIN linked to a member) sees "G'day <first name>" and My card · My results · Documents · FAQs (`homeMember`, `homeTiles`). Renew takes the place of Documents when the status is Not renewed yet, Not financial – renewal overdue or Expired; it opens the same form as Me, Renew. Visitors and an unlinked PIN keep Join · Visit us · Fees · FAQs and "Welcome to the club".
 - **v2.1.0 (all new functions in `Api.js`):**
   - **One email for everything.** Linking makes the sign-in email the contact email too (the old one goes to "Previous email", with the notice to the old address). The first-time screen and My details have a tick box "Send me club news and renewal reminders" (the "Use for club news" column) in place of Yes / Sign-in only. `memberSetContact` is kept only for phones still on v2.0.0.
   - **Signed-in members are recognised ONLY by the "App email" column, never the join form's Email column** (families share emails). One sign-in email links to one membership: a second person gets "This email is already linked to another member. Please use your own email address."
@@ -104,7 +105,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **2.1.1**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **2.1.2**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.

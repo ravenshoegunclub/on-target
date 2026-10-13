@@ -1,4 +1,4 @@
-/* On Target v2.1.1 — club styles */
+/* On Target v2.1.2 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -175,6 +175,9 @@ h1, h2, h3 { font-family: Montserrat, sans-serif; font-weight: 800; margin: 0; }
   text-decoration: none; color: var(--text); font: 600 13px Poppins, sans-serif; min-width: 0;
 }
 .tile-ico { width: 40px; height: 40px; border-radius: 12px; background: var(--tint); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+/* Small phones: "Documents" and "My results" must still fit on one line */
+@media (max-width: 380px) { .tiles { gap: 8px; padding-left: 12px; padding-right: 12px; } .tiles .tile { font-size: 12px; padding-left: 2px; padding-right: 2px; } }
+@media (max-width: 340px) { .tiles { gap: 6px; } .tiles .tile { font-size: 11px; } }
 .tile-ico svg { width: 21px; height: 21px; }
 
 .list { padding: 4px 16px; }

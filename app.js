@@ -1,10 +1,10 @@
-/* On Target v2.1.1 — app shell with live club data and club team tools
+/* On Target v2.1.2 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.1.2';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -36,6 +36,8 @@ const ICON = {
   pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   fees: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
   help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg>',
+  card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.5 1.7-2.2 3-2.2s2.4.7 3 2.2M14 10h4M14 14h4"/></svg>',
+  star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
   doc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
@@ -214,17 +216,35 @@ async function shareEvent(ev) {
 }
 
 /* ---------- Views ---------- */
+/* Home for a signed-in member (by email, or a club team PIN an admin has linked to a membership): their first name,
+   their status and their renewal form. null for visitors and for a PIN that isn't linked: they get the visitor's Home.
+   Until the membership has been fetched, a member's Home is drawn from what the phone remembers (ot:member). */
+function homeMember() {
+  if ((member || session) && !ME && meState !== 'failed' && meState !== 'loading') setTimeout(loadMe, 0);
+  if (ME) return ME.linked && ME.first ? { first: ME.first, status: meStatus(ME), renew: ME.renew && ME.renew.open ? ME.renew.url : '' } : null;
+  return member && member.first && member.status ? { first: member.first, status: member.status, renew: '' } : null;
+}
+/* The four buttons on Home. Renew takes the place of Documents once a member needs to renew. */
+const RENEW_DUE = ['notRenewed', 'overdue', 'expired'];
+function homeTiles(mine) {
+  const tile = (icon, label, href) => `<a class="tile" href="${esc(href)}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}</a>`;
+  if (!mine) return tile(ICON.join, 'Join', JOIN_URL) + tile(ICON.pin, 'Visit us', VISIT_URL) + tile(ICON.fees, 'Fees', JOIN_URL) + tile(ICON.help, 'FAQs', FAQ_URL);
+  return tile(ICON.card, 'My card', '#/me') + tile(ICON.star, 'My results', '#/me/results')
+    + (RENEW_DUE.includes(mine.status) ? tile(ICON.refresh, 'Renew', mine.renew || '#/me') : tile(ICON.doc, 'Documents', '#/me/documents'))
+    + tile(ICON.help, 'FAQs', FAQ_URL);
+}
 const VIEWS = {
   home() {
     const rs = rangeStatus();
     const next = events()[0];
     const latest = days()[0];
     const pics = photos().slice(0, 4);
+    const mine = homeMember();
     return `
       <section class="hero">
         ${ICON.rings}
         ${rs.text ? `<div class="status-pill"><span class="status-dot${rs.open ? '' : ' closed'}"></span>${esc(rs.text)}</div>` : ''}
-        <h1>Welcome to the club</h1>
+        <h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1>
       </section>
       <section class="card next-card" aria-label="Next at the range">
         ${DATA.events ? (next ? `
@@ -240,10 +260,7 @@ const VIEWS = {
         : `<span class="eyebrow">Next at the range</span><span class="skel skel-line"></span><span class="skel skel-line short"></span>`}
       </section>
       <nav class="tiles" aria-label="Quick links">
-        <a class="tile" href="${JOIN_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.join}</span>Join</a>
-        <a class="tile" href="${VISIT_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.pin}</span>Visit us</a>
-        <a class="tile" href="${JOIN_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.fees}</span>Fees</a>
-        <a class="tile" href="${FAQ_URL}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.help}</span>FAQs</a>
+        ${homeTiles(mine)}
       </nav>
       <section class="section">
         <div class="section-head"><h2>Latest results</h2><a href="#/results">All results</a></div>
@@ -2323,7 +2340,7 @@ async function loadMe() {
     if (e.signedOut) return;
     meState = auth === meAuth() ? 'failed' : '';
   }
-  if (currentPage.indexOf('me') === 0) render(true);
+  if (currentPage === 'home' || currentPage.indexOf('me') === 0) render(true);
 }
 
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
