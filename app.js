@@ -1,10 +1,10 @@
-/* On Target v2.2.2 — app shell with live club data and club team tools
+/* On Target v2.3.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.2.2';
+const APP_VERSION = '2.3.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -40,6 +40,7 @@ const ICON = {
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
   bench: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18M6 9v10M18 9v10M6 14h12M9 9V5h6v4"/></svg>',
   calc: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/></svg>',
+  ext: '<svg class="chev ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16L17 7M9 7h8v8"/></svg>',
   doc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   web: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
@@ -345,6 +346,7 @@ const VIEWS = {
 
   me(sub) { return meView(sub); },
   calculator() { return calculatorView(); },
+  admin(sub) { return adminView(sub); },
 
   committee(sub, arg) {
     if (!session) return `
@@ -381,7 +383,7 @@ const VIEWS = {
       if (sub === 'person' && !personEdit) { location.replace('#/committee/people'); return ''; } // e.g. the page was reloaded
       return sub === 'signups' ? signupsView() : sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
     }
-    location.replace('#/me'); return ''; // the club team's home is now part of Me
+    location.replace('#/admin'); return ''; // the club team's home is the Club admin screen
   }
 };
 
@@ -672,10 +674,11 @@ async function loadAdminSummary(force) {
     const sum = { season: d.season || '', notRenewed: Number(d.notRenewed) || 0, overdue: Number(d.overdue) || 0, pending: Number(d.pending) || 0 };
     const same = JSON.stringify(sum) === JSON.stringify(ADMIN.summary);
     ADMIN.summary = sum; ADMIN.mem.season = sum.season || '';
-    if (!same && currentPage === 'me') render(true);
+    if (!same && ON_ME()) render(true);
   } catch (e) { /* the counts are only a guide */ }
 }
-const adminBack = `<a class="back-link" href="#/me">${ICON.chev}Me</a>`;
+const ON_ME = () => currentPage === 'me' || currentPage === 'admin'; // the two screens that show the club team's counts
+const adminBack = `<a class="back-link" href="#/admin">${ICON.chev}Club admin</a>`;
 const loadFailed = (what, attr) => `<div class="card empty"><div class="empty-title">Can't load ${what}</div>
   <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" ${attr}>${ICON.refresh}Try again</button></div>`;
 const niceDate = iso => { if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return ''; const d = parseDate(String(iso).slice(0, 10)); return `${d.getDate()} ${mon(d)} ${d.getFullYear()}`; };
@@ -957,7 +960,7 @@ async function loadUnread(force) {
     if (n === msgUnread) return;
     msgUnread = n;
     drawDot();
-    if (currentPage === 'me') render(true);
+    if (ON_ME()) render(true);
   } catch (e) { /* the badge is only a hint */ }
 }
 
@@ -1629,7 +1632,8 @@ let currentPage = '', currentHash = location.hash;
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request'].includes(sub) ? '/' + sub : '');
+    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request'].includes(sub) ? '/' + sub : '')
+    + (name === 'admin' && sub === 'post' ? '/post' : '');
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -1672,7 +1676,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === ({ committee: 'me', more: 'me', calculator: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === ({ committee: 'me', more: 'me', calculator: 'me', admin: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -1903,7 +1907,7 @@ function signOut() {
   if (rs) rs.remove(); // nothing left to ask about
   clearPicked();
   drawDot();
-  if (/^#\/(committee|me\/)/.test(location.hash)) location.hash = '#/me'; else render();
+  if (/^#\/(committee|admin|me\/)/.test(location.hash)) location.hash = '#/me'; else render();
 }
 
 /* Sheets (simple dialogs) */
@@ -2359,10 +2363,14 @@ const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel
 const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
 const menuLink = (icon, label, href) => `<a class="menu-row" href="${href}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
 
-/* Me: the one place for signing in, My membership, the club team's tools and the club links */
+/* Me: signing in, My membership and the club links. The club team's tools are one green button away, on Club admin. */
+const extLink = (icon, label, href) => `<a class="menu-row" href="${href}" target="_blank" rel="noopener"><span class="tile-ico">${icon}</span>${label}<span class="sr-only"> (opens the website)</span>${ICON.ext}</a>`;
+/* Everything waiting for the club team: new messages and booking requests, and for admins payments and app sign-ups too */
+const adminWaiting = () => !session ? 0 : (msgUnread || 0) + (BENCH.waiting || 0) + (session.admin ? ((ADMIN.summary && ADMIN.summary.pending) || 0) + (ADMIN.signCount || 0) : 0);
+function loadAdminCounts() { if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); } }
 function meView(sub) {
   const signedIn = !!(member || session), linked = !!(signedIn && ME && ME.linked);
-  if (sub === 'documents') { if (signedIn) return documentsView(); location.replace('#/me'); return ''; }
+  if (sub === 'documents') return documentsView(); // open to everyone: the server sends only what each person may see
   if (sub && !linked) { if (!signedIn || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
   else if (sub === 'results') return meResults();
   else if (sub === 'details') return meDetails();
@@ -2370,34 +2378,75 @@ function meView(sub) {
   else if (sub === 'book') return bookView();
   else if (sub === 'bookings') return bookingsView();
   else if (sub === 'request') return requestView();
-  if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); }
+  loadAdminCounts();
   const first = (linked && ME.first) || (member && member.first) || (session && String(session.name || '').trim().split(/\s+/)[0]) || '';
-  const canSeeDocs = session || linked || (member && member.status);
   // Signed in with a PIN that no admin has linked to a membership yet
   const linkHint = session && !member && ME && !ME.linked ? `<p class="muted">Link your membership: ${session.admin
     ? 'choose yourself in <a href="#/committee/people">People and PINs</a>.' : 'ask an admin to link you in People and PINs.'}</p>` : '';
+  const waiting = adminWaiting();
+  const adminButton = session ? `<section class="section"><a class="btn-admin" href="#/admin"><span class="tile-ico">${ICON.key}</span>
+      <span class="btn-admin-text"><b>Club admin</b><span>Messages, posts, range, members</span></span>
+      ${waiting ? `<span class="btn-admin-badge" aria-label="${waiting} waiting">${waiting} new</span>` : ''}${ICON.chev}</a></section>` : '';
+  const install = isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`;
+  const visit = menuLink(ICON.pin, 'Visit the range', VISIT_URL), faqs = menuLink(ICON.help, 'FAQs', FAQ_URL), site = extLink(ICON.web, 'Club website', SITE_URL);
+  const contact = menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au'), calc = menuLink(ICON.calc, 'Handgun shoot calculator', '#/calculator');
+  const docs = menuLink(ICON.doc, 'Club documents', '#/me/documents');
+  const signOutRow = `<button type="button" class="menu-row" data-signout-all><span class="tile-ico">${ICON.close}</span>Sign out${ICON.chev}</button>`;
   return `
     <div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1>${linkHint}</div>
     ${memberBlock()}
-    ${session ? clubAdminBlock() : ''}
+    ${adminButton}
     <section class="section">
       <div class="section-head"><h2 class="caps-head">Club</h2></div>
-      <div class="card list">
-        ${signedIn ? (canSeeDocs ? menuLink(ICON.doc, 'Club documents', '#/me/documents') : '') : menuLink(ICON.pin, 'Visit the range', VISIT_URL)}
-        ${menuLink(ICON.calc, 'Handgun shoot calculator', '#/calculator')}
-        ${menuLink(ICON.help, 'FAQs', FAQ_URL)}
-        ${menuLink(ICON.web, 'Club website', SITE_URL)}
-        ${menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au')}
-        ${isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`}
-      </div>
+      <div class="card list">${signedIn
+        ? (canBook() ? menuLink(ICON.bench, 'Book a bench', '#/me/book') : '') + docs + calc + faqs + contact + site + signOutRow + install
+        : visit + faqs + site + contact + calc + docs + install}</div>
     </section>
     <section class="section me-foot">
-      ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>
-        <button type="button" class="btn btn-outline btn-big" data-signout-all>Sign out</button>`
+      ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>`
       : `<p class="muted">Club team? <button type="button" class="link-btn" data-signin>Sign in with your PIN</button></p>`}
     </section>
     <section class="section me-end">
       <p class="muted">On Target v${APP_VERSION}${TEST_SERVER ? ' · TEST SERVER' : ''}</p>
+    </section>`;
+}
+
+/* Club admin (v2.3.0): everything the club team does, on its own screen. Admin only is hidden from range officers. */
+function adminView(sub) {
+  if (!session) return `
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club admin</h1></div>
+    <section class="section"><div class="card empty">
+      <div class="empty-title">Please sign in</div>
+      <p class="muted">This part of On Target is for the club team.</p>
+      <button type="button" class="btn btn-primary btn-big" data-signin>Club team sign-in</button>
+    </div></section>`;
+  if (sub === 'post') return `
+    <div class="page-title">${adminBack}<h1>Post something new</h1><p class="muted">What would you like to post?</p></div>
+    <section class="section"><div class="post-tiles">
+      <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
+      <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
+      <a class="tile" href="#/committee/photos"><span class="tile-ico">${ICON.camera}</span>Photos</a>
+    </div></section>`;
+  loadAdminCounts();
+  const sum = ADMIN.summary, signCount = ADMIN.signCount;
+  const count = (n, what) => n ? `<span class="count-badge" aria-label="${n} ${what}">${n}</span>` : '';
+  const row = (icon, label, href, extra, sub2) => `<a class="menu-row" href="${href}"><span class="tile-ico">${icon}</span><span class="row-text">${label}${sub2 ? `<span class="muted">${sub2}</span>` : ''}</span>${extra || ''}${ICON.chev}</a>`;
+  const group = (title, rows) => `<div class="section-head"><h2 class="caps-head">${title}</h2></div><div class="card list">${rows}</div>`;
+  return `
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club admin</h1></div>
+    <section class="section">
+      <a class="btn btn-emergency btn-big" href="#/committee/emergency">${ICON.firstaid}Emergency contacts</a>
+      ${group('Every day', row(ICON.mail, 'Messages', '#/committee/messages', unreadBadge()) + row(ICON.plus, 'Post something new', '#/admin/post') + row(ICON.doc, 'Manage posts', '#/committee/manage'))}
+      ${group('Range', row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
+        + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve'))}
+      ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
+      ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
+        + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
+        + row(ICON.key, 'People and PINs', '#/committee/people'))}
+        ${sum && (sum.season === 'renew' || sum.season === 'followup') ? `<div class="admin-counts">
+          ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
+          ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
+        </div>` : ''}` : ''}
     </section>`;
 }
 
@@ -2477,8 +2526,9 @@ function resultsSummary() {
 }
 function meCard() {
   const key = meStatus(ME), note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2], r = ME.renew || {};
-  const renewTile = r.open ? `<a class="tile" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.fees}</span>Renew<span class="tile-sub">Renew now</span></a>`
-    : `<div class="tile tile-off"><span class="tile-ico">${ICON.fees}</span>Renew<span class="tile-sub">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></div>`;
+  // One wide Renew row: a button once renewals are open for this member, otherwise it says when they open
+  const renew = r.open ? `<a class="btn btn-primary btn-big renew-row" href="${esc(r.url)}" target="_blank" rel="noopener">${ICON.refresh}Renew my membership</a>`
+    : `<div class="renew-row renew-off"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew<span class="muted">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></span></div>`;
   return `
     <section class="section">
       <div class="me-card">${ICON.rings}
@@ -2491,59 +2541,15 @@ function meCard() {
         <div class="me-card-status">${mePill(key)}${note ? `<span class="me-card-note">${esc(note)}</span>` : ''}</div>
       </div>
       <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
-      ${r.open && key !== 'notRenewed' ? `<a class="btn btn-primary btn-big" href="${esc(r.url)}" target="_blank" rel="noopener">Renew my membership</a>` : ''}
     </section>
     <section class="section"><nav class="post-tiles me-tiles" aria-label="My membership">
       <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>My results<span class="tile-sub">${esc(resultsSummary())}</span></a>
-      ${renewTile}
+      <a class="tile" href="#/me/bookings"><span class="tile-ico">${ICON.calendar}</span>My bookings<span class="tile-sub">Benches you have booked</span></a>
       <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>My details<span class="tile-sub">Email, mobile, emergency contact</span></a>
     </nav>
-    ${canBook() ? `<div class="card list">
-      ${menuLink(ICON.bench, 'Book a bench', '#/me/book')}
-      ${menuLink(ICON.calendar, 'My bookings', '#/me/bookings')}
-    </div>` : ''}</section>`;
+    ${renew}</section>`;
 }
 
-/* The club team's tools, on Me for anyone signed in with a PIN */
-function clubAdminBlock() {
-  const sum = ADMIN.summary, signCount = ADMIN.signCount;
-  return `
-    <section class="section">
-      <div class="section-head"><h2 class="caps-head">Club admin</h2></div>
-      <a class="btn btn-emergency btn-big" href="#/committee/emergency">${ICON.firstaid}Emergency contacts</a>
-      <div class="card list">
-        <a class="menu-row" href="#/committee/messages"><span class="tile-ico">${ICON.mail}</span>Messages${unreadBadge()}${ICON.chev}</a>
-      </div>
-      <h3 class="sub-head">Post something new</h3>
-      <div class="post-tiles">
-        <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
-        <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
-        <a class="tile" href="#/committee/photos"><span class="tile-ico">${ICON.camera}</span>Photos</a>
-      </div>
-      <div class="card list sub-gap">
-        <a class="menu-row" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage posts${ICON.chev}</a>
-        <a class="menu-row" href="#/committee/documents"><span class="tile-ico">${ICON.doc}</span>Club documents${ICON.chev}</a>
-      </div>
-      <h3 class="sub-head">Bench bookings</h3>
-      <div class="card list">
-        <a class="menu-row" href="#/committee/range"><span class="tile-ico">${ICON.check}</span>Today at the range${ICON.chev}</a>
-        <a class="menu-row" href="#/committee/reserve"><span class="tile-ico">${ICON.trophy}</span>Reserve for a competition${ICON.chev}</a>
-        <a class="menu-row" href="#/committee/requests"><span class="tile-ico">${ICON.calendar}</span>Booking requests${BENCH.waiting ? `<span class="count-badge" aria-label="${BENCH.waiting} waiting">${BENCH.waiting}</span>` : ''}${ICON.chev}</a>
-      </div>
-      ${session.admin ? `<h3 class="sub-head">Admin</h3>
-        ${sum ? `<div class="admin-counts">
-          ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
-          ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
-          <a class="admin-count" href="#/committee/payments">Payments waiting: <b>${sum.pending}</b></a>
-        </div>` : ''}
-        <div class="card list">
-          <a class="menu-row" href="#/committee/payments"><span class="tile-ico">${ICON.fees}</span>Payments to confirm${sum && sum.pending ? `<span class="count-badge" aria-label="${sum.pending} waiting">${sum.pending}</span>` : ''}${ICON.chev}</a>
-          <a class="menu-row" href="#/committee/signups"><span class="tile-ico">${ICON.join}</span>App sign-ups to check${signCount ? `<span class="count-badge" aria-label="${signCount} waiting">${signCount}</span>` : ''}${ICON.chev}</a>
-          <a class="menu-row" href="#/committee/members"><span class="tile-ico">${ICON.people}</span>Members${ICON.chev}</a>
-          <a class="menu-row" href="#/committee/people"><span class="tile-ico">${ICON.key}</span>People and PINs${ICON.chev}</a>
-        </div>` : ''}
-    </section>`;
-}
 
 /* Club documents: the files in the club's "On Target – Club documents" Drive folder, for members and the club team */
 let DOCS = null, docsState = '';
@@ -2551,7 +2557,8 @@ async function loadDocs() {
   if (docsState === 'loading') return;
   docsState = 'loading';
   try {
-    const list = session ? await committeeApi('clubDocuments') : await api('clubDocuments', undefined, [member.token]);
+    // The club team and linked members get every document; anyone else gets the ones marked Everyone
+    const list = session ? await committeeApi('clubDocuments') : await api('clubDocuments', undefined, member ? [member.token] : []);
     DOCS = Array.isArray(list) ? list : []; docsState = '';
   } catch (e) {
     if (e.signedOut) { docsState = ''; return; }
@@ -2574,9 +2581,10 @@ function documentsView() {
     }).join('');
   };
   return `
-    <div class="page-title">${meBack}<h1>Club documents</h1><p class="muted">Forms and club papers. Tap one to open it.</p></div>
-    <section class="section">${DOCS ? (DOCS.length ? groups()
-        : `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`)
+    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club documents</h1><p class="muted">Forms and club papers. Tap one to open it.</p></div>
+    <section class="section">${DOCS ? (DOCS.length ? groups() + (member || session ? '' : '<p class="muted">Members see more club documents here once they have signed in.</p>')
+        : member || session ? `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`
+        : empty('Nothing here yet', 'Members see the club documents here once they have signed in.'))
       : docsState === 'members' ? empty('For members', 'Club documents appear here once your email is linked to your membership.')
       : docsState === 'failed' ? loadFailed('the club documents', 'data-docs-reload') : skeletonRows(3)}</section>`;
 }
@@ -2808,7 +2816,7 @@ async function openEmergency(i) {
 
 /* ---------- Club documents: adding and looking after them (any club team PIN) ----------
    The files live in the club Drive folder "On Target – Club documents". One file is sent per request, as photos are. */
-const DOC_TYPES = ['Policy', 'Form', 'Minutes', 'Other'], DOC_MAX_MB = 10;
+const DOC_TYPES = ['Form', 'Policy', 'Minutes', 'Other'], DOC_MAX_MB = 10;
 let DOCADMIN = { list: null, state: '', note: '' };
 let docEdit = null;          // the document being edited ({} for a new one) while that screen is open
 let docFile = null;          // {blob, name}: the file chosen on that screen, ready to send
@@ -2824,13 +2832,13 @@ async function loadDocAdmin() {
 function docsAdminView() {
   if (!DOCADMIN.list && DOCADMIN.state !== 'failed') setTimeout(loadDocAdmin, 0);
   return `
-    <div class="page-title">${adminBack}<h1>Club documents</h1><p class="muted">Members see these in On Target under Me, Club documents. Only add things every member may see.</p></div>
+    <div class="page-title">${adminBack}<h1>Manage club documents</h1><p class="muted">People see these in On Target under Me, Club documents. “Everyone” documents show to anyone; “Members only” ones need a sign-in.</p></div>
     <section class="section">
       ${DOCADMIN.note ? `<p class="notice" role="status">${esc(DOCADMIN.note)}</p>` : ''}
       <button type="button" class="btn btn-primary btn-big" data-doc="new">${ICON.plus}Add a document</button>
       ${DOCADMIN.list ? (DOCADMIN.list.length ? `<div class="card list">${DOCADMIN.list.map((d, i) => `
         <button type="button" class="list-row manage-row" data-doc="${i}"><span class="list-ico">${ICON.doc}</span>
-          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}${d.what ? ' · ' + esc(d.what) : ' · no description yet'}</span></span>${ICON.chev}</button>`).join('')}</div>`
+          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}${d.what ? ' · ' + esc(d.what) : ' · no description yet'}</span>${badge(d.see === 'Everyone' ? 'Everyone' : 'Members')}</span>${ICON.chev}</button>`).join('')}</div>`
           : empty('No documents yet', 'Until you add one, members see "Coming soon: club policies and forms will be here."'))
         : DOCADMIN.state === 'failed' ? loadFailed('the club documents', 'data-docadmin-reload') : skeletonRows(3)}
     </section>`;
@@ -2855,7 +2863,8 @@ function docForm(d) {
       <p class="muted" id="dcWhoHint">Keep it short, e.g. “Visitors without a licence”.</p>
       <input class="field" id="dcWho" maxlength="60" autocomplete="off" aria-describedby="dcWhoHint" value="${esc(d.who || '')}">
       <label class="field-label" for="dcType">Type</label>
-      <select class="field" id="dcType">${DOC_TYPES.map(t => `<option${(d.type || 'Policy') === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <select class="field" id="dcType">${DOC_TYPES.map(t => `<option${(d.type || 'Form') === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <fieldset class="choices"><legend class="field-label">Who can see this?</legend>${radios('dcSee', [['Everyone', 'Everyone', 'Anyone who opens On Target, signed in or not'], ['Members', 'Members only', 'Members who have signed in, and the club team']], d.see === 'Everyone' ? 'Everyone' : 'Members')}</fieldset>
       ${isNew ? bar : ''}
       <p class="form-error" id="dcError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="dcSubmit">${isNew ? 'Upload document' : 'Save changes'}</button>
@@ -2921,7 +2930,8 @@ async function saveDoc(form) {
   if (btn.disabled || docBusy) return;
   const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
   const text = id => form.querySelector(id).value.replace(/\s+/g, ' ').trim();
-  const meta = { title: text('#dcTitle'), type: form.querySelector('#dcType').value, what: text('#dcWhat'), who: text('#dcWho') };
+  const meta = { title: text('#dcTitle'), type: form.querySelector('#dcType').value, what: text('#dcWhat'), who: text('#dcWho'),
+    see: (form.querySelector('input[name="dcSee"]:checked') || {}).value === 'Everyone' ? 'Everyone' : 'Members' };
   if (!d.id && !docFile) return fail('Please choose a file first.', form.querySelector('[data-doc-choose]'));
   if (!meta.title) return fail('Please give the document a name.', form.querySelector('#dcTitle'));
   if (!d.id) return sendDoc(form, btn, 'Uploading…', data => committeeApi('docAdd', [{ ...meta, fileName: docFile.name }, data]), 'Try again');
@@ -3056,7 +3066,7 @@ async function loadSignups() {
   if (currentPage === 'committee/signups') render(true);
 }
 async function loadSignupCount() {
-  try { const d = await committeeApi('memberLinkCount'); const n = Number(d && d.waiting) || 0; if (n !== ADMIN.signCount) { ADMIN.signCount = n; if (currentPage === 'me') render(true); } }
+  try { const d = await committeeApi('memberLinkCount'); const n = Number(d && d.waiting) || 0; if (n !== ADMIN.signCount) { ADMIN.signCount = n; if (ON_ME()) render(true); } }
   catch (e) { /* the count is only a guide */ }
 }
 function signupsView() {
@@ -3342,7 +3352,7 @@ async function loadBenchCount(force) {
     const n = Number((await committeeApi('benchRequestCount')).waiting) || 0;
     if (n === BENCH.waiting) return;
     BENCH.waiting = n; drawDot();
-    if (currentPage === 'me') render(true);
+    if (ON_ME()) render(true);
   } catch (e) { /* the count is only a guide */ }
 }
 /* The bookings holding a bench on the day that is loaded (no-shows have let theirs go) */
