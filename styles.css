@@ -1,4 +1,4 @@
-/* On Target v2.4.3 — club styles */
+/* On Target v2.6.0 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -370,6 +370,9 @@ button.manage-row:last-child { border-bottom: 0; }
 .badge-members { background: var(--gold-soft); color: var(--gold-text); }
 .badge-committee { background: var(--maroon); color: #fff; }
 .badge-hidden { background: var(--line); color: var(--text); }
+.badge-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.badge-web { display: inline-flex; align-items: center; gap: 4px; background: var(--info-soft); color: var(--info-text); }
+.badge-web svg { width: 13px; height: 13px; }
 .section > .btn { flex: 0 0 auto; }
 .edit-photo { width: 100%; max-height: 300px; object-fit: contain; border-radius: 12px; background: var(--tint); margin-bottom: 10px; }
 .btn-danger { background: var(--card); color: var(--accent); border: 1.5px solid var(--accent); margin-top: 10px; }
@@ -679,3 +682,53 @@ a.mem-row { text-decoration: none; color: var(--text); }
 .list-main > .mem-badges { justify-content: flex-start; margin-top: 4px; }
 .import-bad { color: var(--red-text); }
 #faNew[hidden], #faOld[hidden] { display: none; }
+
+/* ---------- Signpost screens (v2.6.0): Home, Me and Club admin ----------
+   White, calm and list-style: round shortcuts, small capital headings, rows with thin dividers.
+   Rows are at least 48px tall and their text at least 14.5px. */
+body.signpost { background: var(--card); }
+.sp-group { gap: 0; padding-top: 22px; }
+.sp-block { margin-top: 12px; }
+.sp-head { font: 700 12.5px Poppins, sans-serif; letter-spacing: 1.8px; text-transform: uppercase; color: var(--accent); margin: 0 0 2px; }
+body.signpost .menu-row { min-height: 60px; padding: 10px 0; gap: 14px; font-size: 16px; font-weight: 500; border-bottom: 1px solid var(--line-soft); }
+body.signpost .menu-row:last-child { border-bottom: 1px solid var(--line-soft); }
+body.signpost .menu-row .tile-ico { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 0; background: none; color: var(--accent); }
+body.signpost .menu-row .tile-ico svg { width: 22px; height: 22px; }
+body.signpost .row-text { flex: 1 1 auto; }
+body.signpost .row-text .muted { font-size: 14.5px; line-height: 1.35; margin-top: 1px; }
+body.signpost button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); text-align: left; cursor: pointer; font: 500 16px Poppins, sans-serif; }
+body.signpost .card.list { background: none; box-shadow: none; border-radius: 0; padding: 0; }
+body.signpost .card.form { box-shadow: none; border: 1.5px solid var(--line); }
+body.signpost .count-badge + .chev { margin-left: 8px; }
+body.signpost .btn-admin { box-shadow: none; }
+body.signpost button.menu-row.install-row { background: none; color: var(--text); font-weight: 500; margin: 0; width: 100%; padding: 10px 0; border-radius: 0; border-bottom: 1px solid var(--line-soft); }
+body.signpost button.menu-row.install-row .tile-ico { background: none; color: var(--accent); }
+body.signpost button.menu-row.install-row .chev { color: var(--text-3); }
+body.signpost .me-hint { margin: 0; font-size: 14.5px; }
+.me-end { padding-top: 26px; }
+
+/* Round shortcuts: 4 across, 54px circles with the label underneath */
+.shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 8px; padding: 20px 12px 0; }
+.sc { display: flex; flex-direction: column; align-items: center; gap: 8px; min-height: 48px; padding: 2px 0; text-decoration: none; color: var(--text); font: 500 14.5px/1.25 Poppins, sans-serif; text-align: center; }
+.sc-ico { width: 54px; height: 54px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--card); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.sc-ico svg { width: 24px; height: 24px; }
+.sc:hover .sc-ico, .sc:focus-visible .sc-ico { border-color: var(--accent); }
+.sc:focus-visible { outline: none; }
+.sc:focus-visible .sc-ico { box-shadow: 0 0 0 3px var(--gold); }
+
+/* Home: the one "next at the range" box */
+.sp-next { display: flex; align-items: flex-start; gap: 14px; border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; }
+.sp-next > p { margin: 0; }
+.sp-next-main { flex: 1 1 0; min-width: 0; }
+.sp-next-title { font: 600 16.5px/1.3 Poppins, sans-serif; color: var(--text); }
+.sp-next .muted { font-size: 14.5px; }
+.pill-btn { flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1.5px solid var(--accent); background: none; color: var(--accent); font: 600 14.5px Poppins, sans-serif; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.pill-btn:hover { background: var(--tint); }
+.sp-next .pill-btn { margin-top: 10px; }
+/* Very small phones: give the shortcut labels a little more room (the text stays 14.5px) */
+@media (max-width: 360px) {
+  .shortcuts { gap: 0 2px; padding: 20px 4px 0; }
+  .sc { letter-spacing: -.2px; }
+}
+/* Phones under 340px: the shortcut labels drop to 13.5px so the longest ones fit */
+@media (max-width: 339px) { .sc { font-size: 13.5px; letter-spacing: 0; } }

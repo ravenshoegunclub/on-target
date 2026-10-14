@@ -1,10 +1,10 @@
-/* On Target v2.5.0 — app shell with live club data and club team tools
+/* On Target v2.6.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -53,6 +53,8 @@ const ICON = {
   phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M12 8v7M9 12l3 3 3-3"/></svg>',
   firstaid: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
   call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16"/><path d="M7 15l4-4 3 3 5-6"/></svg>',
+  signout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   rings: '<svg class="hero-rings" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48"/><circle cx="50" cy="50" r="34"/><circle cx="50" cy="50" r="20"/><circle cx="50" cy="50" r="6" fill="currentColor"/></svg>'
 };
@@ -154,7 +156,7 @@ function refreshAll(force) { Object.keys(FEEDS).forEach(k => refresh(k, force));
 const events = () => (DATA.events && DATA.events.events) || [];
 const days = () => (DATA.results && DATA.results.days) || [];
 
-/* ----- Results: By date | By type | All (v2.5.0) -----
+/* ----- Results: By date | By type | All (v2.6.0) -----
  * The choice of view (and the type last picked) is remembered on the phone; the day being looked at is not. */
 const RES_MODES = [['date', 'By date'], ['type', 'By type'], ['all', 'All']];
 const RES = (() => {
@@ -323,60 +325,54 @@ function homeMember() {
   if (ME) return ME.linked && ME.first ? { first: ME.first, status: meStatus(ME), renew: ME.renew && ME.renew.open ? ME.renew.url : '' } : null;
   return member && member.first && member.status ? { first: member.first, status: member.status, renew: '' } : null;
 }
-/* The four buttons on Home. Renew takes the place of Documents once a member needs to renew. */
+/* ---------- Signpost screens (v2.6.0): Home, Me and Club admin ----------
+   Round shortcuts for the most-used tasks, then plain lists of rows under small capital headings. */
+const extHref = href => href.charAt(0) !== '#';
+const spShortcut = (icon, label, href) => `<a class="sc" href="${esc(href)}"${extHref(href) ? ' target="_blank" rel="noopener"' : ''}><span class="sc-ico">${icon}</span><span class="sc-label">${label}</span></a>`;
+/* A row: icon, label, optional grey second line, › (or ↗ for the club website). `end` is anything to show before the arrow. */
+const spRow = (icon, label, href, sub, end) => `<a class="menu-row" href="${esc(href)}"${extHref(href) ? ' target="_blank" rel="noopener"' : ''}><span class="tile-ico">${icon}</span>
+  <span class="row-text">${esc(label)}${sub ? `<span class="muted">${sub}</span>` : ''}</span>${end || ''}${href === SITE_URL ? '<span class="sr-only"> (opens the website)</span>' + ICON.ext : ICON.chev}</a>`;
+const spGroup = (title, rows) => rows ? `<section class="section sp-group"><h2 class="sp-head">${title}</h2><div class="sp-list">${rows}</div></section>` : '';
+
+/* Members due to renew see Renew among the Home shortcuts; financial members can book a bench */
 const RENEW_DUE = ['notRenewed', 'overdue', 'expired'];
 const BOOK_OK = ['current', 'notRenewed']; // financial members: the ones who can book a bench
-const homeLink = (icon, label, href) => `<a class="menu-row" href="${href}"><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
-function homeTiles(mine) {
-  const tile = (icon, label, href) => `<a class="tile" href="${esc(href)}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}</a>`;
-  if (!mine) return tile(ICON.join, 'Join', JOIN_URL) + tile(ICON.pin, 'Visit us', VISIT_URL) + tile(ICON.fees, 'Fees', JOIN_URL) + tile(ICON.help, 'FAQs', FAQ_URL);
-  return tile(ICON.card, 'My card', '#/me') + tile(ICON.star, 'My results', '#/me/results')
-    + (RENEW_DUE.includes(mine.status) ? tile(ICON.refresh, 'Renew', mine.renew || '#/me') : tile(ICON.doc, 'Documents', '#/me/documents'))
-    + tile(ICON.help, 'FAQs', FAQ_URL);
-}
 const VIEWS = {
   home() {
-    const rs = rangeStatus();
-    const next = events()[0];
-    const latest = days()[0];
-    const pics = photos().slice(0, 4);
-    const mine = homeMember();
+    const next = events()[0], mine = homeMember(), rs = rangeStatus();
+    // Next at the range: one compact box. Members who can book get Book a bench, everyone else Add to calendar.
+    const action = mine && BOOK_OK.includes(mine.status) ? `<a class="pill-btn" href="#/me/book">Book a bench</a>`
+      : `<button type="button" class="pill-btn" data-cal="0">Add to calendar</button>`;
+    const nextBox = DATA.events ? (next ? `
+        <div class="sp-next">${dateBlock(next.date)}
+          <div class="sp-next-main"><div class="sp-next-title">${esc(next.title)}</div>
+            <div class="muted">${joinDot(rs.open ? 'Range open now' : whenLabel(daysUntil(next.date)), timeRange(next))}</div>
+            ${action}</div>
+        </div>` : `<div class="sp-next"><p class="muted">No events posted yet. Check back soon.</p></div>`)
+      : `<div class="sp-next">${FAILED.events ? `<p class="muted">Can't load events right now.</p>` : `<span class="skel skel-line"></span>`}</div>`;
+    const sc = mine
+      ? spShortcut(ICON.card, 'My card', '#/me')
+        + (BOOK_OK.includes(mine.status) ? spShortcut(ICON.bench, 'Book a bench', '#/me/book') : spShortcut(ICON.doc, 'Documents', '#/me/documents'))
+        + spShortcut(ICON.chart, 'My shooting', '#/me/results')
+        + (RENEW_DUE.includes(mine.status) ? spShortcut(ICON.refresh, 'Renew', mine.renew || '#/me') : BOOK_OK.includes(mine.status) ? spShortcut(ICON.doc, 'Documents', '#/me/documents') : spShortcut(ICON.help, 'FAQs', FAQ_URL))
+      : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', FAQ_URL);
+    // Coming up: the next two competitions (room is left on the right of each row for "I'm in" later)
+    const comps = events().filter(e => e !== next && isCompetition(e)).slice(0, 2);
+    const latest = days()[0], pic = photos()[0];
+    const placed = latest && mine && ME && ME.linked && !viewingOther()
+      ? (ME.results || []).filter(r => r.date === latest.date && Number(r.place) >= 1 && Number(r.place) <= 3).sort((a, b) => Number(a.place) - Number(b.place))[0] : null;
+    const resultsRow = latest ? spRow(ICON.trophy, 'Results: ' + longDate(latest.date).replace(/ \d{4}$/, ''), '#/results',
+        joinDot(compWord(latest.competitions.length), placed && `you were ${placeLabel(placed.place)} in ${placed.competition}`))
+      : DATA.results || FAILED.results ? '' : skeletonRows(1);
+    const albumCount = pic ? photos().filter(p => p.album === pic.album && p.date === pic.date).length : 0;
+    const photosRow = pic ? spRow(ICON.camera, 'Photos: ' + pic.album, '#/photos', joinDot(shortDate(pic.date), albumCount + (albumCount === 1 ? ' photo' : ' photos')))
+      : DATA.photos || FAILED.photos ? '' : skeletonRows(1);
     return `
-      <section class="hero">
-        ${ICON.rings}
-        ${rs.text ? `<div class="status-pill"><span class="status-dot${rs.open ? '' : ' closed'}"></span>${esc(rs.text)}</div>` : ''}
-        <h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1>
-      </section>
-      <section class="card next-card" aria-label="Next at the range">
-        ${DATA.events ? (next ? `
-          <div class="row-between"><span class="eyebrow">Next at the range</span><span class="chip">${whenLabel(daysUntil(next.date))}</span></div>
-          <div class="event-row">${dateBlock(next.date)}
-            <div><div class="event-title">${esc(next.title)}</div><div class="muted">${joinDot(DAYS[parseDate(next.date).getDay()], next.discipline, timeRange(next))}</div></div>
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn btn-primary" data-cal="0">${ICON.calendar}Add to calendar</button>
-            <button type="button" class="btn btn-outline" data-share="0">${ICON.share}Share</button>
-          </div>` : `<span class="eyebrow">Next at the range</span><div class="muted">No events posted yet. Check back soon.</div>`)
-        : FAILED.events ? `<span class="eyebrow">Next at the range</span><div class="muted">Can't load events right now.</div>`
-        : `<span class="eyebrow">Next at the range</span><span class="skel skel-line"></span><span class="skel skel-line short"></span>`}
-      </section>
-      <nav class="tiles" aria-label="Quick links">
-        ${homeTiles(mine)}
-      </nav>
-      ${mine && BOOK_OK.includes(mine.status) ? `<section class="section"><div class="card list">${homeLink(ICON.bench, 'Book a bench', '#/me/book')}</div></section>` : ''}
-      <section class="section">
-        <div class="section-head"><h2>Latest results</h2><a href="#/results">All results</a></div>
-        ${state('results', 2, () => latest ? `
-          <div class="muted">${longDate(latest.date)}</div>
-          <div class="card list">${latest.competitions.slice(0, 4).map(winnerRow).join('')}</div>`
-          : empty('No results yet', 'Results appear here after each competition day.'))}
-      </section>
-      <section class="section">
-        <div class="section-head"><h2>Latest photos</h2><a href="#/photos">All photos</a></div>
-        ${state('photos', 1, () => pics.length ? `
-          <div class="thumb-strip">${pics.map((p, i) => thumb(p, i)).join('')}</div>`
-          : empty('No photos yet', 'Photos from the range appear here.'))}
-      </section>`;
+      <div class="page-title"><h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1></div>
+      <section class="section" aria-label="Next at the range">${nextBox}</section>
+      <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
+      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), timeRange(e)))).join('')) : ''}
+      ${spGroup('Latest', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
   },
 
   events() {
@@ -1682,13 +1678,6 @@ function finishPhotos() {
   view.focus();
 }
 
-function winnerRow(c) {
-  const w = c.rows[0] || {};
-  return `<a class="list-row link-row" href="#/results"><span class="list-ico">${ICON.trophy}</span>
-    <div class="list-main"><div class="list-title">${esc(c.competition)}</div><div class="muted">${joinDot(compKind(c), w.shooter && '1st ' + w.shooter)}</div></div>
-    <div class="score">${esc(w.score)}</div></a>`;
-}
-
 function thumb(p, i) {
   return `<button type="button" class="thumb" data-photo="${i}" aria-label="${esc(p.caption || p.album)}">
     <img src="${esc(p.thumb)}" alt="" loading="lazy" decoding="async"></button>`;
@@ -1737,6 +1726,7 @@ function render(quiet) {
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
+  document.body.classList.toggle('signpost', ['home', 'me', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -2490,10 +2480,8 @@ async function loadMe() {
 
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
 const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
-const menuLink = (icon, label, href) => `<a class="menu-row" href="${href}"${href.charAt(0) === '#' ? '' : ' target="_blank" rel="noopener"'}><span class="tile-ico">${icon}</span>${label}${ICON.chev}</a>`;
 
 /* Me: signing in, My membership and the club links. The club team's tools are one green button away, on Club admin. */
-const extLink = (icon, label, href) => `<a class="menu-row" href="${href}" target="_blank" rel="noopener"><span class="tile-ico">${icon}</span>${label}<span class="sr-only"> (opens the website)</span>${ICON.ext}</a>`;
 /* Everything waiting for the club team: new messages and booking requests, and for admins payments and app sign-ups too */
 const adminWaiting = () => !session ? 0 : (msgUnread || 0) + (BENCH.waiting || 0) + (session.admin ? ((ADMIN.summary && ADMIN.summary.pending) || 0) + (ADMIN.signCount || 0) : 0);
 function loadAdminCounts() { if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); } }
@@ -2517,26 +2505,20 @@ function meView(sub) {
   const adminButton = session ? `<section class="section"><a class="btn-admin" href="#/admin"><span class="tile-ico">${ICON.key}</span>
       <span class="btn-admin-text"><b>Club admin</b><span>Messages, posts, range, members</span></span>
       ${waiting ? `<span class="btn-admin-badge" aria-label="${waiting} waiting">${waiting} new</span>` : ''}${ICON.chev}</a></section>` : '';
-  const install = isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span>Add On Target to your phone${ICON.chev}</button>`;
-  const visit = menuLink(ICON.pin, 'Visit the range', VISIT_URL), faqs = menuLink(ICON.help, 'FAQs', FAQ_URL), site = extLink(ICON.web, 'Club website', SITE_URL);
-  const contact = menuLink(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au'), calc = menuLink(ICON.calc, 'Handgun shoot calculator', '#/calculator');
-  const docs = menuLink(ICON.doc, 'Club documents', '#/me/documents');
-  const signOutRow = `<button type="button" class="menu-row" data-signout-all><span class="tile-ico">${ICON.close}</span>Sign out${ICON.chev}</button>`;
+  const install = isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span><span class="row-text">Add On Target to your phone</span>${ICON.chev}</button>`;
+  const docs = spRow(ICON.doc, 'Club documents', '#/me/documents');
+  const club = docs + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.pin, 'Visit the range', VISIT_URL)
+    + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.help, 'FAQs', FAQ_URL) + spRow(ICON.web, 'Club website', SITE_URL);
+  const app = install + (signedIn ? `<button type="button" class="menu-row" data-signout-all><span class="tile-ico">${ICON.signout}</span><span class="row-text">Sign out</span>${ICON.chev}</button>`
+    : `<button type="button" class="menu-row" data-signin><span class="tile-ico">${ICON.key}</span><span class="row-text">Club team sign-in<span class="muted">For our volunteers helping run the club</span></span>${ICON.chev}</button>`);
   return `
-    <div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1>${linkHint}</div>
+    ${linked ? '<h1 class="sr-only">Me</h1>' : `<div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1>${linkHint}</div>`}
     ${memberBlock()}
     ${adminButton}
-    <section class="section">
-      <div class="section-head"><h2 class="caps-head">Club</h2></div>
-      <div class="card list">${signedIn
-        ? (canBook() ? menuLink(ICON.bench, 'Book a bench', '#/me/book') : '') + docs + calc + faqs + contact + site + signOutRow + install
-        : visit + faqs + site + contact + calc + docs + install}</div>
-    </section>
-    <section class="section me-foot">
-      ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>`
-      : `<p class="muted">Club team? <button type="button" class="link-btn" data-signin>Sign in with your PIN</button></p>`}
-    </section>
+    ${spGroup('Club', club)}
+    ${spGroup('App', app)}
     <section class="section me-end">
+      ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>` : ''}
       <p class="muted">On Target v${APP_VERSION}${TEST_SERVER ? ' · TEST SERVER' : ''}</p>
     </section>`;
 }
@@ -2561,7 +2543,7 @@ function adminView(sub) {
   const sum = ADMIN.summary, signCount = ADMIN.signCount;
   const count = (n, what) => n ? `<span class="count-badge" aria-label="${n} ${what}">${n}</span>` : '';
   const row = (icon, label, href, extra, sub2) => `<a class="menu-row" href="${href}"><span class="tile-ico">${icon}</span><span class="row-text">${label}${sub2 ? `<span class="muted">${sub2}</span>` : ''}</span>${extra || ''}${ICON.chev}</a>`;
-  const group = (title, rows) => `<div class="section-head"><h2 class="caps-head">${title}</h2></div><div class="card list">${rows}</div>`;
+  const group = (title, rows) => `<div class="sp-block"><h2 class="sp-head">${title}</h2><div class="sp-list">${rows}</div></div>`;
   return `
     <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club admin</h1></div>
     <section class="section">
@@ -2599,7 +2581,7 @@ function memberBlock() {
     return `<section class="section">${meState === 'failed' ? loadFailed('your membership', 'data-me-reload') : skeletonRows(3)}</section>`;
   }
   if (!ME.linked) return !member ? '' : ME.pending && !relinking ? mePending() : linkForm();
-  return meCard();
+  return meTop();
 }
 
 function linkForm() {
@@ -2662,12 +2644,16 @@ function familyChips() {
     <button type="button" class="chip-btn" data-view-as="${esc(f.key)}" aria-pressed="${f.key === (ME.viewing.self ? '' : ME.viewing.key)}">${esc(f.first)}${f.junior ? ' <span class="junior-tag">Junior</span>' : ''}</button>`).join('')}</div>
     ${viewingLine()}</section>`;
 }
-function meCard() {
+/* The top of Me for a linked member (v2.6.0): the membership card, four shortcuts, and Renew */
+function meTop() {
   const other = viewingOther(), whose = other ? esc(ME.viewing.first) + "'s" : 'My';
-  const key = meStatus(ME), note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2], r = ME.renew || {};
-  // One wide Renew row: a button once renewals are open for this member, otherwise it says when they open
-  const renew = r.open ? `<a class="btn btn-primary btn-big renew-row" href="${esc(r.url)}" target="_blank" rel="noopener">${ICON.refresh}Renew my membership</a>`
-    : `<div class="renew-row renew-off"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew<span class="muted">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></span></div>`;
+  const key = meStatus(ME), r = ME.renew || {};
+  const note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2];
+  const fam = ME.inFamily || (ME.family && ME.family.length > 1);
+  const renewSub = key === 'notRenewed' ? `Due by ${esc(ME.renewBy)}` : key === 'overdue' ? 'Overdue: please renew now' : key === 'expired' ? 'Expired: renew to rejoin' : '';
+  const renew = r.open
+    ? `<a class="menu-row" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew my membership${renewSub ? `<span class="muted">${renewSub}</span>` : ''}</span>${ICON.chev}</a>`
+    : `<div class="menu-row"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew<span class="muted">${key === 'waiting' ? 'Payment being checked' : 'Opens ' + esc(r.opens)}</span></span></div>`;
   return `
     ${familyChips()}
     <section class="section">
@@ -2682,12 +2668,11 @@ function meCard() {
       </div>
       <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
     </section>
-    <section class="section"><nav class="post-tiles me-tiles" aria-label="My membership">
-      <a class="tile" href="#/me/results"><span class="tile-ico">${ICON.trophy}</span>${whose} results<span class="tile-sub">${esc(resultsSummary())}</span></a>
-      <a class="tile" href="#/me/bookings"><span class="tile-ico">${ICON.calendar}</span>${whose} bookings<span class="tile-sub">${other ? 'Benches booked for ' + esc(ME.viewing.first) : 'Benches you have booked'}</span></a>
-      <a class="tile" href="#/me/details"><span class="tile-ico">${ICON.join}</span>${whose} details<span class="tile-sub">${other ? (ME.viewing.details ? 'Mobile, emergency contact' : 'Private to ' + esc(ME.viewing.first)) : 'Email, mobile, emergency contact'}</span></a>
+    <nav class="shortcuts" aria-label="${whose} membership">
+      ${spShortcut(ICON.chart, `${whose} shooting`, '#/me/results')}${spShortcut(ICON.bench, `${whose} bookings`, '#/me/bookings')}${spShortcut(ICON.join, `${whose} details`, '#/me/details')}
+      ${fam ? spShortcut(ICON.people, 'My family', '#/me/family') : spShortcut(ICON.doc, 'Club documents', '#/me/documents')}
     </nav>
-    ${renew}</section>`;
+    ${spGroup('Membership', renew)}`;
 }
 
 
@@ -2991,7 +2976,7 @@ function docsAdminView() {
       <button type="button" class="btn btn-primary btn-big" data-doc="new">${ICON.plus}Add a document</button>
       ${DOCADMIN.list ? (DOCADMIN.list.length ? `<div class="card list">${DOCADMIN.list.map((d, i) => `
         <button type="button" class="list-row manage-row" data-doc="${i}"><span class="list-ico">${ICON.doc}</span>
-          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}${d.what ? ' · ' + esc(d.what) : ' · no description yet'}</span>${badge(d.see === 'Everyone' ? 'Everyone' : 'Members')}</span>${ICON.chev}</button>`).join('')}</div>`
+          <span class="list-main"><span class="list-title">${esc(d.name)}</span><span class="muted">${esc(d.type || 'Other')}${d.what ? ' · ' + esc(d.what) : ' · no description yet'}</span><span class="badge-row">${badge(d.see === 'Everyone' ? 'Everyone' : 'Members')}${d.see === 'Everyone' ? `<span class="badge badge-web">${ICON.web}On website</span>` : ''}</span></span>${ICON.chev}</button>`).join('')}</div>`
           : empty('No documents yet', 'Until you add one, members see "Coming soon: club policies and forms will be here."'))
         : DOCADMIN.state === 'failed' ? loadFailed('the club documents', 'data-docadmin-reload') : skeletonRows(3)}
     </section>`;
@@ -3017,7 +3002,7 @@ function docForm(d) {
       <input class="field" id="dcWho" maxlength="60" autocomplete="off" aria-describedby="dcWhoHint" value="${esc(d.who || '')}">
       <label class="field-label" for="dcType">Type</label>
       <select class="field" id="dcType">${DOC_TYPES.map(t => `<option${(d.type || 'Form') === t ? ' selected' : ''}>${t}</option>`).join('')}</select>
-      <fieldset class="choices"><legend class="field-label">Who can see this?</legend>${radios('dcSee', [['Everyone', 'Everyone', 'Anyone who opens On Target, signed in or not'], ['Members', 'Members only', 'Members who have signed in, and the club team']], d.see === 'Everyone' ? 'Everyone' : 'Members')}</fieldset>
+      <fieldset class="choices"><legend class="field-label">Who can see this?</legend>${radios('dcSee', [['Everyone', 'Everyone', 'Anyone who opens On Target, signed in or not, and it also goes on the club website.'], ['Members', 'Members only', 'Members who have signed in, and the club team']], d.see === 'Everyone' ? 'Everyone' : 'Members')}</fieldset>
       ${isNew ? bar : ''}
       <p class="form-error" id="dcError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="dcSubmit">${isNew ? 'Upload document' : 'Save changes'}</button>
