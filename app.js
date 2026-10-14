@@ -1,10 +1,10 @@
-/* On Target v2.4.3 — app shell with live club data and club team tools
+/* On Target v2.5.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.4.3';
+const APP_VERSION = '2.5.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -21,7 +21,7 @@ const FEED_URL = TEST_SERVER ? `https://script.google.com/macros/s/${TEST_SERVER
 
 const FEEDS = {
   events:  'feed=events&n=30',
-  results: 'feed=results&all=1&n=12',
+  results: 'feed=results&all=1&n=300',
   photos:  'feed=photos&n=60'
 };
 const REFRESH_AFTER_MS = 2 * 60 * 1000; // matches the feed's own 2-minute cache
@@ -153,6 +153,102 @@ function refreshAll(force) { Object.keys(FEEDS).forEach(k => refresh(k, force));
 
 const events = () => (DATA.events && DATA.events.events) || [];
 const days = () => (DATA.results && DATA.results.days) || [];
+
+/* ----- Results: By date | By type | All (v2.5.0) -----
+ * The choice of view (and the type last picked) is remembered on the phone; the day being looked at is not. */
+const RES_MODES = [['date', 'By date'], ['type', 'By type'], ['all', 'All']];
+const RES = (() => {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('ot:resultsView')); } catch (e) { /* storage blocked */ }
+  saved = saved || {};
+  return { mode: RES_MODES.some(m => m[0] === saved.mode) ? saved.mode : 'date', type: saved.type || '', day: '', picking: false };
+})();
+/* Re-draws Results for a new view or day: the cards start as that view opens them, not as the last one left them */
+function resRender() { view.querySelectorAll('details.comp').forEach(d => d.remove()); render(true); }
+function saveResView() { try { localStorage.setItem('ot:resultsView', JSON.stringify({ mode: RES.mode, type: RES.type })); } catch (e) { /* storage blocked */ } }
+const compWord = n => n + (n === 1 ? ' competition' : ' competitions');
+/* A competition's types: its discipline (Pistol, Rifle or Clay) and, when it is one, Black powder as well.
+   An older row whose discipline was typed as "Black Powder" counts as black powder. Anything else shows under Other. */
+const DISCIPLINES = ['Pistol', 'Rifle', 'Clay'];
+const mainDiscipline = c => DISCIPLINES.find(d => d.toLowerCase() === String(c.discipline || '').trim().toLowerCase()) || '';
+const isBlackPowder = c => !!c.blackPowder || /^black\s*powder$/i.test(String(c.discipline || '').trim());
+const compTypes = c => { const t = [mainDiscipline(c), isBlackPowder(c) && 'Black powder'].filter(Boolean); return t.length ? t : ['Other']; };
+const compKind = c => joinDot(c.discipline, isBlackPowder(c) && mainDiscipline(c) && 'Black powder'); // "Rifle · Black powder"
+const RES_TYPE_ORDER = ['Pistol', 'Rifle', 'Clay', 'Black powder'];
+function resultTypes() {
+  const n = {};
+  days().forEach(d => d.competitions.forEach(c => compTypes(c).forEach(t => { n[t] = (n[t] || 0) + 1; })));
+  const rank = t => { const i = RES_TYPE_ORDER.indexOf(t); return i < 0 ? 99 : i; };
+  return Object.keys(n).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1)).map(t => ({ type: t, count: n[t] }));
+}
+function compCard(c, open) {
+  return `
+    <details class="card comp"${open ? ' open' : ''}>
+      <summary>
+        <span class="list-ico">${ICON.trophy}</span>
+        <span class="list-main"><span class="list-title">${esc(c.competition)}</span>
+          <span class="muted">${joinDot(compKind(c), c.rows[0] && '1st ' + c.rows[0].shooter)}</span></span>
+        ${ICON.chev}
+      </summary>
+      <table class="result-table">
+        <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="num">Score</th></tr></thead>
+        <tbody>${c.rows.map(r => `<tr><td>${placeLabel(r.place)}</td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="num">${esc(r.score)}</td></tr>`).join('')}</tbody>
+      </table>
+    </details>`;
+}
+/* All: every competition day, newest first, the latest day opened (as the Results screen always was). */
+function resultsAll() {
+  return days().map((d, di) => `
+    <section class="section">
+      <h2 class="day-head">${longDate(d.date)}</h2>
+      ${d.competitions.map(c => compCard(c, di === 0)).join('')}
+    </section>`).join('');
+}
+/* By date: one competition day at a time. ‹ is the day before, › the day after; the date box opens the list of days. */
+function resultsByDate() {
+  const list = days();
+  let i = list.findIndex(d => d.date === RES.day);
+  if (i < 0) { i = 0; RES.day = list[0].date; }
+  const d = list[i], older = list[i + 1], newer = list[i - 1];
+  const arrow = (to, dir, label) => `<button type="button" class="icon-btn rv-arrow" data-rv-dir="${label.charAt(0)}" data-rv-day="${to ? to.date : ''}"${to ? '' : ' disabled'} aria-label="${to ? label + ': ' + longDate(to.date) : 'No ' + label.toLowerCase()}">${dir}</button>`;
+  const bar = `<div class="rv-datebar">
+      ${arrow(older, '&lsaquo;', 'Previous competition day')}
+      <button type="button" class="rv-datebox" data-rv-pick aria-expanded="${RES.picking}">
+        <span><span class="rv-date">${longDate(d.date)}</span><span class="muted">${compWord(d.competitions.length)}</span></span>${ICON.chev}
+      </button>
+      ${arrow(newer, '&rsaquo;', 'Next competition day')}
+    </div>`;
+  if (RES.picking) {
+    const years = [];
+    list.forEach(x => { const y = x.date.slice(0, 4); let g = years.find(v => v.y === y); if (!g) { g = { y, days: [] }; years.push(g); } g.days.push(x); });
+    return `<section class="section">${bar}</section>
+      <section class="section rv-picker" aria-label="Choose a competition day">${years.map(g => `
+        <h2 class="day-head">${g.y}</h2>
+        <div class="card list">${g.days.map(x => `
+          <button type="button" class="list-row link-row rv-pick-row" data-rv-day="${x.date}" aria-current="${x.date === d.date}">
+            <span class="list-main"><span class="list-title">${longDate(x.date)}</span><span class="muted">${compWord(x.competitions.length)}</span></span>
+            ${x.date === d.date ? '<span class="chip">Showing</span>' : ICON.chev}
+          </button>`).join('')}</div>`).join('')}
+      </section>`;
+  }
+  return `<section class="section">${bar}</section>
+    <section class="section">${d.competitions.map(c => compCard(c, true)).join('')}</section>`;
+}
+/* By type: chips for each type, then that type's competitions, newest first, under date headings. */
+function resultsByType() {
+  const types = resultTypes();
+  if (!types.some(t => t.type === RES.type)) RES.type = types[0].type;
+  const shown = days().map(d => ({ date: d.date, comps: d.competitions.filter(c => compTypes(c).includes(RES.type)) })).filter(d => d.comps.length);
+  const n = shown.reduce((a, d) => a + d.comps.length, 0);
+  return `<section class="section"><div class="chips" role="group" aria-label="Type of competition">${types.map(t => `
+      <button type="button" class="chip-btn" data-rv-type="${esc(t.type)}" aria-pressed="${t.type === RES.type}">${esc(t.type)}</button>`).join('')}</div>
+      <p class="muted rv-count">${n} ${esc(RES.type.toLowerCase())} ${n === 1 ? 'competition' : 'competitions'}</p></section>
+    ${shown.map(d => `
+      <section class="section">
+        <h2 class="day-head">${longDate(d.date)}</h2>
+        ${d.comps.map(c => compCard(c, false)).join('')}
+      </section>`).join('')}`;
+}
 const photos = () => (DATA.photos && DATA.photos.photos) || [];
 
 /* ---------- Shared bits ---------- */
@@ -304,25 +400,14 @@ const VIEWS = {
   },
 
   results() {
+    const mode = RES.mode, list = days();
+    const seg = `<div class="seg rv-seg" role="group" aria-label="How to show the results">${RES_MODES.map(m => `
+      <button type="button" data-rv-mode="${m[0]}" aria-pressed="${mode === m[0]}">${m[1]}</button>`).join('')}</div>`;
     return `
-      <div class="page-title"><h1>Results</h1><p class="muted">Every competition day, newest first</p></div>
-      ${state('results', 4, () => days().length ? days().map((d, di) => `
-        <section class="section">
-          <h2 class="day-head">${longDate(d.date)}</h2>
-          ${d.competitions.map(c => `
-            <details class="card comp"${di === 0 ? ' open' : ''}>
-              <summary>
-                <span class="list-ico">${ICON.trophy}</span>
-                <span class="list-main"><span class="list-title">${esc(c.competition)}</span>
-                  <span class="muted">${joinDot(c.discipline, c.rows[0] && '1st ' + c.rows[0].shooter)}</span></span>
-                ${ICON.chev}
-              </summary>
-              <table class="result-table">
-                <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="num">Score</th></tr></thead>
-                <tbody>${c.rows.map(r => `<tr><td>${placeLabel(r.place)}</td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="num">${esc(r.score)}</td></tr>`).join('')}</tbody>
-              </table>
-            </details>`).join('')}
-        </section>`).join('') : `<section class="section">${empty('No results yet', 'Results appear here after each competition day.')}</section>`)}`;
+      <div class="page-title"><h1>Results</h1></div>
+      <section class="section">${seg}</section>
+      ${state('results', 4, () => !list.length ? `<section class="section">${empty('No results yet', 'Results appear here after each competition day.')}</section>`
+        : mode === 'type' ? resultsByType() : mode === 'all' ? resultsAll() : resultsByDate())}`;
   },
 
   photos() {
@@ -528,7 +613,7 @@ function manageView() {
         <div class="card list">${MANAGE.results.map((g, i) => `
         <div class="manage-item"><button type="button" class="list-row manage-row" data-edit="results:${i}"><span class="list-ico">${ICON.trophy}</span>
           <span class="list-main"><span class="list-title">${esc(g.competition || 'No name')}</span>
-            <span class="muted">${joinDot(g.date && shortDate(g.date) + ' ' + parseDate(g.date).getFullYear(), g.discipline, g.rows.length + (g.rows.length === 1 ? ' shooter' : ' shooters'))}</span></span>${ICON.chev}</button>
+            <span class="muted">${joinDot(g.date && shortDate(g.date) + ' ' + parseDate(g.date).getFullYear(), compKind(g), g.rows.length + (g.rows.length === 1 ? ' shooter' : ' shooters'))}</span></span>${ICON.chev}</button>
           ${g.date ? shareBtn('results:' + i, 'Share the results for ' + longDate(g.date)) : ''}</div>`).join('')}</div>`
         : empty('No results yet', 'Results you post appear here.');
     }
@@ -1234,7 +1319,6 @@ function shooterOptions() {
 
 /* Suggestion lists (by datalist id). Kept up to date when fresh club data arrives while a form is open. */
 const SUGGEST = {
-  rsDiscList: () => options(uniq(pastComps().map(c => c.discipline))),
   rsCompList: () => options(uniq(pastComps().map(c => c.competition))),
   rsClassList: () => options(uniq(pastComps().flatMap(c => c.rows.map(r => r['class'])))),
   rsShooterList: shooterOptions,
@@ -1270,9 +1354,12 @@ function resultsForm(item) {
     <section class="section"><form class="card form" id="resultsForm" novalidate${item ? ' data-mode="edit"' : ''}>
       <label class="field-label" for="rsDate">Competition day</label>
       ${dateField('rsDate', start.date)}
-      <label class="field-label" for="rsDisc">Discipline <span class="field-hint">choose one or type your own</span></label>
-      <input class="field" id="rsDisc" maxlength="40" list="rsDiscList" autocomplete="off" value="${esc(start.discipline)}">
-      <datalist id="rsDiscList">${SUGGEST.rsDiscList()}</datalist>
+      <fieldset class="choices choices-row" id="rsDisc">
+        <legend class="field-label">Discipline</legend>
+        ${DISCIPLINES.map(d => `<label class="choice"><input type="radio" name="rsDisc" value="${d}"${d === mainDiscipline(start) ? ' checked' : ''}><span class="choice-title">${d}</span></label>`).join('')}
+      </fieldset>
+      <label class="choice"><input type="checkbox" id="rsBP"${item && isBlackPowder(item) ? ' checked' : ''}>
+        <span><span class="choice-title">Black powder</span><span class="choice-text">Tick for a black powder competition. It shows under its discipline and under Black powder.</span></span></label>
       <label class="field-label" for="rsComp">Competition name</label>
       <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" value="${esc(start.competition || '')}" required>
       <datalist id="rsCompList">${SUGGEST.rsCompList()}</datalist>
@@ -1352,9 +1439,10 @@ function linkFor(row) {
   return row.dataset.memberId && name === row.dataset.linked ? { id: row.dataset.memberId, short: name, kept: true } : null;
 }
 
+const rsDiscipline = form => (form.querySelector('input[name="rsDisc"]:checked') || {}).value || '';
 /* Everything typed in the results form, to tell whether it has changed since it was opened */
 function resultsSnapshot(form) {
-  return JSON.stringify([form.querySelector('#rsDate').value, form.querySelector('#rsDisc').value.trim(), form.querySelector('#rsComp').value.trim(),
+  return JSON.stringify([form.querySelector('#rsDate').value, rsDiscipline(form), form.querySelector('#rsBP').checked, form.querySelector('#rsComp').value.trim(),
     [...form.querySelectorAll('.rs-row')].filter(row => [...row.querySelectorAll('input')].some(i => i.value.trim())).map(row => ['shooter', 'class', 'score'].map(f => rowValue(row, f)))]);
 }
 
@@ -1385,9 +1473,10 @@ async function postResultsForm(form) {
   if (btn.disabled) return;
   const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
   tidyRows(form);
-  const comp = { date: form.querySelector('#rsDate').value, discipline: form.querySelector('#rsDisc').value.trim(), competition: form.querySelector('#rsComp').value.trim() };
+  const comp = { date: form.querySelector('#rsDate').value, discipline: rsDiscipline(form), blackPowder: form.querySelector('#rsBP').checked, competition: form.querySelector('#rsComp').value.trim() };
   const filled = [...form.querySelectorAll('.rs-row')].filter(row => !rowEmpty(row));
   if (!comp.date) return fail('Please choose the competition day.', form.querySelector('#rsDate'));
+  if (!comp.discipline) return fail('Please choose the discipline: Pistol, Rifle or Clay.', form.querySelector('input[name="rsDisc"]'));
   if (!comp.competition) return fail('Please enter the competition name.', form.querySelector('#rsComp'));
   if (!filled.length) return fail('Please add at least one shooter.', form.querySelector('[data-f="shooter"]'));
   comp.rows = filled.map((row, i) => {
@@ -1596,7 +1685,7 @@ function finishPhotos() {
 function winnerRow(c) {
   const w = c.rows[0] || {};
   return `<a class="list-row link-row" href="#/results"><span class="list-ico">${ICON.trophy}</span>
-    <div class="list-main"><div class="list-title">${esc(c.competition)}</div><div class="muted">${joinDot(c.discipline, w.shooter && '1st ' + w.shooter)}</div></div>
+    <div class="list-main"><div class="list-title">${esc(c.competition)}</div><div class="muted">${joinDot(compKind(c), w.shooter && '1st ' + w.shooter)}</div></div>
     <div class="score">${esc(w.score)}</div></a>`;
 }
 
@@ -1706,6 +1795,17 @@ view.addEventListener('click', e => {
   if (t.closest('[data-signout-all]')) signOutAll();
   if (t.closest('[data-install]')) installApp();
   if (t.closest('[data-docs-reload]')) { DOCS = null; docsState = ''; render(true); }
+  if (t.closest('[data-rv-mode]')) { RES.mode = t.closest('[data-rv-mode]').dataset.rvMode; RES.picking = false; saveResView(); resRender(); view.querySelector(`[data-rv-mode="${RES.mode}"]`).focus(); }
+  if (t.closest('[data-rv-type]')) { RES.type = t.closest('[data-rv-type]').dataset.rvType; saveResView(); resRender(); view.querySelector(`[data-rv-type="${CSS.escape(RES.type)}"]`).focus(); }
+  if (t.closest('[data-rv-pick]')) { RES.picking = !RES.picking; resRender(); view.querySelector('[data-rv-pick]').focus(); }
+  if (t.closest('[data-rv-day]')) {
+    const b = t.closest('[data-rv-day]'), dir = b.dataset.rvDir;
+    if (b.dataset.rvDay) {
+      RES.day = b.dataset.rvDay; RES.picking = false; resRender();
+      const again = dir && view.querySelector(`[data-rv-dir="${dir}"]:not([disabled])`); // keep stepping with the same arrow
+      (again || view.querySelector('[data-rv-pick]')).focus();
+    }
+  }
   if (t.closest('[data-me-reload]')) { ME = null; meState = ''; relinking = false; render(true); }
   if (t.closest('[data-me-relink]')) { relinking = true; render(); }
   if (t.closest('[data-ec-again]')) emailCodeAgain(t.closest('[data-ec-again]'));
@@ -3544,7 +3644,7 @@ function reserveView() {
     const on = res.benches.includes(k), big = range.big.includes(k);
     const other = day.bookings.find(b => b.range === range.key && b.bench === k && holding(b) && sessionsClash(b.session, res.session) && !(b.kind === 'Competition' && b.session === res.session));
     return other ? `<button type="button" class="bench bench-taken${big ? ' bench-big' : ''}" disabled aria-label="Bench ${k}, booked by ${esc(other.name)}"><b>${k}</b><span>${esc(other.kind === 'Competition' ? 'Comp' : other.name.split(' ')[0])}</span></button>`
-      : `<button type="button" class="bench ${on ? 'bench-competition' : 'bench-free'}${big ? ' bench-big' : ''}" data-res-bench="${k}" aria-pressed="${on}" aria-label="Bench ${k}, ${on ? 'reserved for the competition' : 'free'}"><b>${k}</b><span>${on ? 'Reserved' : 'Free'}</span></button>`;
+      : `<button type="button" class="bench ${on ? 'bench-competition' : 'bench-free'}${big ? ' bench-big' : ''}" data-res-bench="${k}" aria-pressed="${on}" aria-label="Bench ${k}, ${on ? 'reserved for the competition' : 'free'}"><b>${k}</b><span>${on ? 'Comp' : 'Free'}</span></button>`;
   };
   return `${head}
     <section class="section">

@@ -1,16 +1,16 @@
-/* On Target v2.4.3 — offline support
+/* On Target v2.5.0 — offline support
    Change CACHE when files change so phones pick up the new version. */
-const CACHE = 'on-target-v2.4.3';
+const CACHE = 'on-target-v2.5.0';
 const PHOTO_CACHE = 'on-target-photos';
 const SHELL = [
   './',
   'index.html',
-  'styles.css?v=2.4.3',
-  'app.js?v=2.4.3',
-  'manifest.webmanifest?v=2.4.3',
-  'icons/icon-192.png?v=2.4.3',
-  'icons/favicon-48.png?v=2.4.3',
-  'icons/apple-touch-icon.png?v=2.4.3'
+  'styles.css?v=2.5.0',
+  'app.js?v=2.5.0',
+  'manifest.webmanifest?v=2.5.0',
+  'icons/icon-192.png?v=2.5.0',
+  'icons/favicon-48.png?v=2.5.0',
+  'icons/apple-touch-icon.png?v=2.5.0'
 ];
 
 self.addEventListener('install', e => {
