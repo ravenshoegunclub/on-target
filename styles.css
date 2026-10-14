@@ -1,4 +1,4 @@
-/* On Target v2.6.0 — club styles */
+/* On Target v2.6.1 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -732,3 +732,14 @@ body.signpost .me-hint { margin: 0; font-size: 14.5px; }
 }
 /* Phones under 340px: the shortcut labels drop to 13.5px so the longest ones fit */
 @media (max-width: 339px) { .sc { font-size: 13.5px; letter-spacing: 0; } }
+
+/* Club tab (v2.6.1): the latest photos as a row of thumbnails */
+.club-thumbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 2px; }
+/* Me, APP: Club admin keeps its green, as a row */
+body.signpost .menu-row.admin-row .tile-ico { flex-basis: 34px; width: 34px; height: 34px; border-radius: 17px; background: var(--green); color: #fff; }
+body.signpost .menu-row.admin-row .tile-ico svg { width: 18px; height: 18px; }
+.admin-row .row-text { color: var(--green); font-weight: 700; }
+.admin-row .btn-admin-badge { background: var(--green); color: #fff; margin-left: 8px; }
+@media (prefers-color-scheme: dark) { .admin-row .row-text { color: #7DD69A; } }
+/* Me without a family membership has three shortcuts: spread them evenly across the row */
+.shortcuts.shortcuts-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }

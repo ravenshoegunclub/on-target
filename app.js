@@ -1,10 +1,10 @@
-/* On Target v2.6.0 — app shell with live club data and club team tools
+/* On Target v2.6.1 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.6.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -156,7 +156,7 @@ function refreshAll(force) { Object.keys(FEEDS).forEach(k => refresh(k, force));
 const events = () => (DATA.events && DATA.events.events) || [];
 const days = () => (DATA.results && DATA.results.days) || [];
 
-/* ----- Results: By date | By type | All (v2.6.0) -----
+/* ----- Results: By date | By type | All (v2.5.0) -----
  * The choice of view (and the type last picked) is remembered on the phone; the day being looked at is not. */
 const RES_MODES = [['date', 'By date'], ['type', 'By type'], ['all', 'All']];
 const RES = (() => {
@@ -415,7 +415,7 @@ const VIEWS = {
       g.items.push({ p, i });
     });
     return `
-      <div class="page-title"><h1>Photos</h1><p class="muted">From the range</p></div>
+      <div class="page-title"><a class="back-link" href="#/club">${ICON.chev}Club</a><h1>Photos</h1><p class="muted">From the range</p></div>
       ${state('photos', 3, () => groups.length ? groups.map(g => `
         <section class="section">
           <div class="section-head"><h2>${esc(g.album)}</h2><span class="muted">${shortDate(g.date)}</span></div>
@@ -427,6 +427,7 @@ const VIEWS = {
 
   me(sub) { return meView(sub); },
   calculator() { return calculatorView(); },
+  club() { return clubView(); },
   admin(sub) { return adminView(sub); },
 
   committee(sub, arg) {
@@ -1726,7 +1727,7 @@ function render(quiet) {
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
-  document.body.classList.toggle('signpost', ['home', 'me', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
+  document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -1770,7 +1771,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === ({ committee: 'me', more: 'me', calculator: 'me', admin: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -2481,7 +2482,8 @@ async function loadMe() {
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
 const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
 
-/* Me: signing in, My membership and the club links. The club team's tools are one green button away, on Club admin. */
+/* Me (v2.6.1): just personal. Signing in, the membership card and shortcuts, Renew, and the app itself (Club admin for the club team).
+   The club's own links live on the Club tab. */
 /* Everything waiting for the club team: new messages and booking requests, and for admins payments and app sign-ups too */
 const adminWaiting = () => !session ? 0 : (msgUnread || 0) + (BENCH.waiting || 0) + (session.admin ? ((ADMIN.summary && ADMIN.summary.pending) || 0) + (ADMIN.signCount || 0) : 0);
 function loadAdminCounts() { if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); } }
@@ -2502,25 +2504,36 @@ function meView(sub) {
   const linkHint = session && !member && ME && !ME.linked ? `<p class="muted">Link your membership: ${session.admin
     ? 'choose yourself in <a href="#/committee/people">People and PINs</a>.' : 'ask an admin to link you in People and PINs.'}</p>` : '';
   const waiting = adminWaiting();
-  const adminButton = session ? `<section class="section"><a class="btn-admin" href="#/admin"><span class="tile-ico">${ICON.key}</span>
-      <span class="btn-admin-text"><b>Club admin</b><span>Messages, posts, range, members</span></span>
-      ${waiting ? `<span class="btn-admin-badge" aria-label="${waiting} waiting">${waiting} new</span>` : ''}${ICON.chev}</a></section>` : '';
   const install = isInstalled() ? '' : `<button type="button" class="menu-row install-row" data-install><span class="tile-ico">${ICON.phone}</span><span class="row-text">Add On Target to your phone</span>${ICON.chev}</button>`;
-  const docs = spRow(ICON.doc, 'Club documents', '#/me/documents');
-  const club = docs + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.pin, 'Visit the range', VISIT_URL)
-    + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.help, 'FAQs', FAQ_URL) + spRow(ICON.web, 'Club website', SITE_URL);
-  const app = install + (signedIn ? `<button type="button" class="menu-row" data-signout-all><span class="tile-ico">${ICON.signout}</span><span class="row-text">Sign out</span>${ICON.chev}</button>`
-    : `<button type="button" class="menu-row" data-signin><span class="tile-ico">${ICON.key}</span><span class="row-text">Club team sign-in<span class="muted">For our volunteers helping run the club</span></span>${ICON.chev}</button>`);
+  // APP (v2.6.1): the club team's way in is Club admin once signed in with a PIN, otherwise Club team sign-in
+  const team = session
+    ? `<a class="menu-row admin-row" href="#/admin"><span class="tile-ico">${ICON.key}</span><span class="row-text">Club admin<span class="muted">Messages, posts, range, members</span></span>
+        ${waiting ? `<span class="btn-admin-badge" aria-label="${waiting} waiting">${waiting} new</span>` : ''}${ICON.chev}</a>`
+    : `<button type="button" class="menu-row" data-signin><span class="tile-ico">${ICON.key}</span><span class="row-text">Club team sign-in<span class="muted">For our volunteers helping run the club</span></span>${ICON.chev}</button>`;
+  const app = install + team + (signedIn ? `<button type="button" class="menu-row" data-signout-all><span class="tile-ico">${ICON.signout}</span><span class="row-text">Sign out</span>${ICON.chev}</button>` : '');
   return `
     ${linked ? '<h1 class="sr-only">Me</h1>' : `<div class="page-title"><h1>${signedIn && first ? `G'day ${esc(first)}` : 'Me'}</h1>${linkHint}</div>`}
     ${memberBlock()}
-    ${adminButton}
-    ${spGroup('Club', club)}
     ${spGroup('App', app)}
     <section class="section me-end">
       ${signedIn ? `<p class="muted">${[member && ME ? 'Signed in as ' + esc(ME.email) : '', session ? 'Club team: ' + esc(session.name) + (session.admin ? ' (admin)' : '') : ''].filter(Boolean).join(' · ')}</p>` : ''}
       <p class="muted">On Target v${APP_VERSION}${TEST_SERVER ? ' · TEST SERVER' : ''}</p>
     </section>`;
+}
+
+/* Club (v2.6.1): the club's own things, the same for everyone. Room is kept at the top for the range status banner (v2.7). */
+function clubView() {
+  const signedIn = !!(member || session), pics = photos().slice(0, 4);
+  const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', FAQ_URL)
+    + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.web, 'Club website', SITE_URL);
+  return `
+    <div class="page-title"><h1>Club</h1></div>
+    <section class="section sp-group"><h2 class="sp-head">Photos</h2>
+      ${state('photos', 1, () => pics.length ? `<div class="club-thumbs">${pics.map((p, i) => thumb(p, i)).join('')}</div>` : '<p class="muted">Photos from the range appear here.</p>')}
+      <div class="sp-list">${spRow(ICON.camera, 'All photos', '#/photos')}</div>
+    </section>
+    ${spGroup('Club', club)}
+    ${signedIn ? '' : spGroup('Join us', spRow(ICON.join, 'Join the club', JOIN_URL) + spRow(ICON.fees, 'Fees', JOIN_URL))}`;
 }
 
 /* Club admin (v2.3.0): everything the club team does, on its own screen. Admin only is hidden from range officers. */
@@ -2668,9 +2681,9 @@ function meTop() {
       </div>
       <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
     </section>
-    <nav class="shortcuts" aria-label="${whose} membership">
+    <nav class="shortcuts${fam ? '' : ' shortcuts-3'}" aria-label="${whose} membership">
       ${spShortcut(ICON.chart, `${whose} shooting`, '#/me/results')}${spShortcut(ICON.bench, `${whose} bookings`, '#/me/bookings')}${spShortcut(ICON.join, `${whose} details`, '#/me/details')}
-      ${fam ? spShortcut(ICON.people, 'My family', '#/me/family') : spShortcut(ICON.doc, 'Club documents', '#/me/documents')}
+      ${fam ? spShortcut(ICON.people, 'My family', '#/me/family') : ''}
     </nav>
     ${spGroup('Membership', renew)}`;
 }
@@ -2706,7 +2719,7 @@ function documentsView() {
     }).join('');
   };
   return `
-    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club documents</h1><p class="muted">Forms and club papers. Tap one to open it.</p></div>
+    <div class="page-title"><a class="back-link" href="#/club">${ICON.chev}Club</a><h1>Club documents</h1><p class="muted">Forms and club papers. Tap one to open it.</p></div>
     <section class="section">${DOCS ? (DOCS.length ? groups() + (member || session ? '' : '<p class="muted">Members see more club documents here once they have signed in.</p>')
         : member || session ? `<div class="card empty"><p class="muted">Coming soon: club policies and forms will be here.</p></div>`
         : empty('Nothing here yet', 'Members see the club documents here once they have signed in.'))
@@ -3792,7 +3805,7 @@ function financialYear() { const d = new Date(), from = d.getMonth() >= 6 ? d.ge
 function calculatorView() {
   const fy = financialYear();
   return `
-    <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Handgun shoot calculator</h1><p class="muted">How many shoots do I need? Financial year ${fy.label}.</p></div>
+    <div class="page-title"><a class="back-link" href="#/club">${ICON.chev}Club</a><h1>Handgun shoot calculator</h1><p class="muted">How many shoots do I need? Financial year ${fy.label}.</p></div>
     <section class="section"><form class="card form" id="calcForm" novalidate>
       <p>For Category H (handgun) licence holders. Tick each class of pistol you have registered. It doesn't matter how many of each.</p>
       ${HANDGUN_CLASSES.map(([key, name, hint]) => `<div class="calc-class">
