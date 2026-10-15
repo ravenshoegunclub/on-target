@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '3.0.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -55,6 +55,7 @@ const ICON = {
   firstaid: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
   call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
   alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5"/><path d="M12 18h.01"/></svg>',
+  target: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
   chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16"/><path d="M7 15l4-4 3 3 5-6"/></svg>',
   signout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
@@ -1808,7 +1809,7 @@ let currentPage = '', currentHash = location.hash;
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'shoot', 'handgun', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
@@ -1824,7 +1825,8 @@ function render(quiet) {
     if (page !== 'committee/person') personEdit = null;
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
-    if (page !== 'me/results') CLAIMS.note = '';
+    if (page !== 'me/results') { CLAIMS.note = ''; SHOOT.note = ''; }
+    if (page !== 'me/shoot' && page !== 'me/results') SHOOT.edit = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
     benchLeave(page);
     familyLeave(page);
@@ -2615,6 +2617,8 @@ function meView(sub) {
   if (sub === 'documents') return documentsView(); // open to everyone: the server sends only what each person may see
   if (sub && !linked) { if (!signedIn || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
   else if (sub === 'results') return meResults();
+  else if (sub === 'shoot') return shootForm();
+  else if (sub === 'handgun') return handgunView();
   else if (sub === 'details') return meDetails();
   else if (sub === 'email') return meEmail();
   else if (sub === 'book') return bookView();
@@ -2990,41 +2994,6 @@ async function loadClaims() {
   if (CLAIMS.auth === meAuth() && currentPage === 'me/results') render(true);
 }
 const resultLine = r => [r.place && placeLabel(r.place) + ' place', r.score && 'Score ' + esc(r.score), r['class'] && 'Class ' + esc(r['class'])].filter(Boolean).join(' · ');
-function meResults() {
-  const next = events().find(e => /competition/i.test(e.discipline || '')), other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
-  if (ME.canClaim && (CLAIMS.auth !== meAuth() || (!CLAIMS.data && !CLAIMS.state))) setTimeout(loadClaims, 0);
-  const c = CLAIMS.auth === meAuth() ? CLAIMS.data : null;
-  const claims = !ME.canClaim ? '' : c && c.items.length ? `
-    <section class="section">
-      <div class="section-head"><h2 class="caps-head">Are these ${other ? who + "'s" : 'yours'}?</h2></div>
-      <p class="muted">Results from before On Target linked them to members, under a name like ${other ? who + "'s" : 'yours'}. Tap Yes to add one to ${other ? who + "'s" : 'your'} results.</p>
-      <div class="card list">${c.items.map(r => `
-        <div class="list-row claim-row">${dateBlock(r.date)}
-          <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
-            <div class="muted">Listed as <b>${esc(r.shooter)}</b>${resultLine(r) ? ' · ' + resultLine(r) : ''}</div>
-            <div class="btn-row claim-btns">
-              <button type="button" class="btn btn-primary" data-claim-yes="${esc(r.key)}">Yes, ${other ? who + "'s" : 'mine'}</button>
-              <button type="button" class="btn btn-outline" data-claim-no="${esc(r.key)}">Not ${other ? who : 'me'}</button>
-            </div></div>
-        </div>`).join('')}</div>
-      ${c.more ? `<p class="muted">And ${c.more} more. They show here as you go through these.</p>` : ''}
-    </section>` : c && c.waiting ? '' : CLAIMS.state === 'loading' && CLAIMS.auth === meAuth() ? `<section class="section">${skeletonRows(1)}</section>` : '';
-  const waiting = c && c.waiting ? `<p class="muted">${c.waiting === 1 ? '1 result' : c.waiting + ' results'} ${other ? who : 'you'} claimed ${c.waiting === 1 ? 'is' : 'are'} with the club team to check.</p>` : '';
-  return `
-    <div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} shooting</h1>${viewingLine()}${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
-    ${CLAIMS.note && CLAIMS.auth === meAuth() ? `<section class="section"><p class="notice" role="status">${esc(CLAIMS.note)}</p></section>` : ''}
-    <section class="section">${ME.results.length ? `<div class="card list">${ME.results.map(r => `
-      <div class="list-row">${dateBlock(r.date)}
-        <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
-          <div class="muted">${resultLine(r)}</div></div>
-        ${ME.canClaim && r.key ? `<button type="button" class="btn-link claim-unlink" data-unlink="${esc(r.key)}" aria-label="Not ${other ? who + "'s" : 'mine'}: ${esc(r.competition)}, ${esc(shortDate(r.date))}">Not ${other ? who + "'s" : 'mine'}?</button>` : ''}
-      </div>`).join('')}</div>${waiting}` : `${waiting}<div class="card empty">
-      <div class="empty-title">No competition results yet</div>
-      <p class="muted">Fancy having a go? ${next ? `Next competition: ${esc(shortDate(next.date))}${next.start ? ', ' + esc(niceTime(next.start) || next.start) : ''}. ` : ''}All levels welcome.</p>
-      <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
-    </div>`}</section>
-    ${claims}`;
-}
 async function claimResult(btn, key, yes) {
   if (btn.disabled) return;
   view.querySelectorAll('[data-claim-yes],[data-claim-no],[data-unlink]').forEach(b => { b.disabled = true; });
@@ -3050,6 +3019,306 @@ view.addEventListener('click', e => {
   if (yes) claimResult(yes, yes.dataset.claimYes, true);
   if (no) claimResult(no, no.dataset.claimNo, false);
   if (un && !un.disabled) askUnlink(un.dataset.unlink);
+});
+/* My shooting (v3.0.0): Overview (handgun shoots this year, a few numbers, progress in one competition, personal bests)
+   and Log (RDSS results, shoots elsewhere the member adds, and "Are these yours?").
+   Shoots elsewhere and the handgun classes are kept by the server (memberShooting), in memory only here. */
+let SHOOT = { auth: '', data: null, state: '', tab: 'overview', comp: '', note: '', edit: null };
+async function loadShooting() {
+  const auth = meAuth();
+  if (SHOOT.state === 'loading' && SHOOT.auth === auth) return;
+  if (SHOOT.auth !== auth) SHOOT = { auth, data: null, state: '', tab: SHOOT.tab, comp: '', note: '', edit: null };
+  SHOOT.state = 'loading';
+  try { SHOOT.data = await memberApi('memberShooting'); SHOOT.state = ''; }
+  catch (e) { if (e.signedOut) return; SHOOT.state = 'failed'; }
+  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|handgun)$/.test(currentPage)) render(true);
+}
+const shootData = () => (SHOOT.auth === meAuth() ? SHOOT.data : null);
+const fyStart = () => financialYear().from + '-07-01';
+const isPistol = r => /pistol|handgun/i.test(r.discipline || r.type || '');
+/* Everything they've shot, newest first: RDSS results and shoots elsewhere, in one shape */
+function shootLines() {
+  const d = shootData(), rdss = ME.results.map(r => ({ rdss: true, key: r.key, date: r.date, name: r.competition, place: r.place, score: r.score,
+    cls: r['class'], comp: true, pistol: isPistol(r), where: 'RDSS' }));
+  const own = d ? d.log.map(s => ({ rdss: false, id: s.id, date: s.date, name: s.what, place: s.place, score: s.score, comp: s.kind === 'Competition',
+    pistol: s.type === 'Pistol', where: s.club, type: s.type, kind: s.kind })) : [];
+  return rdss.concat(own).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+}
+const sameComp = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+/* Competitions with at least one score, most recently shot first: [{name, points:[{date, score}] oldest first}] */
+function scoredComps(lines) {
+  const map = new Map();
+  lines.filter(l => l.comp && scoreNumber(l.score) !== null).forEach(l => {
+    const k = l.name.trim().toLowerCase();
+    if (!map.has(k)) map.set(k, { name: l.name, points: [] });
+    map.get(k).points.unshift({ date: l.date, score: scoreNumber(l.score), line: l });
+  });
+  return [...map.values()];
+}
+/* Where they stand in their class in this competition this year, from the public results: "3rd of 9 in Class B" */
+function classRank(comp) {
+  const mine = ME.results.filter(r => sameComp(r.competition, comp.name) && r.date >= fyStart() && r['class']);
+  if (!mine.length) return '';
+  const cls = mine[0]['class'], from = fyStart(), totals = new Map();
+  let me = '';
+  days().filter(d => d.date >= from).forEach(d => d.competitions.filter(c => sameComp(c.competition, comp.name)).forEach(c => c.rows.forEach(r => {
+    if (String(r['class']).trim().toLowerCase() !== String(cls).trim().toLowerCase()) return;
+    const s = scoreNumber(r.score), who = String(r.shooter).trim().toLowerCase();
+    if (s === null || !who) return;
+    if (!me && mine.some(m => m.date === d.date && String(m.place) === String(r.place) && String(m.score) === String(r.score))) me = who;
+    const t = totals.get(who) || { sum: 0, n: 0 }; t.sum += s; t.n++; totals.set(who, t);
+  })));
+  if (!me || totals.size < 2) return '';
+  const avg = [...totals.entries()].map(([who, t]) => ({ who, avg: t.sum / t.n })).sort((a, b) => b.avg - a.avg);
+  return `${placeLabel(avg.findIndex(a => a.who === me) + 1)} of ${avg.length} in Class ${esc(cls)} this year`;
+}
+/* A small line chart: the scores in one competition (last 12), a dashed trend line, and the best one marked */
+function shootChart(comp) {
+  const pts = comp.points.slice(-12), W = 300, H = 120, pad = { l: 10, r: 14, t: 22, b: 12 };
+  const ys = pts.map(p => p.score), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+  const x = i => pts.length < 2 ? W / 2 : pad.l + i * (W - pad.l - pad.r) / (pts.length - 1);
+  const y = v => hi === lo ? (H + pad.t - pad.b) / 2 : pad.t + (hi - v) * (H - pad.t - pad.b) / span;
+  const best = ys.indexOf(Math.max(...ys)), newPb = best === pts.length - 1 && pts.length > 1;
+  let trend = '', slope = 0;
+  if (pts.length >= 3) {
+    const n = pts.length, mx = (n - 1) / 2, my = ys.reduce((a, b) => a + b, 0) / n;
+    slope = ys.reduce((a, v, i) => a + (i - mx) * (v - my), 0) / ys.reduce((a, _, i) => a + (i - mx) ** 2, 0);
+    trend = `<line class="sc-trend" x1="${x(0)}" y1="${y(my - slope * mx)}" x2="${x(n - 1)}" y2="${y(my + slope * mx)}"/>`;
+  }
+  const bx = x(best), anchor = bx > W - 60 ? 'end' : bx < 60 ? 'start' : 'middle';
+  const svg = `<svg class="shoot-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(comp.name)}: scores ${pts.map(p => p.score).join(', ')}, oldest first">
+    ${trend}<polyline class="sc-line" points="${pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')}"/>
+    ${pts.map((p, i) => `<circle class="sc-dot" cx="${x(i)}" cy="${y(p.score)}" r="4"/>`).join('')}
+    <text class="sc-pb" x="${bx}" y="${y(ys[best]) - 9}" text-anchor="${anchor}">${newPb ? 'New PB' : 'PB'} ${ys[best]}</text></svg>`;
+  const spread = span / Math.max(1, Math.abs(hi));
+  const words = pts.length < 3 ? '' : Math.abs(slope) < Math.max(0.05, spread * Math.abs(hi) * 0.02) ? 'Holding steady' : slope > 0 ? 'Trending up' : 'Trending down';
+  return { svg, words };
+}
+/* The handgun card: shoots this financial year against what the licence needs (the same rules as the calculator) */
+function handgunCard(lines, d) {
+  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  if (!d) return '';
+  if (!d.handgun.set) return d.canEdit ? `<div class="card shoot-hg shoot-hg-ask">
+      <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
+        <p class="muted">${other ? `Does ${who} hold` : 'Hold'} a handgun licence? Tell On Target which classes, and it counts ${other ? 'their' : 'your'} shoots towards the year's requirement.</p>
+        <div class="btn-row"><a class="btn btn-primary" href="#/me/handgun">Choose classes</a><button type="button" class="btn btn-outline" data-hg-none>${other ? 'No licence' : "I don't have one"}</button></div></div></div>` : '';
+  if (!d.handgun.classes.length) return '';
+  const need = shootsNeeded(d.handgun.classes), from = fyStart(), daysSeen = new Map();
+  lines.filter(l => l.pistol && l.date >= from).forEach(l => { const was = daysSeen.get(l.date); daysSeen.set(l.date, { rdss: (was && was.rdss) || l.rdss, comp: (was && was.comp) || l.comp }); });
+  const all = [...daysSeen.values()], done = all.length, comps = all.filter(v => v.comp).length, here = all.filter(v => v.rdss).length;
+  const total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
+  const r = 26, c = 2 * Math.PI * r, part = total ? Math.min(1, done / total) : 1;
+  const ring = `<div class="shoot-ring" role="img" aria-label="${done} of ${total} handgun shoots"><svg viewBox="0 0 64 64" aria-hidden="true">
+      <circle class="ring-bg" cx="32" cy="32" r="${r}"/><circle class="ring-fg" cx="32" cy="32" r="${r}" stroke-dasharray="${c * part} ${c}" transform="rotate(-90 32 32)"/></svg>
+      <span aria-hidden="true">${done}/${total}</span></div>`;
+  const status = left || compsLeft ? [left && `${left} more needed by 30 June`, need.classes.length > 1 && `${Math.min(comps, need.competitions)} of ${need.competitions} competitions done`].filter(Boolean).join('. ')
+    : 'Done for this year. Well shot!';
+  return `<div class="card shoot-hg">${ring}
+    <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
+      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
+      <div class="muted">${status}</div>
+      <div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a>${d.canEdit ? ' · <a href="#/me/handgun">Change classes</a>' : ''}</div></div></div>`;
+}
+function shootOverview(lines, d) {
+  const from = fyStart(), year = lines.filter(l => l.comp && l.date >= from);
+  const comps = scoredComps(lines), comp = comps.find(c => sameComp(c.name, SHOOT.comp)) || comps.find(c => c.points.length > 1) || comps[0];
+  const avg = comp ? comp.points.reduce((a, p) => a + p.score, 0) / comp.points.length : null;
+  const tile = (n, label) => `<div class="card shoot-stat"><b>${n}</b><span>${label}</span></div>`;
+  const stats = `<div class="shoot-stats">${tile(year.length, `competition${year.length === 1 ? '' : 's'} this year`)}${tile(avg === null ? '–' : Math.round(avg * 10) / 10, comp ? 'average, ' + esc(comp.name) : 'average')}${tile(year.filter(l => [1, 2, 3].includes(Number(l.place))).length, 'podiums this year')}</div>`;
+  let chart = '';
+  if (comp) {
+    const ch = shootChart(comp), rank = classRank(comp);
+    chart = `<div class="card shoot-chart-card" id="shootChart">
+      <div class="shoot-chart-head"><h2 class="list-title">${esc(comp.name)}</h2>
+        ${comps.length > 1 ? `<label class="shoot-change"><span>Change</span><select data-shoot-comp aria-label="Which competition to show">${comps.map(c => `<option value="${esc(c.name)}"${c === comp ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}</div>
+      ${comp.points.length > 1 ? ch.svg : `<p class="muted">One score so far: ${comp.points[0].score}. Shoot it again to see how you're going.</p>`}
+      ${ch.words || rank ? `<p class="muted">${[ch.words, rank].filter(Boolean).join(' · ')}</p>` : ''}</div>`;
+  }
+  const bests = comps.map(c => c.points.reduce((b, p) => p.score > b.score ? p : b)).map((p, i) => ({ ...p, comp: comps[i] })).sort((a, b) => a.date < b.date ? 1 : -1);
+  const pbs = bests.length ? `<section class="section"><h2 class="sp-head">Personal bests</h2><div class="card list">${bests.map(b => `
+      <button type="button" class="menu-row pb-row" data-shoot-pb="${esc(b.comp.name)}"><span class="pb-ico">${ICON.trophy}</span>
+        <span class="row-text">${esc(b.comp.name)}<span class="muted">${b.score} · ${esc(shortDate(b.date))} ${b.date.slice(0, 4)}${b.line.rdss ? '' : ' · ' + esc(b.line.where)}</span></span>${ICON.chev}</button>`).join('')}</div></section>` : '';
+  return `<section class="section shoot-over">${handgunCard(lines, d)}${lines.length ? stats + chart : ''}</section>${pbs}`;
+}
+function shootLog(lines, d) {
+  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
+  const c = CLAIMS.auth === meAuth() ? CLAIMS.data : null;
+  const byYear = {};
+  lines.forEach(l => { (byYear[l.date.slice(0, 4)] = byYear[l.date.slice(0, 4)] || []).push(l); });
+  const row = l => {
+    const sub = joinDot(shortDate(l.date), l.where, l.place && placeLabel(l.place), l.score && esc(l.score), !l.rdss && l.kind === 'Practice' && !/practice/i.test(l.name) && 'Practice');
+    const tag = l.rdss ? `<span class="mbadge mbadge-ok shoot-tag">${ICON.check}RDSS</span>` : `<span class="mbadge shoot-tag shoot-tag-own">Added by ${other ? who : 'you'}</span>`;
+    const main = `<span class="pb-ico">${l.comp ? ICON.trophy : ICON.target}</span><span class="row-text">${esc(l.name)}<span class="muted">${sub}</span></span>${tag}`;
+    if (!l.rdss) return can ? `<button type="button" class="menu-row log-row" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${main}${ICON.chev}</button>` : `<div class="menu-row log-row">${main}</div>`;
+    return ME.canClaim && l.key ? `<button type="button" class="menu-row log-row" data-unlink="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}, at RDSS. Tap if it isn't ${other ? who + "'s" : 'yours'}.">${main}</button>` : `<div class="menu-row log-row">${main}</div>`;
+  };
+  const add = can ? `<a class="shoot-add" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : '';
+  const list = lines.length ? Object.keys(byYear).sort().reverse().map(y => `<h2 class="sp-head">${y}</h2><div class="card list">${byYear[y].map(row).join('')}</div>`).join('')
+    : `<div class="card empty"><div class="empty-title">Nothing here yet</div><p class="muted">${other ? who + "'s" : 'Your'} results at RDSS show here by themselves.${can ? ' Shot somewhere else? Add it above.' : ''}</p></div>`;
+  const waiting = c && c.waiting ? `<p class="muted">${c.waiting === 1 ? '1 result' : c.waiting + ' results'} ${other ? who : 'you'} claimed ${c.waiting === 1 ? 'is' : 'are'} with the club team to check.</p>` : '';
+  const claims = !ME.canClaim ? '' : c && c.items.length ? `
+    <h2 class="sp-head">Are these ${other ? who + "'s" : 'yours'}?</h2>
+    <p class="muted">Results from before On Target linked them to members, under a name like ${other ? who + "'s" : 'yours'}.</p>
+    <div class="card list">${c.items.map(r => `
+      <div class="menu-row claim-row"><span class="pb-ico">${ICON.help}</span>
+        <span class="row-text">${esc(r.competition)}, ${esc(shortDate(r.date))}<span class="muted">Listed as <b>${esc(r.shooter)}</b>${r.place ? ', ' + placeLabel(r.place) : ''}${r.score ? ' · ' + esc(r.score) : ''}</span>
+          <span class="btn-row claim-btns">
+            <button type="button" class="btn btn-primary" data-claim-yes="${esc(r.key)}">Yes, ${other ? who + "'s" : 'mine'}</button>
+            <button type="button" class="btn btn-outline" data-claim-no="${esc(r.key)}">Not ${other ? who : 'me'}</button></span></span>
+      </div>`).join('')}</div>
+    ${c.more ? `<p class="muted">And ${c.more} more. They show here as you go through these.</p>` : ''}`
+    : CLAIMS.state === 'loading' && CLAIMS.auth === meAuth() ? skeletonRows(1) : '';
+  const unlinkTip = ME.canClaim && lines.some(l => l.rdss) ? `<p class="muted">An RDSS result here that isn't ${other ? who + "'s" : 'yours'}? Tap it to take it off.</p>` : '';
+  return `<section class="section shoot-log">${add}${list}${unlinkTip}${waiting}${claims}
+    <p class="muted shoot-foot">Shoots at other clubs are ${other ? who + "'s" : 'your'} own record. Those clubs keep the official one.</p></section>`;
+}
+function meResults() {
+  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  if (ME.canClaim && (CLAIMS.auth !== meAuth() || (!CLAIMS.data && !CLAIMS.state))) setTimeout(loadClaims, 0);
+  if (SHOOT.auth !== meAuth() || (!SHOOT.data && !SHOOT.state)) setTimeout(loadShooting, 0);
+  const d = shootData(), lines = shootLines(), tab = SHOOT.tab;
+  const note = (CLAIMS.note && CLAIMS.auth === meAuth() ? CLAIMS.note : '') || SHOOT.note;
+  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log']].map(t => `
+    <button type="button" data-shoot-tab="${t[0]}" aria-pressed="${tab === t[0]}">${t[1]}</button>`).join('')}</div>`;
+  const next = events().find(e => /competition/i.test(e.discipline || ''));
+  const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
+    : !d ? `<section class="section">${skeletonRows(3)}</section>`
+    : tab === 'log' ? shootLog(lines, d)
+    : shootOverview(lines, d);
+  const none = d && !lines.length && tab === 'overview' ? `<section class="section"><div class="card empty">
+      <div class="empty-title">No competition results yet</div>
+      <p class="muted">Fancy having a go? ${next ? `Next competition: ${esc(shortDate(next.date))}${next.start ? ', ' + esc(niceTime(next.start) || next.start) : ''}. ` : ''}All levels welcome.</p>
+      <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
+    </div></section>` : '';
+  return `
+    <div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} shooting</h1>${viewingLine()}</div>
+    ${note ? `<section class="section"><p class="notice" role="status">${esc(note)}</p></section>` : ''}
+    <section class="section">${seg}</section>
+    ${body}${none}`;
+}
+/* Add or change a shoot elsewhere (#/me/shoot) */
+const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
+function shootForm() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title"><a class="back-link" href="#/me/results">${ICON.chev}My shooting</a><h1>Add a shoot</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('your shooting log', 'data-shoot-reload') : skeletonRows(2)}</section>`; }
+  if (!d.canEdit) { location.replace('#/me/results'); return ''; }
+  const s = (SHOOT.edit && d.log.find(x => x.id === SHOOT.edit)) || { date: todayIso(), type: 'Pistol', kind: 'Competition' };
+  const pills = (name, list, picked) => list.map(v => `<label class="choice"><input type="radio" name="${name}" value="${v}"${v === picked ? ' checked' : ''}><span class="choice-title">${v}</span></label>`).join('');
+  return `
+    <div class="page-title"><a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a><h1>${s.id ? 'Change a shoot' : 'Add a shoot elsewhere'}</h1>${viewingLine()}
+      <p class="muted">For shoots at other clubs, or practice. Results at RDSS are added by the club team.</p></div>
+    <section class="section"><form class="card form" id="shootForm" novalidate data-id="${esc(s.id || '')}">
+      <label class="field-label" for="shDate">Day</label>
+      ${dateField('shDate', s.date)}
+      <label class="field-label" for="shWhat">What ${other ? 'did they' : 'did you'} shoot? <span class="field-hint">e.g. ISSF 25m Pistol</span></label>
+      <input class="field" id="shWhat" maxlength="80" autocapitalize="words" autocomplete="off" value="${esc(s.what || '')}">
+      <label class="field-label" for="shClub">Where? <span class="field-hint">e.g. Atherton Pistol Club</span></label>
+      <input class="field" id="shClub" maxlength="80" autocapitalize="words" autocomplete="off" list="shClubs" value="${esc(s.club || '')}">
+      <datalist id="shClubs">${options(uniq(d.log.map(x => x.club)))}</datalist>
+      <fieldset class="choices choices-row shoot-types"><legend class="field-label">Type</legend>${pills('shType', SHOOT_TYPES, s.type)}</fieldset>
+      <p class="muted">Pistol shoots count towards the handgun shoots for the year.</p>
+      <fieldset class="choices choices-row shoot-kinds"><legend class="field-label">Competition or practice?</legend>${pills('shKind', ['Competition', 'Practice'], s.kind)}</fieldset>
+      <div class="shoot-pair">
+        <div><label class="field-label" for="shPlace">Place <span class="field-hint">optional</span></label>
+          <input class="field" id="shPlace" inputmode="numeric" maxlength="10" autocomplete="off" value="${esc(s.place || '')}"></div>
+        <div><label class="field-label" for="shScore">Score <span class="field-hint">optional</span></label>
+          <input class="field" id="shScore" inputmode="decimal" maxlength="20" autocomplete="off" value="${esc(s.score || '')}"></div>
+      </div>
+      <label class="field-label" for="shNotes">Notes <span class="field-hint">optional</span></label>
+      <input class="field" id="shNotes" maxlength="200" autocomplete="off" value="${esc(s.notes || '')}">
+      <p class="form-error" id="shError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="shSubmit">${s.id ? 'Save changes' : 'Add to my log'}</button>
+      ${s.id ? `<button type="button" class="btn btn-outline btn-big" data-shoot-remove>Remove this shoot</button>` : ''}
+    </form></section>`;
+}
+async function saveShoot(form) {
+  const btn = form.querySelector('#shSubmit'), error = form.querySelector('#shError'), val = id => form.querySelector(id).value.trim(), label = btn.textContent;
+  if (btn.disabled) return;
+  const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
+  const pick = name => (form.querySelector(`input[name="${name}"]:checked`) || {}).value || '';
+  const s = { id: form.dataset.id, date: val('#shDate'), what: val('#shWhat'), club: val('#shClub'), type: pick('shType'), kind: pick('shKind'), place: val('#shPlace').replace(/(st|nd|rd|th)$/i, ''), score: val('#shScore'), notes: val('#shNotes') };
+  if (!s.date) return fail('Please choose the day of the shoot.', '#shDate');
+  if (s.date > todayIso()) return fail("That day hasn't happened yet. Please choose the day of the shoot.", '#shDate');
+  if (!s.what) return fail('Please type what was shot, e.g. "ISSF 25m Pistol" or "Practice".', '#shWhat');
+  if (!s.club) return fail('Please type where, e.g. "Atherton Pistol Club".', '#shClub');
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    SHOOT.data = await memberApi('memberShootSave', [s]);
+    SHOOT.note = s.id ? 'Saved.' : 'Added to the log.'; SHOOT.tab = 'log'; SHOOT.edit = null;
+    form.remove(); go('#/me/results');
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    fail(e.message);
+  }
+}
+function askRemoveShoot() {
+  const s = shootData() && shootData().log.find(x => x.id === SHOOT.edit);
+  if (!s) return;
+  confirmAsk({ title: 'Remove this shoot?', text: `${s.what}, ${shortDate(s.date)}, ${s.club}. It comes off the log.`,
+    yes: 'Yes, remove it', busy: 'Removing…', no: 'No, keep it', run: () => memberApi('memberShootRemove', [s.id]),
+    done: out => { SHOOT.data = out; SHOOT.note = 'Removed.'; SHOOT.tab = 'log'; SHOOT.edit = null; const f = document.getElementById('shootForm'); if (f) f.remove(); go('#/me/results'); } });
+}
+/* Handgun classes (#/me/handgun): the same choices as the calculator, saved so My shooting can count */
+function handgunView() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '', fy = financialYear();
+  const back = `<a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a>`;
+  if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title">${back}<h1>Handgun classes</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('your shooting log', 'data-shoot-reload') : skeletonRows(2)}</section>`; }
+  if (!d.canEdit) { location.replace('#/me/results'); return ''; }
+  const held = key => d.handgun.classes.find(c => c.key === key);
+  return `
+    <div class="page-title">${back}<h1>Handgun classes</h1>${viewingLine()}<p class="muted">Financial year ${fy.label}.</p></div>
+    <section class="section"><form class="card form" id="hgForm" novalidate>
+      <p>Tick each class of pistol ${other ? who + ' has' : 'you have'} registered. On Target then counts ${other ? 'their' : 'your'} pistol shoots towards what the licence needs this year.</p>
+      ${HANDGUN_CLASSES.map(([key, name, hint]) => `<div class="calc-class">
+        <label class="choice"><input type="checkbox" id="calc${key}" data-calc-class="${key}"${held(key) ? ' checked' : ''}>
+          <span><span class="choice-title">${key} – ${name}</span><span class="choice-text">${hint}</span></span></label>
+        <div class="calc-held" id="calcHeld${key}"${held(key) ? '' : ' hidden'}><label class="field-label" for="calcMonths${key}">Held</label>
+          <select class="field" id="calcMonths${key}" aria-label="Months held class ${key} this financial year">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}"${i + 1 === (held(key) ? held(key).months : 12) ? ' selected' : ''}>${i + 1} month${i ? 's' : ''}</option>`).join('')}</select></div>
+      </div>`).join('')}
+      <p class="muted">“Held” = whole months this financial year (1 July – 30 June). Leave at 12 if it's been all year. From 1 July it goes back to 12 by itself.</p>
+      <p class="form-error" id="hgError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="hgSubmit">Save</button>
+      <button type="button" class="btn btn-outline btn-big" data-hg-none>${other ? who + " doesn't" : "I don't"} have a handgun licence</button>
+    </form></section>`;
+}
+async function saveHandgun(classes, btn) {
+  if (btn.disabled) return;
+  const label = btn.textContent, error = document.getElementById('hgError');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    SHOOT.data = await memberApi('memberHandgunSave', [classes]);
+    SHOOT.note = classes.length ? 'Saved. Your handgun shoots are counted below.' : "Saved. The handgun count won't show.";
+    if (viewingOther()) SHOOT.note = SHOOT.note.replace('Your', ME.viewing.first + "'s");
+    SHOOT.tab = 'overview';
+    const f = document.getElementById('hgForm'); if (f) f.remove();
+    if (currentPage === 'me/results') render(true); else go('#/me/results');
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    if (error) { error.textContent = e.message; error.hidden = false; } else { SHOOT.note = e.message; render(true); }
+  }
+}
+view.addEventListener('click', e => {
+  const t = e.target;
+  const tab = t.closest('[data-shoot-tab]'), pb = t.closest('[data-shoot-pb]'), ed = t.closest('[data-shoot-edit]');
+  if (tab) { SHOOT.tab = tab.dataset.shootTab; SHOOT.note = ''; CLAIMS.note = ''; render(true); view.querySelector(`[data-shoot-tab="${SHOOT.tab}"]`).focus(); }
+  if (pb) { SHOOT.comp = pb.dataset.shootPb; render(true); const c = document.getElementById('shootChart'); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+  if (ed) { SHOOT.edit = ed.dataset.shootEdit; go('#/me/shoot'); }
+  if (t.closest('[data-shoot-reload]')) { SHOOT.state = ''; SHOOT.data = null; render(true); }
+  if (t.closest('[data-shoot-remove]')) askRemoveShoot();
+  if (t.closest('[data-hg-none]')) saveHandgun([], t.closest('[data-hg-none]'));
+});
+view.addEventListener('change', e => { if (e.target.matches('[data-shoot-comp]')) { SHOOT.comp = e.target.value; render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); } });
+view.addEventListener('submit', e => {
+  if (e.target.id === 'shootForm') { e.preventDefault(); saveShoot(e.target); }
+  if (e.target.id === 'hgForm') {
+    e.preventDefault();
+    const held = HANDGUN_CLASSES.filter(([key]) => document.getElementById('calc' + key).checked).map(([key]) => ({ key, months: Number(document.getElementById('calcMonths' + key).value) }));
+    const error = document.getElementById('hgError');
+    if (!held.length) { error.textContent = `Please tick at least one class, or choose "I don't have a handgun licence".`; error.hidden = false; return; }
+    saveHandgun(held, document.getElementById('hgSubmit'));
+  }
 });
 /* My details: members change their own, and it is saved straight away with no club team approval.
    Name and SSAA number are the two things only the club can change. */
@@ -4147,7 +4416,7 @@ view.addEventListener('change', e => {
   const key = e.target.dataset && e.target.dataset.calcClass;
   if (!key) return;
   document.getElementById('calcHeld' + key).hidden = !e.target.checked;
-  document.getElementById('calcResult').innerHTML = ''; // the answer on show no longer matches the ticks
+  const out = document.getElementById('calcResult'); if (out) out.innerHTML = ''; // the answer on show no longer matches the ticks
 });
 view.addEventListener('submit', e => {
   if (e.target.id !== 'calcForm') return;

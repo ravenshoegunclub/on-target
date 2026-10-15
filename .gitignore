@@ -12,3 +12,6 @@ website/
 guide-screenshots/
 guide-screenshots.zip
 guide-screenshots-update.zip
+
+# Claude Code personal settings
+.claude/settings.local.json
