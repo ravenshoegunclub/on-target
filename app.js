@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.1.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -402,7 +402,7 @@ const VIEWS = {
   },
 
   events() {
-    if (session && !PRIVATE) loadPrivate();
+    if (session || (member && ME && ME.linked) ? !PRIVATE || PRIVATE_FOR !== privateFor() : false) loadPrivate();
     entriesWanted();
     const list = eventsShown();
     return `
@@ -566,21 +566,29 @@ function eventPosted() {
     </div></section>`;
 }
 
-/* ---------- Private events (members-only and committee-only), for the signed-in club team ---------- */
+/* ---------- Private events: members-only and committee-only for the signed-in club team; members-only for signed-in
+   members (v3.1.1, memberEvents) ---------- */
 let PRIVATE = null;          // from the server; kept in memory only, never saved on the phone
+let PRIVATE_FOR = '';        // who PRIVATE was fetched for, so another sign-in never sees it
 let privateLoading = false;
+const privateFor = () => (session ? 'pin:' + session.pin : member ? member.token : '');
 
 async function loadPrivate() {
-  if (privateLoading || !session) return;
+  const auth = privateFor();
+  if (privateLoading || !auth) return;
+  if (!session && !(ME && ME.linked)) { if (!ME && !meState) setTimeout(loadMe, 0); return; }
   privateLoading = true;
-  try { const list = await committeeApi('privateEvents'); PRIVATE = Array.isArray(list) ? list : []; } catch (e) { /* the public events still show */ }
+  try {
+    const list = session ? await committeeApi('privateEvents') : await memberApi('memberEvents', [], true);
+    PRIVATE = Array.isArray(list) ? list : []; PRIVATE_FOR = auth;
+  } catch (e) { /* the public events still show */ }
   privateLoading = false;
   if (PRIVATE && currentPage === 'events') render(true);
 }
-/* The Events tab: public events, plus upcoming private ones (with a badge) when the club team is signed in */
+/* The Events tab: public events, plus upcoming private ones (with a badge) when the club team or a member is signed in */
 function eventsShown() {
   const today = todayIso();
-  const extra = session && PRIVATE ? PRIVATE.filter(e => e.date >= today) : [];
+  const extra = PRIVATE && PRIVATE_FOR && PRIVATE_FOR === privateFor() ? PRIVATE.filter(e => e.date >= today) : [];
   return [...events(), ...extra].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 }
 
@@ -2579,14 +2587,14 @@ async function memberApi(fn, args, asSelf) {
 }
 function forgetMember() {
   BENCH = blankBench(); VIEW_AS = '';
-  member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
+  member = null; memberStore.set(null); ME = null; PRIVATE = null; PRIVATE_FOR = ''; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = '';
   if (location.hash.indexOf('#/me/') === 0) location.hash = '#/me'; else render();
 }
 /* One Sign out for everything: the member sign-in and the club team PIN */
 function signOutAll() {
   if (member) {
     api('memberSignOut', undefined, [member.token]).catch(() => { /* the phone forgets the sign-in either way */ });
-    member = null; memberStore.set(null); ME = null; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = ''; VIEW_AS = '';
+    member = null; memberStore.set(null); ME = null; PRIVATE = null; PRIVATE_FOR = ''; meState = ''; meNote = ''; relinking = false; DOCS = null; docsState = ''; VIEW_AS = '';
   }
   signOut();
   view.focus();
@@ -3109,24 +3117,26 @@ function shootChart(comp) {
 function handgunCard(lines, d) {
   const other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
   if (!d) return '';
-  if (!d.handgun.set) return d.canEdit ? `<div class="card shoot-hg shoot-hg-ask">
-      <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
-        <p class="muted">${other ? `Does ${who} hold` : 'Hold'} a handgun licence? Tell On Target which classes, and it counts ${other ? 'their' : 'your'} shoots towards the year's requirement.</p>
-        <div class="btn-row"><a class="btn btn-primary" href="#/me/handgun">Choose classes</a><button type="button" class="btn btn-outline" data-hg-none>${other ? 'No licence' : "I don't have one"}</button></div></div></div>` : '';
-  if (!d.handgun.classes.length) return '';
+  // v3.1.1: the classes are ticked right here, in every state, so "I don't have one" can always be undone
+  const picker = hgPicker(d);
+  if (!d.handgun.set) return d.canEdit ? `<div class="card shoot-hg-wrap"><div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
+        <p class="muted">${other ? `Does ${who} hold` : 'Hold'} a handgun licence? Tick the classes, and On Target counts ${other ? 'their' : 'your'} shoots towards the year's requirement.</p></div>
+      ${picker}<button type="button" class="link-btn hg-none" data-hg-none>${other ? who + " doesn't" : "I don't"} have a handgun licence</button></div>` : '';
+  if (!d.handgun.classes.length) return d.canEdit ? `<div class="card shoot-hg-wrap"><div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
+        <p class="muted">No handgun licence (as entered by ${other ? 'you for ' + who : 'you'}). Tick a class if that changes.</p></div>${picker}</div>` : '';
   const from = fyStart(), daysSeen = new Map();
   lines.filter(l => l.pistol && l.date >= from).forEach(l => { const was = daysSeen.get(l.date); daysSeen.set(l.date, { rdss: (was && was.rdss) || l.rdss, comp: (was && was.comp) || l.comp }); });
   const all = [...daysSeen.values()], done = all.length, comps = all.filter(v => v.comp).length, here = all.filter(v => v.rdss).length;
-  const links = `<div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a>${d.canEdit ? ' · <a href="#/me/handgun">Change classes</a>' : ''}</div>`;
+  const links = `<div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a></div>`;
   const r = 26, c = 2 * Math.PI * r;
   const ringOf = (part, label, text) => `<div class="shoot-ring" role="img" aria-label="${label}"><svg viewBox="0 0 64 64" aria-hidden="true">
       <circle class="ring-bg" cx="32" cy="32" r="${r}"/><circle class="ring-fg" cx="32" cy="32" r="${r}" stroke-dasharray="${c * part} ${c}" transform="rotate(-90 32 32)"/></svg>
       <span aria-hidden="true">${text}</span></div>`;
   // Their licence conditions say no attendance is needed (as they entered it): no requirements shown, just the count
-  if (d.handgun.noAttend) return `<div class="card shoot-hg">${ringOf(1, `${done} handgun shoots`, done)}
+  if (d.handgun.noAttend) return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(1, `${done} handgun shoots`, done)}
     <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
       <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
-      <div class="muted"><b>No attendance requirement (as entered by you)</b>${d.handgun.conditions ? `. Conditions: ${esc(d.handgun.conditions)}` : ''}</div>${links}</div></div>`;
+      <div class="muted"><b>No attendance requirement (as entered by you)</b>${d.handgun.conditions ? `. Conditions: ${esc(d.handgun.conditions)}` : ''}</div>${links}</div></div>${picker}</div>`;
   const need = shootsNeeded(d.handgun.classes), total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
   const status = left || compsLeft ? [left && `${left} more needed by 30 June`, need.classes.length > 1 && `${Math.min(comps, need.competitions)} of ${need.competitions} competitions done`].filter(Boolean).join('. ')
     : 'Done for this year. Well shot!';
@@ -3134,7 +3144,29 @@ function handgunCard(lines, d) {
     <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
       <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
       <div class="muted">${status}</div>${links}</div></div>
-    ${handgunBreakdown(lines, need, d)}</div>`;
+    ${picker}${handgunBreakdown(lines, need, d)}</div>`;
+}
+/* The pistol classes they hold, as four tick buttons (v3.1.1). Months held and licence conditions stay on Handgun classes. */
+function hgPicker(d) {
+  if (!d.canEdit) return '';
+  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', held = key => d.handgun.classes.some(c => c.key === key);
+  return `<div class="hg-pick"><div class="hg-pick-head">Pistol classes ${other ? who + ' holds' : 'I hold'}</div>
+    <div class="hg-chips" role="group" aria-label="Pistol classes ${other ? who + ' holds' : 'I hold'}">${HANDGUN_CLASSES.map(([key, name]) => `
+      <button type="button" class="hg-chip" data-hg-tick="${key}" aria-pressed="${held(key)}"${SHOOT.hgBusy ? ' disabled' : ''}><span class="hg-chip-key">${held(key) ? ICON.check : ''}${key}</span><span class="hg-chip-name">${esc(name)}</span></button>`).join('')}</div>
+    <a class="hg-more" href="#/me/handgun">Months held and licence conditions</a></div>`;
+}
+async function tickHandgun(key) {
+  const d = shootData();
+  if (!d || SHOOT.hgBusy) return;
+  const was = d.handgun.classes, on = was.some(c => c.key === key);
+  const classes = on ? was.filter(c => c.key !== key) : [...was, { key, months: 12 }].sort((a, b) => a.key < b.key ? -1 : 1);
+  SHOOT.hgBusy = true; SHOOT.note = '';
+  view.querySelectorAll('[data-hg-tick]').forEach(b => { b.disabled = true; });
+  try { SHOOT.data = await memberApi('memberHandgunSave', [classes]); }
+  catch (e) { if (e.signedOut) { SHOOT.hgBusy = false; return; } SHOOT.note = e.message; }
+  SHOOT.hgBusy = false;
+  render(true);
+  const b = view.querySelector(`[data-hg-tick="${key}"]`); if (b) b.focus();
 }
 /* Under the ring: what each class needs this year, by the calculator's rules (shootsNeeded), and how far along they are.
    A shoot counts towards a class when it was entered with that class; RDSS results don't record the class. */
@@ -3431,6 +3463,7 @@ view.addEventListener('click', e => {
   if (rc) { SHOOT.rkey = rc.dataset.rclass; go('#/me/rclass'); }
   if (t.closest('[data-rc-clear]')) saveResultClass('', t.closest('[data-rc-clear]'));
   if (t.closest('[data-hg-none]')) saveHandgun([], t.closest('[data-hg-none]'));
+  if (t.closest('[data-hg-tick]')) tickHandgun(t.closest('[data-hg-tick]').dataset.hgTick);
 });
 view.addEventListener('change', e => {
   // Add a shoot: the class question only for pistol; the accredited tick only for Class C

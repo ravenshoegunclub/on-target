@@ -19,13 +19,13 @@ Carl is a volunteer club member (a former IT professional), not on the committee
 ## The plan (phases)
 
 1. **Move to a proper app (now):** public pages (events, results, photos, club info), then the committee's tools (posting events/results/photos with a PIN, messages inbox, admin: payments and members).
-2. Members sign in (email + one-time code): my membership and expiry, renew, digital card, my results history, renewal reminders. **Part 1 built in v2.0.0** (sign-in, card, my results, renew link, my details, "App sign-ups to check"). **Next job: members-only events for signed-in members** (today only the club team sees them, though the posting message already says "signed-in members"). After that: renewal reminders.
+2. Members sign in (email + one-time code): my membership and expiry, renew, digital card, my results history, renewal reminders. **Part 1 built in v2.0.0** (sign-in, card, my results, renew link, my details, "App sign-ups to check"). Members-only events for signed-in members: **built in v3.1.1**. **Next job: renewal reminders.**
 3. Club life: RSVP, training and safety course bookings, members-only documents, Learn section, calendar subscription.
 4. Bench booking (pistol range 6 benches, rifle range 12; benches 11 and 12 for big calibres and muzzle brakes, corrected in v2.5.0). **Built in v2.2.0.**
 
 Event visibility (built in v1.5.0 with Manage posts):
 
-- Events have a "Who can see this?" choice: **Everyone / Members only / Committee only**. Until members can sign in (phase 2), only signed-in committee see the last two.
+- Events have a "Who can see this?" choice: **Everyone / Members only / Committee only**. The club team sees all three; since v3.1.1 a signed-in member linked to a membership (or a linked PIN) also sees "Members only" ones (`memberEvents`), never "Committee only".
 - Members-only and committee-only events must **never** appear on the website or the public feed, and must **not be stored in the published RDSS Club Data sheet**. They live in a "Private events" tab of the private Members spreadsheet, and the app keeps them in memory only (never in localStorage).
 
 Parked: electronic range sign-in / Form 33 (waiting on Queensland Police), online payments, SMS alerts, one-tap Facebook/Instagram posting.
@@ -95,6 +95,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
   - **Only admins set families up** (`familyGet`, `familyAdd`, `familyRemove`): All members & status, tap a member. Members can't add people.
   - **On Me:** name chips (Jo · Sam · Alex, juniors with a gold "Junior" tag), "Viewing: Sam", card status "Current · Family". My details has "My family" (`#/me/family`) and the hide switch. The phone remembers only your own first name and status, never a family member's.
   - **Members list import (admins, `#/committee/import`, `membersImport`):** reads the layout of Carl's "RDSS Members list – template" (Surname, First name, Known as (v2.9.0), SSAA member number, Single or Family, Family group, Paid up to, Mobile, Email, Notes, Year of birth (juniors only)) as .xlsx or .csv. The file is read in the browser with no library (`xlsxCells`, `csvCells`); the server first reports what would happen to each row and adds nothing until the admin agrees. The members are taken from the first sheet that has a heading row with "Surname" in it, so a notes sheet or a title row above the headings is fine, and headings are matched loosely (capitals, stars and extra words don't matter); the heading row is the one with both "Surname" and "First name" in it, columns can be in any order, and the template's own example rows (surname starting "EXAMPLE –", with any kind of dash) are always left out (v2.4.3). When no heading row is found the message lists the first row it could read. Someone already in the list (same SSAA number, or same name when they have no number) is never changed, except to be put in their family; the first adult listed in a family is the one who pays. No emails are sent.
+- **v3.1.1:** the pistol classes are ticked right in the "Handgun shoots this year" card on My shooting's Overview (`hgPicker`, `tickHandgun`; four buttons A to D, saved at once with `memberHandgunSave`, new classes as 12 months), in every state: not set yet, "No handgun licence" (so "I don't have one" can be undone), and with classes. Months held and licence conditions stay on Handgun classes (`#/me/handgun`, "Months held and licence conditions"). **Members-only events** show in Events, with their badge, for signed-in linked members: `memberEvents(token)` (end of `Api.js`) gives upcoming "Members" events from the Private events tab; the phone keeps them in memory only (`PRIVATE`, `PRIVATE_FOR`). They get no I'm in button (public competitions only).
 - **v3.1.0, "I'm in" for competitions (all new functions at the end of `Api.js`; `ENTRY`, `entryBlock`, `entriesSection`, `entriesAdminView` in `app.js`):**
   - On each competition in Events (`isCompetition`; public events only, never private ones), a signed-in linked member taps **I'm in**; tapping again, or "Can't make it", withdraws. Open until the start time (no start time: until the day before); never on a closed range day. Not binding, no payment: "Lets the club know you're coming."
   - **Families:** an adult with juniors sees "Who's going?" with a button per person (Me, Sam); a junior can only be entered by an adult in their family, or themselves. Always from the signed-in person's own view (`asSelf`), not "Viewing".
@@ -159,7 +160,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **3.1.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **3.1.1**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.

@@ -907,3 +907,19 @@ button.log-row { font: inherit; color: inherit; }
 .roster li:last-child { border-bottom: 0; }
 .roster li > span:first-child { margin-right: 8px; }
 .roster-off > span:first-child { text-decoration: line-through; color: var(--text-2); }
+
+/* v3.1.1 the pistol classes they hold, ticked right in "Handgun shoots this year" */
+.hg-pick { border-top: 1px solid var(--line-soft); padding: 12px 16px 14px; }
+.shoot-hg-wrap > .shoot-hg-text { padding: 16px 16px 4px; }
+.shoot-hg-wrap > .shoot-hg-text + .hg-pick { border-top: 0; }
+.hg-pick-head { font-weight: 600; font-size: 14.5px; margin-bottom: 8px; }
+.hg-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hg-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 56px; padding: 8px 12px; text-align: left; cursor: pointer;
+  border: 1.5px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); font: 500 13.5px/1.3 Poppins, sans-serif; }
+.hg-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--tint); }
+.hg-chip:disabled { opacity: .6; cursor: default; }
+.hg-chip-key { display: inline-flex; align-items: center; gap: 4px; font: 800 17px Montserrat, sans-serif; color: var(--heading); }
+.hg-chip-key svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.hg-chip-name { color: var(--text-2); }
+.hg-more { display: inline-block; margin-top: 10px; font-weight: 600; font-size: 14.5px; color: var(--accent); }
+.hg-none { padding: 0 16px; margin-bottom: 6px; font-size: 15px; }
