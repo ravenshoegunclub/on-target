@@ -1,10 +1,10 @@
-/* On Target v2.6.1 — app shell with live club data and club team tools
+/* On Target v2.7.0 — app shell with live club data and club team tools
    Events, results and photos come from the club's public feed (the same one
    the website uses). Each list is saved on the phone, so it opens instantly
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.6.1';
+const APP_VERSION = '2.7.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -22,7 +22,8 @@ const FEED_URL = TEST_SERVER ? `https://script.google.com/macros/s/${TEST_SERVER
 const FEEDS = {
   events:  'feed=events&n=30',
   results: 'feed=results&all=1&n=300',
-  photos:  'feed=photos&n=60'
+  photos:  'feed=photos&n=60',
+  range:   'feed=range'
 };
 const REFRESH_AFTER_MS = 2 * 60 * 1000; // matches the feed's own 2-minute cache
 
@@ -53,6 +54,7 @@ const ICON = {
   phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M12 8v7M9 12l3 3 3-3"/></svg>',
   firstaid: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
   call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5"/><path d="M12 18h.01"/></svg>',
   chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16"/><path d="M7 15l4-4 3 3 5-6"/></svg>',
   signout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
@@ -109,11 +111,12 @@ function dateBlock(iso) {
 function rangeStatus() {
   const now = new Date(), day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
   const close = { 3: 11 * 60 + 30, 6: 12 * 60 };
-  if (close[day] && mins >= 8 * 60 + 30 && mins < close[day]) return { open: true, text: 'Range open now' };
-  if (close[day] && mins < 8 * 60 + 30) return { open: false, text: 'Range opens today 8:30am' };
-  for (let i = 1; i <= 7; i++) {
+  const iso = i => isoOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i));
+  if (close[day] && !closedOn(iso(0)) && mins >= 8 * 60 + 30 && mins < close[day]) return { open: true, text: 'Range open now' };
+  if (close[day] && !closedOn(iso(0)) && mins < 8 * 60 + 30) return { open: false, text: 'Range opens today 8:30am' };
+  for (let i = 1; i <= 21; i++) { // closed days are skipped (v2.7.0)
     const d = (day + i) % 7;
-    if (close[d]) return { open: false, text: `Next range day ${i === 1 ? 'tomorrow' : DAYS_LONG[d]} 8:30am` };
+    if (close[d] && !closedOn(iso(i))) return { open: false, text: `Next range day ${i === 1 ? 'tomorrow' : i < 7 ? DAYS_LONG[d] : shortDate(iso(i))} 8:30am` };
   }
   return { open: false, text: '' };
 }
@@ -253,6 +256,26 @@ function resultsByType() {
 }
 const photos = () => (DATA.photos && DATA.photos.photos) || [];
 
+/* ----- Range status (v2.7.0): closures come with the public feed (?feed=range), so everyone sees them, signed in or not ----- */
+const FIRE_URL = 'https://www.fire.qld.gov.au/prepare/bushfire/fire-danger-ratings'; // Queensland Fire Department, Monitor Fire Danger Ratings
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const isoAdd = (iso, n) => { const d = parseDate(iso); d.setDate(d.getDate() + n); return isoOf(d); };
+const closures = () => ((DATA.range && DATA.range.closed) || []).filter(c => c.until >= isoOf(new Date()));
+const closedOn = iso => closures().find(c => c.from <= iso && iso <= c.until) || null;
+const closureDays = c => c.from === c.until ? shortDate(c.from) : `${shortDate(c.from)} – ${shortDate(c.until)}`;
+/* The red banner: "Range closed today · Fire danger", the note, and for fire danger the official ratings link */
+function rangeBanner(c) {
+  const today = isoOf(new Date());
+  const when = c.from <= today ? (c.until > today ? `until ${shortDate(c.until)}` : 'today') : closureDays(c);
+  return `<div class="range-banner" role="status">${ICON.alert}<div class="range-banner-text"><b>Range closed ${esc(when)} · ${esc(c.reason)}</b>
+    ${c.note ? `<span>${esc(c.note)}</span>` : ''}${c.fire ? `<a href="${FIRE_URL}" target="_blank" rel="noopener">Check fire danger ratings<span class="sr-only"> (opens the Queensland Fire Department website)</span> ↗</a>` : ''}</div></div>`;
+}
+/* Home and the Club tab: a banner for each closure that has started or starts within 7 days; nothing on normal days */
+function rangeBanners() {
+  const soon = isoAdd(isoOf(new Date()), 7), list = closures().filter(c => c.from <= soon);
+  return list.length ? `<section class="section range-banners">${list.map(rangeBanner).join('')}</section>` : '';
+}
+
 /* ---------- Shared bits ---------- */
 /* The club website's pages, each named once. Join and Fees are the same page. */
 const SITE_URL = 'https://ravenshoegunclub.com.au';
@@ -339,7 +362,7 @@ const RENEW_DUE = ['notRenewed', 'overdue', 'expired'];
 const BOOK_OK = ['current', 'notRenewed']; // financial members: the ones who can book a bench
 const VIEWS = {
   home() {
-    const next = events()[0], mine = homeMember(), rs = rangeStatus();
+    const next = events().find(e => !closedOn(e.date)), mine = homeMember(), rs = rangeStatus();
     // Next at the range: one compact box. Members who can book get Book a bench, everyone else Add to calendar.
     const action = mine && BOOK_OK.includes(mine.status) ? `<a class="pill-btn" href="#/me/book">Book a bench</a>`
       : `<button type="button" class="pill-btn" data-cal="0">Add to calendar</button>`;
@@ -368,10 +391,11 @@ const VIEWS = {
     const photosRow = pic ? spRow(ICON.camera, 'Photos: ' + pic.album, '#/photos', joinDot(shortDate(pic.date), albumCount + (albumCount === 1 ? ' photo' : ' photos')))
       : DATA.photos || FAILED.photos ? '' : skeletonRows(1);
     return `
+      ${rangeBanners()}
       <div class="page-title"><h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1></div>
       <section class="section" aria-label="Next at the range">${nextBox}</section>
       <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
-      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), timeRange(e)))).join('')) : ''}
+      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e)))).join('')) : ''}
       ${spGroup('Latest', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
   },
 
@@ -385,7 +409,7 @@ const VIEWS = {
           ${list.map((ev, i) => `
             <div class="list-row">${dateBlock(ev.date)}
               <div class="list-main">
-                <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}</div>
+                <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
                 <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
                 ${ev.description ? `<div class="muted desc">${esc(ev.description)}</div>` : ''}
               </div>
@@ -445,6 +469,7 @@ const VIEWS = {
     if (sub === 'emergency') return emergencyView();
     if (sub === 'documents') return docsAdminView();
     if (sub === 'range') return rangeView();
+    if (sub === 'rangestatus') return rangeStatusView();
     if (sub === 'walkin') return walkInView();
     if (sub === 'reserve') return reserveView();
     if (sub === 'requests') return benchRequestsView();
@@ -1724,7 +1749,7 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
@@ -2521,12 +2546,124 @@ function meView(sub) {
     </section>`;
 }
 
+/* Range status (v2.7.0), any club team PIN: close the range for today or some days, or set it back to open as normal.
+   Saving asks first, saying how many bookings will be cancelled and members emailed. */
+const RS_CHOICES = [['open', 'Open as normal', ''], ['fire', 'Closed: fire danger', ''], ['ro', 'Closed: no range officer available', ''], ['weather', 'Closed: weather', ''],
+  ['works', 'Closed: maintenance or working bee', ''], ['other', 'Other', 'Type a short reason']];
+let RSTAT = { data: null, state: '', note: '', form: null };
+async function loadRangeStatus() {
+  if (RSTAT.state === 'loading') return;
+  RSTAT.state = 'loading';
+  try { RSTAT.data = await committeeApi('rangeStatus'); RSTAT.state = ''; }
+  catch (e) { if (e.signedOut) return; RSTAT.state = 'failed'; }
+  if (currentPage === 'committee/rangestatus') render();
+}
+/* What the form says now: {reason, other, days, from, until, note} */
+function rsForm(form) {
+  const f = form || document.getElementById('rangeForm'), val = sel => (f.querySelector(sel) || {}).value || '';
+  const today = isoOf(new Date()), days = val('input[name="rsDays"]:checked') || 'today';
+  return { reason: val('input[name="rsReason"]:checked'), other: val('#rsOther').trim(), note: val('#rsNote').trim(), days,
+    from: days === 'today' ? today : val('#rsFrom'), until: days === 'today' ? today : val('#rsUntil') || val('#rsFrom') };
+}
+const rsText = d => d.reason === 'other' ? d.other : (RS_CHOICES.find(c => c[0] === d.reason) || [, ''])[1].replace(/^Closed: /, '').replace(/^./, m => m.toUpperCase());
+/* The banner as members will see it, drawn from the form */
+function rsPreview(d) {
+  if (!d.reason) return '<p class="muted">Choose what is happening to see the banner.</p>';
+  if (d.reason === 'open') return '<p class="muted">On normal days members see no banner.</p>';
+  if (!d.from) return '<p class="muted">Choose the days to see the banner.</p>';
+  return rangeBanner({ from: d.from, until: d.until < d.from ? d.from : d.until, reason: rsText(d) || 'Other', note: d.note, fire: d.reason === 'fire' });
+}
+function rangeStatusView() {
+  if (!RSTAT.data && RSTAT.state !== 'failed') setTimeout(loadRangeStatus, 0);
+  const head = `<div class="page-title">${adminBack}<h1>Range status</h1><p class="muted">Close the range for today or a few days. Members see a red banner on Home and the Club tab, bookings on those days are cancelled, and each member is emailed.</p></div>`;
+  if (!RSTAT.data) return head + `<section class="section">${RSTAT.state === 'failed' ? loadFailed('the range status', 'data-rs-reload') : skeletonRows(3)}</section>`;
+  const list = RSTAT.data.closures, f = RSTAT.form || { reason: 'fire', days: 'today', from: '', until: '', other: '', note: '' };
+  return `${head}
+    <section class="section">
+      ${RSTAT.note ? `<p class="notice" role="status">${esc(RSTAT.note)}</p>` : ''}
+      <h2 class="caps-head">Now</h2>
+      ${list.length ? `<div class="card list">${list.map((c, i) => `<div class="list-row rs-closure"><span class="list-ico rs-ico">${ICON.alert}</span>
+          <span class="list-main"><span class="list-title">Closed ${esc(closureDays(c))}</span><span class="muted">${joinDot(c.text, c.note)}</span><span class="muted">Set by ${esc(c.by)}</span></span>
+          <button type="button" class="btn btn-outline rs-open" data-rs-open="${i}">Reopen</button></div>`).join('')}</div>`
+        : `<div class="card rs-open-now"><span class="list-ico">${ICON.check}</span><span><b>Open as normal</b><span class="muted">No closures are set.</span></span></div>`}
+    </section>
+    <section class="section"><form class="card form" id="rangeForm" novalidate>
+      <h2 class="form-head">Set the range</h2>
+      <fieldset class="choices"><legend class="field-label">What's happening?</legend>${radios('rsReason', RS_CHOICES.map(c => [c[0], c[1], '']), f.reason)}</fieldset>
+      <div id="rsOtherWrap"${f.reason === 'other' ? '' : ' hidden'}><label class="field-label" for="rsOther">Reason <span class="field-hint">short, e.g. "Police inspection"</span></label>
+        <input class="field" id="rsOther" maxlength="60" value="${esc(f.other)}"></div>
+      <fieldset class="choices choices-row rs-days"><legend class="field-label">Which days?</legend>${radios('rsDays', [['today', 'Today', ''], ['range', 'Some days', '']], f.days)}</fieldset>
+      <div id="rsRange"${f.days === 'range' ? '' : ' hidden'}>
+        <label class="field-label" for="rsFrom">From</label>${dateField('rsFrom', f.from)}
+        <label class="field-label" for="rsUntil">Until <span class="field-hint">the last day; it opens as normal by itself after that</span></label>${dateField('rsUntil', f.until)}
+      </div>
+      <label class="field-label" for="rsNote">Note <span class="field-hint">optional, e.g. "Expected to reopen Saturday"</span></label>
+      <input class="field" id="rsNote" maxlength="140" value="${esc(f.note)}">
+      <h3 class="field-label">What members will see</h3>
+      <div id="rsPreview" class="rs-preview">${rsPreview(f.reason ? Object.assign({}, f, f.days === 'today' ? { from: isoOf(new Date()), until: isoOf(new Date()) } : {}) : f)}</div>
+      <p class="form-error" id="rsError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="rsSubmit">Save</button>
+    </form></section>`;
+}
+function rsRefresh() {
+  const form = document.getElementById('rangeForm');
+  if (!form) return;
+  const d = rsForm(form);
+  form.querySelector('#rsOtherWrap').hidden = d.reason !== 'other';
+  form.querySelector('#rsRange').hidden = d.days !== 'range';
+  form.querySelector('#rsPreview').innerHTML = rsPreview(d);
+}
+async function rsSave(form) {
+  const d = rsForm(form), error = form.querySelector('#rsError'), btn = form.querySelector('#rsSubmit');
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  if (!d.reason) return fail('Please choose what is happening.', form.querySelector('input[name="rsReason"]'));
+  if (d.reason === 'other' && !d.other) return fail('Please type a short reason.', form.querySelector('#rsOther'));
+  if (!d.from) return fail('Please choose the first day.', form.querySelector('#rsFrom'));
+  if (d.until < d.from) return fail('The last day can\'t be before the first day.', form.querySelector('#rsUntil'));
+  error.hidden = true; RSTAT.form = d;
+  const days = closureDays(d), label = btn.textContent;
+  if (d.reason === 'open') return confirmAsk({ title: `Open as normal ${d.from === isoOf(new Date()) && d.until === d.from ? 'today' : days}?`,
+    text: 'Any closure set for those days is taken off, and members can book again. Bookings that were cancelled stay cancelled.',
+    yes: 'Yes, open as normal', busy: 'Saving…', no: 'No, go back', run: () => committeeApi('rangeSet', [d]), done: rsDone });
+  btn.disabled = true; btn.textContent = 'Checking…';
+  let p;
+  try { p = await committeeApi('rangePreview', [d]); } catch (e) { btn.disabled = false; btn.textContent = label; if (!e.signedOut) fail(e.message); return; }
+  btn.disabled = false; btn.textContent = label;
+  const n = (x, one, many) => `${x} ${x === 1 ? one : many}`;
+  const effects = p.bookings || p.requests
+    ? `${n(p.bookings, 'bench booking', 'bench bookings')} will be cancelled${p.requests ? ` and ${n(p.requests, 'booking request', 'booking requests')} declined` : ''}. ${n(p.members, 'member is', 'members are')} emailed${p.members > p.emailsLeft ? ` (only ${p.emailsLeft} closure emails are left today: you'll get the names of anyone not emailed)` : ''}.`
+    : 'There are no bookings on those days.';
+  confirmAsk({ title: `Close the range ${days}?`, text: `${rsText(d)}. ${effects}${p.reserved ? ` ${n(p.reserved, 'bench reserved for a competition is', 'benches reserved for a competition are')} released.` : ''} The club inbox gets an email too.`,
+    yes: 'Yes, close the range', busy: 'Closing… this can take a minute', no: 'No, go back', run: () => committeeApi('rangeSet', [d]), done: rsDone });
+}
+function rsDone(out) {
+  RSTAT = { data: null, state: '', note: (out && out.message) || 'Saved.', form: null };
+  BENCH.info = null; BENCH.infoState = '';
+  refresh('range', true);
+  render(); view.focus();
+}
+function rsReopen(i) {
+  const c = RSTAT.data && RSTAT.data.closures[i];
+  if (!c) return;
+  const today = isoOf(new Date()), d = { reason: 'open', from: c.from < today ? today : c.from, until: c.until };
+  confirmAsk({ title: `Reopen ${closureDays(d)}?`, text: `The range goes back to open as normal for those days, and members can book again. Bookings that were cancelled stay cancelled.`,
+    yes: 'Yes, reopen', busy: 'Saving…', no: 'No, go back', run: () => committeeApi('rangeSet', [d]), done: rsDone });
+}
+view.addEventListener('input', e => { if (e.target.closest('#rangeForm')) rsRefresh(); });
+view.addEventListener('change', e => { if (e.target.closest('#rangeForm')) rsRefresh(); });
+view.addEventListener('submit', e => { if (e.target.id === 'rangeForm') { e.preventDefault(); rsSave(e.target); } });
+view.addEventListener('click', e => {
+  const o = e.target.closest('[data-rs-open]'); if (o) rsReopen(Number(o.dataset.rsOpen));
+  if (e.target.closest('[data-rs-reload]')) { RSTAT.state = ''; render(true); }
+});
+
 /* Club (v2.6.1): the club's own things, the same for everyone. Room is kept at the top for the range status banner (v2.7). */
 function clubView() {
   const signedIn = !!(member || session), pics = photos().slice(0, 4);
   const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', FAQ_URL)
     + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.web, 'Club website', SITE_URL);
   return `
+    ${rangeBanners()}
     <div class="page-title"><h1>Club</h1></div>
     <section class="section sp-group"><h2 class="sp-head">Photos</h2>
       ${state('photos', 1, () => pics.length ? `<div class="club-thumbs">${pics.map((p, i) => thumb(p, i)).join('')}</div>` : '<p class="muted">Photos from the range appear here.</p>')}
@@ -2562,7 +2699,8 @@ function adminView(sub) {
     <section class="section">
       <a class="btn btn-emergency btn-big" href="#/committee/emergency">${ICON.firstaid}Emergency contacts</a>
       ${group('Every day', row(ICON.mail, 'Messages', '#/committee/messages', unreadBadge()) + row(ICON.plus, 'Post something new', '#/admin/post') + row(ICON.doc, 'Manage posts', '#/committee/manage'))}
-      ${group('Range', row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
+      ${group('Range', row(ICON.alert, 'Range status', '#/committee/rangestatus', '', closures().length ? `Closed ${esc(closureDays(closures()[0]))}${closures().length > 1 ? ' and more' : ''}` : 'Open as normal')
+        + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
         + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve'))}
       ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
       ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
@@ -3354,7 +3492,9 @@ function bookView() {
   return `${head}
     <section class="section">
       ${stepHead(1, 'Which day?')}
-      <div class="chips">${info.days.map(d => `<button type="button" class="chip-btn" data-bk-day="${d.date}" aria-pressed="${p.date === d.date}">${shortDate(d.date)}</button>`).join('')}</div>
+      <div class="chips">${info.days.map(d => d.closed
+        ? `<button type="button" class="chip-btn chip-closed" disabled aria-label="${shortDate(d.date)}, closed: ${esc(d.closed)}">${shortDate(d.date)}<small>Closed: ${esc(d.closed)}</small></button>`
+        : `<button type="button" class="chip-btn" data-bk-day="${d.date}" aria-pressed="${p.date === d.date}">${shortDate(d.date)}</button>`).join('')}</div>
       <p class="muted">You can book up to ${info.weeksAhead} weeks ahead.</p>
     </section>
     ${day ? `<section class="section">
@@ -3457,7 +3597,7 @@ function requestView() {
   return `${head}
     <section class="section"><form class="card form" id="benchReqForm" novalidate>
       <label class="field-label" for="rqDay">Which day?</label>
-      <select class="field" id="rqDay"><option value="">Choose a day…</option>${days.map(d => `<option value="${d.date}">${esc(benchDayLabel(d.date))}</option>`).join('')}</select>
+      <select class="field" id="rqDay"><option value="">Choose a day…</option>${days.map(d => `<option value="${d.date}"${d.closed ? ' disabled' : ''}>${esc(benchDayLabel(d.date))}${d.closed ? ' – closed: ' + esc(d.closed) : ''}</option>`).join('')}</select>
       <fieldset class="choices"><legend class="field-label">Which range?</legend>${radios('rqRange', info.ranges.map(r => [r.key, r.name]), '')}</fieldset>
       <fieldset class="choices"><legend class="field-label">Which session?</legend>${radios('rqSession', SESSION_KEYS.map(s => [s, info.sessions[s], sessionTimes(days[0].times[s])]), '')}</fieldset>
       <label class="field-label" for="rqNote">Anything the range officer should know? <span class="field-hint">optional</span></label>
