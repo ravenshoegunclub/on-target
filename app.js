@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.0.2';
+const APP_VERSION = '3.1.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -380,7 +380,8 @@ const VIEWS = {
         + spShortcut(ICON.chart, 'My shooting', '#/me/results')
         + (RENEW_DUE.includes(mine.status) ? spShortcut(ICON.refresh, 'Renew', mine.renew || '#/me') : BOOK_OK.includes(mine.status) ? spShortcut(ICON.doc, 'Documents', '#/me/documents') : spShortcut(ICON.help, 'FAQs', FAQ_URL))
       : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', FAQ_URL);
-    // Coming up: the next two competitions (room is left on the right of each row for "I'm in" later)
+    // Coming up: the next two competitions, with "You're in" and how many are going (v3.1.0)
+    if (mine) entriesWanted();
     const comps = events().filter(e => e !== next && isCompetition(e)).slice(0, 2);
     const latest = days()[0], pic = photos()[0];
     const placed = latest && mine && ME && ME.linked && !viewingOther()
@@ -396,12 +397,13 @@ const VIEWS = {
       <div class="page-title"><h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1></div>
       <section class="section" aria-label="Next at the range">${nextBox}</section>
       <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
-      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e)))).join('')) : ''}
+      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e), entryLine(e)))).join('')) : ''}
       ${spGroup('Latest', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
   },
 
   events() {
     if (session && !PRIVATE) loadPrivate();
+    entriesWanted();
     const list = eventsShown();
     return `
       <div class="page-title"><h1>Events</h1><p class="muted">Competition days, training and club events</p></div>
@@ -413,6 +415,7 @@ const VIEWS = {
                 <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
                 <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
                 ${ev.description ? `<div class="muted desc">${esc(ev.description)}</div>` : ''}
+                ${!ev.audience && isCompetition(ev) ? entryBlock(ev) : ''}
               </div>
               <button type="button" class="icon-btn soft" data-cal="${i}" aria-label="Add ${esc(ev.title)} to calendar">${ICON.calendar}</button>
             </div>`).join('')}
@@ -474,6 +477,7 @@ const VIEWS = {
     if (sub === 'walkin') return walkInView();
     if (sub === 'reserve') return reserveView();
     if (sub === 'requests') return benchRequestsView();
+    if (sub === 'entries') return entriesAdminView();
     if (sub === 'document') {
       if (!docEdit) { location.replace('#/committee/documents'); return ''; } // e.g. the page was reloaded
       return docForm(docEdit);
@@ -1808,7 +1812,7 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'shoot', 'handgun', 'rclass', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
@@ -1828,6 +1832,8 @@ function render(quiet) {
     if (page !== 'me/results') { CLAIMS.note = ''; SHOOT.note = ''; }
     if (page !== 'me/shoot' && page !== 'me/results') SHOOT.edit = null;
     if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
+    if (page !== 'committee/entries') ROSTER = { data: null, state: '' };
+    if (page !== 'events') ENTRY.err = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
     benchLeave(page);
     familyLeave(page);
@@ -2602,7 +2608,7 @@ async function loadMe() {
     if (e.signedOut) return;
     meState = auth === meAuth() ? 'failed' : '';
   }
-  if (currentPage === 'home' || currentPage.indexOf('me') === 0) render(true);
+  if (currentPage === 'home' || currentPage === 'events' || currentPage.indexOf('me') === 0) render(true);
 }
 
 const joinLink = `<p class="form-foot"><a href="${JOIN_URL}" target="_blank" rel="noopener">Not a member yet? Join the club</a></p>`;
@@ -2805,7 +2811,7 @@ function adminView(sub) {
       ${group('Every day', row(ICON.mail, 'Messages', '#/committee/messages', unreadBadge()) + row(ICON.plus, 'Post something new', '#/admin/post') + row(ICON.doc, 'Manage posts', '#/committee/manage'))}
       ${group('Range', row(ICON.alert, 'Range status', '#/committee/rangestatus', '', closures().length ? `Closed ${esc(closureDays(closures()[0]))}${closures().length > 1 ? ' and more' : ''}` : 'Open as normal')
         + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
-        + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve'))}
+        + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve') + row(ICON.people, 'Competition entries', '#/committee/entries', '', "Who's said I'm in"))}
       ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
       ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
@@ -4095,7 +4101,7 @@ const bookingStarted = b => { const now = new Date(), t = time24(b.start) || '00
 function bookingsView() {
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
   const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} bookings</h1>${viewingLine()}</div>`;
-  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(2)}</section>`;
+  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(2)}</section>` + entriesSection();
   const info = BENCH.info, what = x => `${esc(info.sessions[x.session])}${x.start ? ' · ' + esc(sessionTimes([x.start, x.end])) : ''}`;
   const pill = { Waiting: 'amber', Declined: 'grey' };
   return `${head}
@@ -4125,7 +4131,7 @@ function bookingsView() {
           ${r.answer ? `<div class="muted">Range officer: ${esc(r.answer)}</div>` : ''}</div>
           ${r.status === 'Waiting' ? `<button type="button" class="link-btn" data-bk-unask="${i}">Cancel</button>` : ''}</div>`).join('')}</div>` : ''}
       ${info.appointmentDays.length ? `<a class="btn btn-outline btn-big" href="#/me/request">${ICON.calendar}Request a booking</a>` : ''}
-    </section>`;
+    </section>${entriesSection()}`;
 }
 function bookingToCalendar(b) {
   const range = rangeOf(BENCH.info.ranges, b.range).name;
@@ -4299,6 +4305,129 @@ async function addWalkIn(form) {
     go('#/committee/range');
   } catch (e) { if (e.signedOut) return; btn.disabled = false; btn.textContent = 'Add to the bench'; fail(e.message); }
 }
+
+/* ---------- "I'm in" for competitions (v3.1.0) ----------
+   A signed-in member taps I'm in on a competition in Events (again, or Can't make it, to withdraw), for themselves or a
+   junior in their family. Open until the start time. Members see how many are going; the club team sees the names in
+   Club admin (Competition entries). Not binding, no payment. Kept by the server (entryInfo), in memory only here. */
+let ENTRY = { auth: '', data: null, state: '', at: 0, busy: '', err: null };
+let ROSTER = { data: null, state: '' };
+const entryKey = (date, title) => date + '|' + String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const entryData = () => (ENTRY.auth && ENTRY.auth === selfAuth() ? ENTRY.data : null);
+const entryComp = ev => { const d = entryData(); return d ? d.comps.find(c => c.key === entryKey(ev.date, ev.title)) : null; };
+/* Fetch the entries when a linked member (or linked PIN) is signed in; again once they are 2 minutes old */
+function entriesWanted() {
+  if (!(member || session)) return;
+  if (!ME) { if (!meState) setTimeout(loadMe, 0); return; }
+  if (!ME.linked) return;
+  if (ENTRY.state === 'loading' && ENTRY.auth === selfAuth()) return;
+  if (ENTRY.auth !== selfAuth() || (!ENTRY.data && ENTRY.state !== 'failed') || Date.now() - ENTRY.at > 120000) setTimeout(loadEntries, 0);
+}
+async function loadEntries() {
+  const auth = selfAuth();
+  if (!auth || (ENTRY.state === 'loading' && ENTRY.auth === auth)) return;
+  ENTRY = { auth, data: ENTRY.auth === auth ? ENTRY.data : null, state: 'loading', at: Date.now(), busy: '', err: null };
+  try { const d = await memberApi('entryInfo', [], true); if (ENTRY.auth !== auth) return; ENTRY.data = d; ENTRY.state = ''; ENTRY.at = Date.now(); }
+  catch (e) { if (e.signedOut || ENTRY.auth !== auth) return; ENTRY.state = 'failed'; }
+  if (['events', 'home', 'me/bookings'].includes(currentPage)) render(true);
+}
+const entryGoing = (key, who) => { const d = entryData(); return !!(d && d.mine.some(m => m.key === key && m.whoKey === who && m.status === 'Going')); };
+/* Under a competition in Events: the I'm in button (one per person for a family with juniors) and how many are going */
+function entryBlock(ev) {
+  const c = entryComp(ev), d = entryData();
+  if (!c) return '';
+  const count = c.going && !c.closed ? `<span class="entry-count">${ICON.people}${c.going} going</span>` : '';
+  if (c.closed) return '';
+  const err = ENTRY.err && ENTRY.err.key === c.key ? `<p class="form-error" role="alert">${esc(ENTRY.err.msg)}</p>` : '';
+  if (!c.open) return `<div class="entry"><div class="entry-row">${count}<span class="muted">Entries closed</span></div></div>`;
+  const busy = ENTRY.busy === c.key ? ' disabled' : '', k = esc(c.key);
+  const btn = (who, label, on, aria) => `<button type="button" class="btn ${on ? 'btn-primary' : 'btn-outline'} entry-btn" data-entry="${k}" data-entry-who="${esc(who)}" data-entry-going="${on ? '0' : '1'}" aria-pressed="${on}" aria-label="${esc(aria)}"${busy}>${on ? ICON.check : ''}${esc(label)}</button>`;
+  if (d.people.length === 1) {
+    const on = entryGoing(c.key, '');
+    return `<div class="entry"><div class="entry-row">${btn('', "I'm in", on, on ? `You're in for ${c.title}. Tap to withdraw` : `I'm in for ${c.title}`)}
+      ${on ? `<button type="button" class="link-btn" data-entry="${k}" data-entry-who="" data-entry-going="0"${busy}>Can't make it</button>` : ''}${count}</div>
+      ${err}<p class="muted entry-note">Lets the club know you're coming.</p></div>`;
+  }
+  return `<div class="entry"><div class="entry-who">Who's going?</div><div class="entry-row">${d.people.map(p => {
+      const on = entryGoing(c.key, p.key), name = p.self ? 'Me' : p.first;
+      return btn(p.key, name, on, `${p.self ? 'Me' : p.first}${on ? ': going. Tap to withdraw' : ": I'm in"}, ${c.title}`);
+    }).join('')}${count}</div>${err}<p class="muted entry-note">Tap a name, or tap again to withdraw. Lets the club know you're coming.</p></div>`;
+}
+/* Home, Coming up: "You're in" and how many are going */
+function entryLine(ev) {
+  const c = entryComp(ev);
+  if (!c || c.closed) return '';
+  const d = entryData(), mine = d.mine.filter(m => m.key === c.key && m.status === 'Going');
+  return joinDot(mine.length ? (mine.some(m => m.self) ? "You're in" : mine.map(m => m.who).join(' and ') + "'s in") : '', c.going ? c.going + ' going' : '');
+}
+async function setEntry(btn) {
+  if (ENTRY.busy || btn.disabled) return;
+  const key = btn.dataset.entry, who = btn.dataset.entryWho, going = btn.dataset.entryGoing === '1';
+  ENTRY.busy = key; ENTRY.err = null;
+  view.querySelectorAll(`[data-entry]`).forEach(b => { if (b.dataset.entry === key) b.disabled = true; });
+  btn.textContent = going ? 'Saving…' : 'Withdrawing…';
+  try {
+    ENTRY.data = await memberApi('entrySet', [key, who, going], true); ENTRY.at = Date.now();
+    if (currentPage === 'me/bookings') BENCH.note = going ? "You're in." : 'Withdrawn.';
+  } catch (e) {
+    ENTRY.busy = '';
+    if (e.signedOut) return;
+    if (currentPage === 'me/bookings') BENCH.note = e.message; else ENTRY.err = { key, msg: e.message };
+    ENTRY.at = 0; // fetch fresh counts and times next time
+  }
+  ENTRY.busy = '';
+  render(true);
+  const again = [...view.querySelectorAll('[data-entry]')].find(b => b.dataset.entry === key && b.dataset.entryWho === who && b.classList.contains('entry-btn'));
+  if (again) again.focus();
+}
+/* My bookings: the competitions they (and their juniors) are in, with Can't make it while entries are open */
+function entriesSection() {
+  entriesWanted();
+  const d = entryData();
+  if (!d) return ENTRY.state === 'loading' ? `<section class="section"><div class="section-head"><h2>Competitions</h2></div>${skeletonRows(1)}</section>` : '';
+  return `<section class="section"><div class="section-head"><h2>Competitions</h2></div>
+    ${d.mine.length ? d.mine.map(m => `
+      <article class="card book-card">
+        <div class="event-row">${dateBlock(m.date)}
+          <div><div class="event-title">${esc(m.title)}</div>
+            <div class="muted">${joinDot(m.self ? '' : esc(m.who), DAYS_LONG[parseDate(m.date).getDay()], m.start && esc(niceTime(m.start) || m.start))}</div>
+            ${m.status === 'Cancelled' ? `<span class="me-pill me-pill-grey">Cancelled</span>${m.note ? ` <span class="muted">${esc(m.note)}</span>` : ''}` : `<span class="me-pill me-pill-ok">${m.self ? "You're in" : esc(m.who) + "'s in"}</span>`}</div></div>
+        ${m.status === 'Going' && m.open ? `<div class="btn-row"><button type="button" class="btn btn-outline" data-entry="${esc(m.key)}" data-entry-who="${esc(m.whoKey)}" data-entry-going="0">${ICON.close}Can't make it</button></div>` : ''}
+      </article>`).join('') : `<p class="muted">Going to a competition? Tap I'm in on it in Events. It lets the club know you're coming.</p>`}
+    <a class="btn btn-outline btn-big" href="#/events">${ICON.calendar}See competitions</a>
+  </section>`;
+}
+/* Club admin, Competition entries: who's coming to each upcoming competition, for setting up and squadding */
+async function loadRoster() {
+  if (ROSTER.state === 'loading' || !session) return;
+  ROSTER.state = 'loading';
+  try { ROSTER.data = await committeeApi('entryRoster'); ROSTER.state = ''; }
+  catch (e) { ROSTER.state = e.signedOut ? '' : 'failed'; }
+  if (currentPage === 'committee/entries') render(true);
+}
+function entriesAdminView() {
+  if (!ROSTER.data && !ROSTER.state) setTimeout(loadRoster, 0);
+  const head = `<div class="page-title">${adminBack}<h1>Competition entries</h1><p class="muted">Members who said I'm in. It isn't binding: some may not come, and others may turn up on the day.</p></div>`;
+  if (!ROSTER.data) return head + `<section class="section">${ROSTER.state === 'failed' ? `<div class="card empty"><div class="empty-title">Can't load the entries</div><button type="button" class="btn btn-outline" data-roster-reload>Try again</button></div>` : skeletonRows(3)}</section>`;
+  if (!ROSTER.data.length) return head + `<section class="section">${empty('No competitions coming up', 'Competitions posted in Events show here.')}</section>`;
+  return head + `<section class="section">${ROSTER.data.map(c => {
+    const live = c.going.filter(g => !g.cancelled);
+    return `<article class="card roster-card">
+      <div class="event-row">${dateBlock(c.date)}
+        <div><div class="event-title">${esc(c.title)}</div>
+          <div class="muted">${joinDot(DAYS_LONG[parseDate(c.date).getDay()], c.start && esc(niceTime(c.start) || c.start), c.discipline && esc(c.discipline))}</div>
+          ${c.closed ? `<span class="badge badge-closed">Range closed</span> <span class="muted">${esc(c.closed)}</span>` : `<b>${live.length} going</b>${!c.open ? ' <span class="muted">· entries closed</span>' : ''}`}</div></div>
+      ${c.going.length ? `<ol class="roster">${c.going.map(g => `<li${g.cancelled ? ' class="roster-off"' : ''}><span>${esc(g.name)}${g.junior ? ' <span class="junior-tag">Junior</span>' : ''}</span>
+        <span class="muted">${g.cancelled ? 'Cancelled' : g.cls ? 'Class ' + esc(g.cls) : ''}</span></li>`).join('')}</ol>` : '<p class="muted">Nobody yet.</p>'}
+      ${c.withdrawn ? `<p class="muted">${c.withdrawn} withdrew.</p>` : ''}
+    </article>`;
+  }).join('')}<p class="muted">Class is from each member's latest result in that competition (or the same discipline), when there is one.</p></section>`;
+}
+view.addEventListener('click', e => {
+  const b = e.target.closest('[data-entry]');
+  if (b) setEntry(b);
+  if (e.target.closest('[data-roster-reload]')) { ROSTER = { data: null, state: '' }; render(true); }
+});
 
 /* Reserve for a competition: pick the event, then tap the benches it needs */
 async function loadBenchEvents() {

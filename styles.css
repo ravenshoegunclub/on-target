@@ -889,3 +889,21 @@ button.log-row { font: inherit; color: inherit; }
 .pc-table { table-layout: fixed; }
 .pc-w-date { width: 17%; } .pc-w-venue { width: 27%; } .pc-w-event { width: 28%; } .pc-w-kind { width: 16%; } .pc-w-class { width: 12%; }
 .pc-table td { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
+
+/* v3.1.0 "I'm in" for competitions: under a competition in Events, and the club team's entry lists */
+.entry { margin-top: 10px; }
+.entry-who { font-weight: 600; font-size: 14.5px; margin-bottom: 6px; }
+.entry-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.entry-btn { min-height: 44px; padding: 8px 18px; }
+.entry-btn svg { width: 18px; height: 18px; }
+.entry-row .link-btn { padding: 0 4px; }
+.entry-count { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14.5px; color: var(--text-2); }
+.entry-count svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.entry-note { margin: 6px 0 0; font-size: 14px; }
+.entry .form-error { margin: 8px 0 0; }
+.roster-card { padding: 16px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.roster { margin: 0; padding-left: 26px; }
+.roster li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.roster li:last-child { border-bottom: 0; }
+.roster li > span:first-child { margin-right: 8px; }
+.roster-off > span:first-child { text-decoration: line-through; color: var(--text-2); }
