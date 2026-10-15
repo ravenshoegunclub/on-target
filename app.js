@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.1.1';
+const APP_VERSION = '3.2.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -374,11 +374,12 @@ const VIEWS = {
             ${action}</div>
         </div>` : `<div class="sp-next"><p class="muted">No events posted yet. Check back soon.</p></div>`)
       : `<div class="sp-next">${FAILED.events ? `<p class="muted">Can't load events right now.</p>` : `<span class="skel skel-line"></span>`}</div>`;
+    // v3.2.0: the member's four shortcuts
+    if (mine && !DOCS && !docsState) setTimeout(loadDocs, 0);
+    const rules = rangeRulesDoc();
     const sc = mine
-      ? spShortcut(ICON.card, 'My card', '#/me')
-        + (BOOK_OK.includes(mine.status) ? spShortcut(ICON.bench, 'Book a bench', '#/me/book') : spShortcut(ICON.doc, 'Documents', '#/me/documents'))
-        + spShortcut(ICON.chart, 'My shooting', '#/me/results')
-        + (RENEW_DUE.includes(mine.status) ? spShortcut(ICON.refresh, 'Renew', mine.renew || '#/me') : BOOK_OK.includes(mine.status) ? spShortcut(ICON.doc, 'Documents', '#/me/documents') : spShortcut(ICON.help, 'FAQs', FAQ_URL))
+      ? spShortcut(ICON.trophy, 'Enter a comp', '#/comps') + spShortcut(ICON.alert, 'Range rules &amp; safety', rules ? rules.url : '#/rules')
+        + spShortcut(ICON.firstaid, 'Emergency contacts', '#/emergency') + spShortcut(ICON.mail, 'Contact the club', '#/contact')
       : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', FAQ_URL);
     // Coming up: the next two competitions, with "You're in" and how many are going (v3.1.0)
     if (mine) entriesWanted();
@@ -455,6 +456,10 @@ const VIEWS = {
 
   me(sub) { return meView(sub); },
   calculator() { return calculatorView(); },
+  comps() { return compsView(); },
+  rules() { return rulesView(); },
+  emergency() { return emergencyInfoView(); },
+  contact() { return contactView(); },
   club() { return clubView(); },
   admin(sub) { return adminView(sub); },
 
@@ -667,7 +672,7 @@ function manageView() {
           <img src="${esc(p.thumb)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>`;
   };
   return `
-    <div class="page-title">${adminBack}<h1>Manage posts</h1></div>
+    <div class="page-title">${postsBack}<h1>Manage posts</h1></div>
     <section class="section">
       ${manageNote ? `<p class="notice" role="status">${esc(manageNote)}</p>` : ''}
       <div class="seg" role="group" aria-label="What to manage">${MANAGE_TABS.map(t => `
@@ -804,6 +809,7 @@ const ON_ME = () => currentPage === 'me' || currentPage === 'admin'; // the two 
 /* Posting an event, results or photos starts from Club admin, Post something new */
 const postBack = `<a class="back-link" href="#/admin/post">${ICON.chev}Post something new</a>`;
 const adminBack = `<a class="back-link" href="#/admin">${ICON.chev}Club admin</a>`;
+const postsBack = `<a class="back-link" href="#/admin/posts">${ICON.chev}Posts</a>`;
 const loadFailed = (what, attr) => `<div class="card empty"><div class="empty-title">Can't load ${what}</div>
   <p class="muted">Check your signal and try again.</p><button type="button" class="btn btn-outline" ${attr}>${ICON.refresh}Try again</button></div>`;
 const niceDate = iso => { if (!/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return ''; const d = parseDate(String(iso).slice(0, 10)); return `${d.getDate()} ${mon(d)} ${d.getFullYear()}`; };
@@ -1821,8 +1827,8 @@ let currentPage = '', currentHash = location.hash;
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'shoot', 'handgun', 'rclass', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
-    + (name === 'admin' && sub === 'post' ? '/post' : '');
+    + (name === 'me' && ['results', 'shoot', 'handgun', 'rclass', 'licence', 'licenceedit', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
+    + (name === 'admin' && (sub === 'post' || sub === 'posts') ? '/' + sub : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
@@ -1841,6 +1847,8 @@ function render(quiet) {
     if (page !== 'me/shoot' && page !== 'me/results') SHOOT.edit = null;
     if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
     if (page !== 'committee/entries') ROSTER = { data: null, state: '' };
+    if (page !== 'me/licence') LIC.note = '';
+    if (page !== 'me/licenceedit') LIC.second = false;
     if (page !== 'events') ENTRY.err = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
     benchLeave(page);
@@ -1873,7 +1881,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me', comps: 'events', rules: 'home', emergency: 'home', contact: 'home' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -2633,7 +2641,9 @@ function meView(sub) {
   if (sub && !linked) { if (!signedIn || (ME && !ME.linked)) { location.replace('#/me'); return ''; } }
   else if (sub === 'results') return meResults();
   else if (sub === 'shoot') return shootForm();
-  else if (sub === 'handgun') return handgunView();
+  else if (sub === 'handgun') { location.replace('#/me/licenceedit'); return ''; } // v3.2.0: the classes are part of My licence
+  else if (sub === 'licence') return licenceView();
+  else if (sub === 'licenceedit') return licenceForm();
   else if (sub === 'rclass') return resultClassView();
   else if (sub === 'details') return meDetails();
   else if (sub === 'email') return meEmail();
@@ -2800,8 +2810,14 @@ function adminView(sub) {
       <p class="muted">This part of On Target is for the club team.</p>
       <button type="button" class="btn btn-primary btn-big" data-signin>Club team sign-in</button>
     </div></section>`;
+  if (sub === 'posts') return `
+    <div class="page-title">${adminBack}<h1>Posts</h1><p class="muted">Events, results and photos for On Target, the website and social media.</p></div>
+    <section class="section"><div class="post-tiles post-tiles-2">
+      <a class="tile" href="#/admin/post"><span class="tile-ico">${ICON.plus}</span>Post something new</a>
+      <a class="tile" href="#/committee/manage"><span class="tile-ico">${ICON.doc}</span>Manage existing posts</a>
+    </div></section>`;
   if (sub === 'post') return `
-    <div class="page-title">${adminBack}<h1>Post something new</h1><p class="muted">What would you like to post?</p></div>
+    <div class="page-title">${postsBack}<h1>Post something new</h1><p class="muted">What would you like to post?</p></div>
     <section class="section"><div class="post-tiles">
       <a class="tile" href="#/committee/event"><span class="tile-ico">${ICON.calendar}</span>Event</a>
       <a class="tile" href="#/committee/results"><span class="tile-ico">${ICON.trophy}</span>Results</a>
@@ -2816,7 +2832,7 @@ function adminView(sub) {
     <div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Club admin</h1></div>
     <section class="section">
       <a class="btn btn-emergency btn-big" href="#/committee/emergency">${ICON.firstaid}Emergency contacts</a>
-      ${group('Every day', row(ICON.mail, 'Messages', '#/committee/messages', unreadBadge()) + row(ICON.plus, 'Post something new', '#/admin/post') + row(ICON.doc, 'Manage posts', '#/committee/manage'))}
+      ${group('Every day', row(ICON.mail, 'Messages', '#/committee/messages', unreadBadge()) + row(ICON.plus, 'Posts', '#/admin/posts', '', 'On Target, website &amp; social'))}
       ${group('Range', row(ICON.alert, 'Range status', '#/committee/rangestatus', '', closures().length ? `Closed ${esc(closureDays(closures()[0]))}${closures().length > 1 ? ' and more' : ''}` : 'Open as normal')
         + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
         + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve') + row(ICON.people, 'Competition entries', '#/committee/entries', '', "Who's said I'm in"))}
@@ -2919,7 +2935,6 @@ function meTop() {
   const other = viewingOther(), whose = other ? esc(ME.viewing.first) + "'s" : 'My';
   const key = meStatus(ME), r = ME.renew || {};
   const note = key === 'notRenewed' ? `Renew by ${ME.renewBy}` : ME_PILL[key][2];
-  const fam = ME.inFamily || (ME.family && ME.family.length > 1);
   const renewSub = key === 'notRenewed' ? `Due by ${esc(ME.renewBy)}` : key === 'overdue' ? 'Overdue: please renew now' : key === 'expired' ? 'Expired: renew to rejoin' : '';
   const renew = r.open
     ? `<a class="menu-row" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.refresh}</span><span class="row-text">Renew my membership${renewSub ? `<span class="muted">${renewSub}</span>` : ''}</span>${ICON.chev}</a>`
@@ -2938,9 +2953,8 @@ function meTop() {
       </div>
       <p class="muted me-hint">Show your SSAA card and licence at the range.</p>
     </section>
-    <nav class="shortcuts${fam ? '' : ' shortcuts-3'}" aria-label="${whose} membership">
-      ${spShortcut(ICON.chart, `${whose} shooting`, '#/me/results')}${spShortcut(ICON.bench, `${whose} bookings`, '#/me/bookings')}${spShortcut(ICON.join, `${whose} details`, '#/me/details')}
-      ${fam ? spShortcut(ICON.people, 'My family', '#/me/family') : ''}
+    <nav class="shortcuts" aria-label="${whose} membership">
+      ${spShortcut(ICON.chart, `${whose} shooting`, '#/me/results')}${spShortcut(ICON.bench, `${whose} bookings`, '#/me/bookings')}${spShortcut(ICON.join, `${whose} details`, '#/me/details')}${spShortcut(ICON.card, `${whose} licence`, '#/me/licence')}
     </nav>
     ${spGroup('Membership', renew)}`;
 }
@@ -2960,8 +2974,10 @@ async function loadDocs() {
     if (/signed out/i.test(e.message)) return forgetMember();
     docsState = /for members/i.test(e.message) ? 'members' : 'failed';
   }
-  if (currentPage === 'me/documents') render(true);
+  if (['me/documents', 'home', 'rules'].includes(currentPage)) render(true);
 }
+/* The club document called "Range rules" (v3.2.0), once one has been added in Manage club documents */
+const rangeRulesDoc = () => (DOCS || []).find(d => /range rules/i.test(d.name)) || null;
 /* Grouped by type, in this order; a group with nothing in it isn't shown */
 const DOC_GROUPS = [['Form', 'Forms'], ['Policy', 'Policies'], ['Minutes', 'Minutes'], ['Other', 'Other']];
 function documentsView() {
@@ -3047,7 +3063,7 @@ async function loadShooting() {
   SHOOT.state = 'loading';
   try { SHOOT.data = await memberApi('memberShooting'); SHOOT.state = ''; }
   catch (e) { if (e.signedOut) return; SHOOT.state = 'failed'; }
-  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|handgun|rclass)$/.test(currentPage)) render(true);
+  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|rclass|licence|licenceedit)$/.test(currentPage)) render(true);
 }
 const shootData = () => (SHOOT.auth === meAuth() ? SHOOT.data : null);
 const fyStart = () => financialYear().from + '-07-01';
@@ -3113,60 +3129,44 @@ function shootChart(comp) {
   const words = pts.length < 3 ? '' : Math.abs(slope) < Math.max(0.05, spread * Math.abs(hi) * 0.02) ? 'Holding steady' : slope > 0 ? 'Trending up' : 'Trending down';
   return { svg, words };
 }
-/* The handgun card: shoots this financial year against what the licence needs (the same rules as the calculator) */
+/* A progress ring: part (0 to 1) of the circle filled, with text in the middle */
+function ringOf(part, label, text) {
+  const r = 26, c = 2 * Math.PI * r;
+  return `<div class="shoot-ring" role="img" aria-label="${label}"><svg viewBox="0 0 64 64" aria-hidden="true">
+      <circle class="ring-bg" cx="32" cy="32" r="${r}"/><circle class="ring-fg" cx="32" cy="32" r="${r}" stroke-dasharray="${c * part} ${c}" transform="rotate(-90 32 32)"/></svg>
+      <span aria-hidden="true">${text}</span></div>`;
+}
+/* My licence, category H (v3.2.0): handgun shoots this licence year against what the licence needs (the calculator's
+   rules, with each class's months worked out from the date it was obtained). Only shown when they hold a class. */
 function handgunCard(lines, d) {
-  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
-  if (!d) return '';
-  // v3.1.1: the classes are ticked right here, in every state, so "I don't have one" can always be undone
-  const picker = hgPicker(d);
-  if (!d.handgun.set) return d.canEdit ? `<div class="card shoot-hg-wrap"><div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
-        <p class="muted">${other ? `Does ${who} hold` : 'Hold'} a handgun licence? Tick the classes, and On Target counts ${other ? 'their' : 'your'} shoots towards the year's requirement.</p></div>
-      ${picker}<button type="button" class="link-btn hg-none" data-hg-none>${other ? who + " doesn't" : "I don't"} have a handgun licence</button></div>` : '';
-  if (!d.handgun.classes.length) return d.canEdit ? `<div class="card shoot-hg-wrap"><div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
-        <p class="muted">No handgun licence (as entered by ${other ? 'you for ' + who : 'you'}). Tick a class if that changes.</p></div>${picker}</div>` : '';
-  const from = fyStart(), daysSeen = new Map();
+  const hg = d.handgun, from = fyStart(), daysSeen = new Map();
   lines.filter(l => l.pistol && l.date >= from).forEach(l => { const was = daysSeen.get(l.date); daysSeen.set(l.date, { rdss: (was && was.rdss) || l.rdss, comp: (was && was.comp) || l.comp }); });
   const all = [...daysSeen.values()], done = all.length, comps = all.filter(v => v.comp).length, here = all.filter(v => v.rdss).length;
   const links = `<div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a></div>`;
-  const r = 26, c = 2 * Math.PI * r;
-  const ringOf = (part, label, text) => `<div class="shoot-ring" role="img" aria-label="${label}"><svg viewBox="0 0 64 64" aria-hidden="true">
-      <circle class="ring-bg" cx="32" cy="32" r="${r}"/><circle class="ring-fg" cx="32" cy="32" r="${r}" stroke-dasharray="${c * part} ${c}" transform="rotate(-90 32 32)"/></svg>
-      <span aria-hidden="true">${text}</span></div>`;
-  // Their licence conditions say no attendance is needed (as they entered it): no requirements shown, just the count
-  if (d.handgun.noAttend) return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(1, `${done} handgun shoots`, done)}
+  const classes = `<div class="muted">${hg.classes.map(c => 'Class ' + esc(c.key) + (c.since ? ' since ' + esc(dmy(c.since)) : '')).join(' · ')}</div>`;
+  const noDate = hg.classes.some(c => !c.since) && d.canEdit ? `<p class="muted hg-nodate">Add the date each class was obtained (Change licence details), so the numbers fit this licence year.</p>` : '';
+  // Their licence conditions don't require attendance (as they confirmed): no requirements shown, just the count
+  if (hg.noAttend) return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(1, `${done} handgun shoots`, done)}
     <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
-      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
-      <div class="muted"><b>No attendance requirement (as entered by you)</b>${d.handgun.conditions ? `. Conditions: ${esc(d.handgun.conditions)}` : ''}</div>${links}</div></div>${picker}</div>`;
-  const need = shootsNeeded(d.handgun.classes), total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
+      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>${classes}
+      <div class="muted"><b>No attendance requirement (as confirmed by you)</b></div>${links}</div></div>${noDate}</div>`;
+  const need = shootsNeeded(hg.classes), total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
   const status = left || compsLeft ? [left && `${left} more needed by 30 June`, need.classes.length > 1 && `${Math.min(comps, need.competitions)} of ${need.competitions} competitions done`].filter(Boolean).join('. ')
     : 'Done for this year. Well shot!';
   return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(total ? Math.min(1, done / total) : 1, `${done} of ${total} handgun shoots`, `${done}/${total}`)}
     <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
-      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
-      <div class="muted">${status}</div>${links}</div></div>
-    ${picker}${handgunBreakdown(lines, need, d)}</div>`;
+      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>${classes}
+      <div class="muted">${status}</div>${links}</div></div>${noDate}
+    ${handgunBreakdown(lines, need, d)}</div>`;
 }
-/* The pistol classes they hold, as four tick buttons (v3.1.1). Months held and licence conditions stay on Handgun classes. */
-function hgPicker(d) {
-  if (!d.canEdit) return '';
-  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', held = key => d.handgun.classes.some(c => c.key === key);
-  return `<div class="hg-pick"><div class="hg-pick-head">Pistol classes ${other ? who + ' holds' : 'I hold'}</div>
-    <div class="hg-chips" role="group" aria-label="Pistol classes ${other ? who + ' holds' : 'I hold'}">${HANDGUN_CLASSES.map(([key, name]) => `
-      <button type="button" class="hg-chip" data-hg-tick="${key}" aria-pressed="${held(key)}"${SHOOT.hgBusy ? ' disabled' : ''}><span class="hg-chip-key">${held(key) ? ICON.check : ''}${key}</span><span class="hg-chip-name">${esc(name)}</span></button>`).join('')}</div>
-    <a class="hg-more" href="#/me/handgun">Months held and licence conditions</a></div>`;
-}
-async function tickHandgun(key) {
-  const d = shootData();
-  if (!d || SHOOT.hgBusy) return;
-  const was = d.handgun.classes, on = was.some(c => c.key === key);
-  const classes = on ? was.filter(c => c.key !== key) : [...was, { key, months: 12 }].sort((a, b) => a.key < b.key ? -1 : 1);
-  SHOOT.hgBusy = true; SHOOT.note = '';
-  view.querySelectorAll('[data-hg-tick]').forEach(b => { b.disabled = true; });
-  try { SHOOT.data = await memberApi('memberHandgunSave', [classes]); }
-  catch (e) { if (e.signedOut) { SHOOT.hgBusy = false; return; } SHOOT.note = e.message; }
-  SHOOT.hgBusy = false;
-  render(true);
-  const b = view.querySelector(`[data-hg-tick="${key}"]`); if (b) b.focus();
+/* My licence, no category H, working towards a pistol licence: pistol competitions so far. First-time applicants need at least 3. */
+function towardsCard(lines) {
+  const n = new Set(lines.filter(l => l.pistol && l.comp).map(l => l.date)).size;
+  return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(Math.min(1, n / 3), `${n} of 3 competitions`, `${Math.min(n, 3)}/3`)}
+    <div class="shoot-hg-text"><div class="list-title">Working towards a pistol licence</div>
+      <div class="muted"><b>${Math.min(n, 3)} of 3 competitions</b>${n >= 3 ? '. Well done!' : ''}</div>
+      <div class="muted">First-time applicants need at least 3 pistol competitions. Guide only.</div>
+      <div class="shoot-hg-links"><a href="${QPS_URL}" target="_blank" rel="noopener">Queensland Police requirements</a></div></div></div></div>`;
 }
 /* Under the ring: what each class needs this year, by the calculator's rules (shootsNeeded), and how far along they are.
    A shoot counts towards a class when it was entered with that class; RDSS results don't record the class. */
@@ -3205,7 +3205,8 @@ function shootOverview(lines, d) {
   const pbs = bests.length ? `<section class="section"><h2 class="sp-head">Personal bests</h2><div class="card list">${bests.map(b => `
       <button type="button" class="menu-row pb-row" data-shoot-pb="${esc(b.comp.name)}"><span class="pb-ico">${ICON.trophy}</span>
         <span class="row-text">${esc(b.comp.name)}<span class="muted">${b.score} · ${esc(shortDate(b.date))} ${b.date.slice(0, 4)}${b.line.rdss ? '' : ' · ' + esc(b.line.where)}</span></span>${ICON.chev}</button>`).join('')}</div></section>` : '';
-  return `<section class="section shoot-over">${handgunCard(lines, d)}${lines.length ? stats + chart : ''}</section>${pbs}`;
+  const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/licence"><span class="tile-ico">${ICON.card}</span><span class="row-text">Handgun shoots and pistol card<span class="muted">In ${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} licence</span></span>${ICON.chev}</a>` : '';
+  return `<section class="section shoot-over">${lic}${lines.length ? stats + chart : ''}</section>${pbs}`;
 }
 function shootLog(lines, d) {
   const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
@@ -3246,13 +3247,12 @@ function meResults() {
   if (SHOOT.auth !== meAuth() || (!SHOOT.data && !SHOOT.state)) setTimeout(loadShooting, 0);
   const d = shootData(), lines = shootLines(), tab = SHOOT.tab;
   const note = (CLAIMS.note && CLAIMS.auth === meAuth() ? CLAIMS.note : '') || SHOOT.note;
-  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log'], ['card', 'Pistol card']].map(t => `
+  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log']].map(t => `
     <button type="button" data-shoot-tab="${t[0]}" aria-pressed="${tab === t[0]}">${t[1]}</button>`).join('')}</div>`;
   const next = events().find(e => /competition/i.test(e.discipline || ''));
   const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
     : !d ? `<section class="section">${skeletonRows(3)}</section>`
     : tab === 'log' ? shootLog(lines, d)
-    : tab === 'card' ? pistolCard(lines, d)
     : shootOverview(lines, d);
   const none = d && !lines.length && tab === 'overview' ? `<section class="section"><div class="card empty">
       <div class="empty-title">No competition results yet</div>
@@ -3403,54 +3403,162 @@ async function saveResultClass(cls, btn) {
     if (error) { error.textContent = e.message; error.hidden = false; }
   }
 }
-/* Handgun classes (#/me/handgun): the same choices as the calculator, saved so My shooting can count */
-function handgunView() {
-  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '', fy = financialYear();
-  const back = `<a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a>`;
-  if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title">${back}<h1>Handgun classes</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('your shooting log', 'data-shoot-reload') : skeletonRows(2)}</section>`; }
-  if (!d.canEdit) { location.replace('#/me/results'); return ''; }
-  const held = key => d.handgun.classes.find(c => c.key === key);
+/* ---------- My licence (v3.2.0, #/me/licence) ----------
+   A club summary of their licence(s): categories and expiry, never the licence number. Category H: the handgun ring,
+   what each class needs (Guide only) and the pistol attendance card. No H: "Working towards a pistol licence?", and if
+   so the attendance card and "X of 3 competitions". Kept by the server with My shooting (memberShooting). */
+let LIC = { note: '', second: false };
+const LIC_CATS = ['A', 'B', 'C', 'D', 'H', 'M', 'R'];
+/* A short reminder of each Queensland licence category, shown when ticking them */
+const LIC_CAT_TEXT = {
+  A: 'Rimfire rifles, single or double barrel break-action shotguns, paintball guns, air rifles and power heads',
+  B: 'Centre-fire rifles (other than semi-automatic), shotgun/rifle combinations and black powder rifles',
+  C: 'Semi-automatic rimfire rifles, and pump-action or semi-automatic shotguns (limited magazines)',
+  D: 'Semi-automatic centre-fire rifles, and larger-magazine pump-action or semi-automatic shotguns',
+  H: 'Handguns (pistols), including air and black powder pistols',
+  M: 'Crossbows and some other restricted weapons',
+  R: 'Restricted weapons such as machine guns (mainly collectors)'
+};
+const dmy = iso => { const d = parseDate(iso); return `${d.getDate()} ${mon(d)} ${d.getFullYear()}`; };
+function licenceCard(l, name) {
+  const expired = l.expiry && l.expiry < todayIso();
+  return `<div class="me-card lic-card">${ICON.rings}
+    <div class="me-card-club">LICENCE SUMMARY · RAVENSHOE &amp; DISTRICT SPORTING SHOOTERS</div>
+    <div class="me-card-name">${esc(name)}</div>
+    <div class="me-card-facts"><div><span>Categories</span><b>${l.cats.map(esc).join(' ')}</b></div><div><span>${expired ? 'Expired' : 'Expires'}</span><b>${l.expiry ? esc(dmy(l.expiry)) : '–'}</b></div></div>
+    ${expired ? '<div class="me-card-status"><span class="me-pill me-pill-red">Expired</span></div>' : ''}
+    <div class="lic-foot">Club summary only. Not a firearms licence.</div></div>`;
+}
+const licHasH = hg => (hg.licences || []).some(l => l.cats.includes('H')) || (!(hg.licences || []).length && hg.classes.length > 0);
+function licenceView() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '', them = other ? 'their' : 'your';
+  if (SHOOT.auth !== meAuth() || (!d && !SHOOT.state)) setTimeout(loadShooting, 0);
+  const head = `<div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} licence</h1>${viewingLine()}</div>`;
+  if (!d) return head + `<section class="section">${SHOOT.state === 'failed' ? loadFailed('the licence details', 'data-shoot-reload') : skeletonRows(3)}</section>`;
+  if (!d.canEdit) return head + `<section class="section">${empty(`Private to ${who}`, `${who}'s licence details are theirs alone.`)}</section>`;
+  const hg = d.handgun, lic = hg.licences || [], lines = shootLines();
+  const note = LIC.note ? `<section class="section"><p class="notice" role="status">${esc(LIC.note)}</p></section>` : '';
+  const cards = lic.length ? `<section class="section lic-cards">${lic.map(l => licenceCard(l, ME.name)).join('')}
+      <a class="btn btn-outline btn-big" href="#/me/licenceedit">Change licence details</a></section>`
+    : `<section class="section"><div class="card empty"><div class="empty-title">Add ${them} licence</div>
+      <p class="muted">Keep a club summary of ${them} licence categories and expiry date here, so On Target can work out what a handgun licence needs each year. Never the licence number.</p>
+      <a class="btn btn-primary btn-big" href="#/me/licenceedit">Add ${them} licence</a></div></section>`;
+  let pistol;
+  if (licHasH(hg)) {
+    pistol = hg.classes.length ? `<section class="section"><h2 class="sp-head">Handgun (category H)</h2>${handgunCard(lines, d)}</section>${pistolCard(lines, d)}`
+      : `<section class="section"><h2 class="sp-head">Handgun (category H)</h2><div class="card empty"><div class="empty-title">Which pistol classes?</div>
+        <p class="muted">Add the classes ${other ? who + ' holds' : 'you hold'} and the date each was obtained, and On Target works out this year's requirements.</p>
+        <a class="btn btn-primary" href="#/me/licenceedit">Add pistol classes</a></div></section>`;
+  } else if (hg.towards === 'Yes') {
+    pistol = `<section class="section"><h2 class="sp-head">Pistol licence</h2>${towardsCard(lines)}
+      <button type="button" class="link-btn lic-link" data-lic-towards="no">Not working towards one any more</button></section>${pistolCard(lines, d)}`;
+  } else if (hg.towards !== 'No') {
+    pistol = `<section class="section"><div class="card lic-ask"><div class="list-title">Working towards a pistol licence?</div>
+      <p class="muted">On Target can keep ${them} pistol attendance card and count the competitions.</p>
+      <div class="btn-row"><button type="button" class="btn btn-primary" data-lic-towards="yes">Yes</button><button type="button" class="btn btn-outline" data-lic-towards="no">No</button></div></div></section>`;
+  } else pistol = `<section class="section"><button type="button" class="link-btn lic-link" data-lic-towards="yes">Working towards a pistol licence? Tap here</button></section>`;
+  return head + note + cards + pistol;
+}
+async function licenceTowards(btn) {
+  if (btn.disabled) return;
+  view.querySelectorAll('[data-lic-towards]').forEach(b => { b.disabled = true; });
+  try { SHOOT.data = await memberApi('memberLicenceTowards', [btn.dataset.licTowards === 'yes']); LIC.note = ''; }
+  catch (e) { if (e.signedOut) return; LIC.note = e.message; }
+  render(true);
+}
+/* Add or change the licence details (#/me/licenceedit) */
+function licenceForm() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '', them = other ? 'their' : 'your';
+  const back = `<a class="back-link" href="#/me/licence">${ICON.chev}${other ? who + "'s" : 'My'} licence</a>`;
+  if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title">${back}<h1>Licence details</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('the licence details', 'data-shoot-reload') : skeletonRows(3)}</section>`; }
+  if (!d.canEdit) { location.replace('#/me/licence'); return ''; }
+  const hg = d.handgun, lic = (hg.licences || []).length ? hg.licences : hg.classes.length ? [{ cats: ['H'], expiry: '' }] : [];
+  const two = lic.length > 1 || LIC.second, hasH = licHasH(hg), held = k => hg.classes.find(c => c.key === k);
+  const block = i => { const l = lic[i]; return `<div class="lic-block" id="licBlock${i}"${i && !two ? ' hidden' : ''}>
+      <h2 class="form-head">${i ? 'Second licence' : 'Licence'}</h2>
+      <fieldset class="choices lic-cats"><legend class="field-label">Categories</legend>${LIC_CATS.map(c => `
+        <label class="choice"><input type="checkbox" name="licCat${i}" value="${c}"${l && l.cats.includes(c) ? ' checked' : ''}><span><span class="choice-title">${c}</span><span class="choice-text">${esc(LIC_CAT_TEXT[c])}</span></span></label>`).join('')}</fieldset>
+      <label class="field-label" for="licExp${i}">Expiry date</label>${dateField('licExp' + i, l ? l.expiry : '')}
+      ${i ? '<button type="button" class="link-btn lic-link" data-lic-second="0">Remove the second licence</button>' : ''}</div>`; };
   return `
-    <div class="page-title">${back}<h1>Handgun classes</h1>${viewingLine()}<p class="muted">Financial year ${fy.label}.</p></div>
-    <section class="section"><form class="card form" id="hgForm" novalidate>
-      <p>Tick each class of pistol ${other ? who + ' has' : 'you have'} registered. On Target then counts ${other ? 'their' : 'your'} pistol shoots towards what the licence needs this year.</p>
-      ${HANDGUN_CLASSES.map(([key, name, hint]) => `<div class="calc-class">
-        <label class="choice"><input type="checkbox" id="calc${key}" data-calc-class="${key}"${held(key) ? ' checked' : ''}>
-          <span><span class="choice-title">${key} – ${name}</span><span class="choice-text">${hint}</span></span></label>
-        <div class="calc-held" id="calcHeld${key}"${held(key) ? '' : ' hidden'}><label class="field-label" for="calcMonths${key}">Held</label>
-          <select class="field" id="calcMonths${key}" aria-label="Months held class ${key} this financial year">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}"${i + 1 === (held(key) ? held(key).months : 12) ? ' selected' : ''}>${i + 1} month${i ? 's' : ''}</option>`).join('')}</select></div>
-      </div>`).join('')}
-      <p class="muted">“Held” = whole months this financial year (1 July – 30 June). Leave at 12 if it's been all year. From 1 July it goes back to 12 by itself.</p>
-      <h2 class="form-head">Licence conditions <span class="field-hint">optional</span></h2>
-      <label class="field-label" for="hgCond">Condition codes, as written on the licence</label>
-      <input class="field" id="hgCond" maxlength="80" autocomplete="off" value="${esc(d.handgun.conditions || '')}" aria-describedby="hgCondHint">
-      <p class="muted" id="hgCondHint">Type them exactly as they appear. Don't type the licence number: On Target never keeps it.</p>
-      <label class="choice"><input type="checkbox" id="hgNoAttend"${d.handgun.noAttend ? ' checked' : ''}>
-        <span><span class="choice-title">My conditions don't require competition attendance</span><span class="choice-text">On Target then doesn't show the shoots needed.</span></span></label>
-      <p class="muted" id="hgNoAttendNote"${d.handgun.noAttend ? '' : ' hidden'}>My shooting will show "No attendance requirement (as entered by you)". Check with QPS Weapons Licensing if unsure.</p>
-      <p class="form-error" id="hgError" role="alert" hidden></p>
-      <button type="submit" class="btn btn-primary btn-big" id="hgSubmit">Save</button>
-      <button type="button" class="btn btn-outline btn-big" data-hg-none>${other ? who + " doesn't" : "I don't"} have a handgun licence</button>
+    <div class="page-title">${back}<h1>Licence details</h1>${viewingLine()}
+      <p class="muted">A club summary for On Target. Don't type ${them} licence number: there's nowhere for it, and On Target never keeps it.</p></div>
+    <section class="section"><form class="card form" id="licForm" novalidate>
+      ${block(0)}${block(1)}
+      <button type="button" class="btn btn-outline" id="licAddSecond" data-lic-second="1"${two ? ' hidden' : ''}>${ICON.plus}Add a second licence</button>
+      <p class="muted">For example a concealable licence (H) and a firearms licence (A B).</p>
+      <div id="licH"${hasH ? '' : ' hidden'}>
+        <h2 class="form-head">Pistol classes</h2>
+        <p class="muted">Tick each class ${other ? who + ' holds' : 'you hold'} and the date it was obtained.</p>
+        ${HANDGUN_CLASSES.map(([key, name]) => `<div class="calc-class">
+          <label class="choice"><input type="checkbox" id="licCls${key}" data-lic-cls="${key}"${held(key) ? ' checked' : ''}><span><span class="choice-title">${key} – ${esc(name)}</span></span></label>
+          <div class="calc-held lic-since" id="licSinceWrap${key}"${held(key) ? '' : ' hidden'}><label class="field-label" for="licSince${key}">Date obtained</label>${dateField('licSince' + key, held(key) ? held(key).since : '')}</div>
+        </div>`).join('')}
+        <fieldset class="choices"><legend class="field-label">Do ${them} licence conditions not require competition attendance?</legend>
+          ${radios('licNoAtt', [['yes', 'Yes', 'My conditions don’t require attending competitions'], ['no', 'No', 'The usual attendance applies']], hg.noAttend ? 'yes' : 'no')}</fieldset>
+        <p class="muted">Just Yes or No: On Target doesn't keep condition codes. Check with QPS Weapons Licensing if unsure.</p>
+      </div>
+      <div id="licNoH"${hasH ? ' hidden' : ''}>
+        <fieldset class="choices"><legend class="field-label">Working towards a pistol licence?</legend>${radios('licTowards', [['Yes', 'Yes', ''], ['No', 'No', '']], hg.towards)}</fieldset>
+      </div>
+      <p class="form-error" id="licError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="licSubmit">Save</button>
     </form></section>`;
 }
-async function saveHandgun(classes, btn) {
+/* Category H ticked on a licence shown: the pistol class questions; otherwise "Working towards a pistol licence?" */
+function licSync() {
+  const f = document.getElementById('licForm');
+  if (!f) return;
+  const two = !f.querySelector('#licBlock1').hidden;
+  const h = [...f.querySelectorAll('input[name^="licCat"]:checked')].some(x => x.value === 'H' && (two || x.name === 'licCat0'));
+  f.querySelector('#licH').hidden = !h; f.querySelector('#licNoH').hidden = h;
+}
+async function saveLicence(form) {
+  const btn = form.querySelector('#licSubmit'), error = form.querySelector('#licError'), label = btn.textContent;
   if (btn.disabled) return;
-  const label = btn.textContent, error = document.getElementById('hgError');
-  btn.disabled = true; btn.textContent = 'Saving…';
+  const fail = (msg, sel) => { error.textContent = msg; error.hidden = false; const x = sel && form.querySelector(sel); if (x) x.focus(); };
+  const pick = n => (form.querySelector(`input[name="${n}"]:checked`) || {}).value || '';
+  const two = !form.querySelector('#licBlock1').hidden;
+  const licences = (two ? [0, 1] : [0]).map(i => ({ i, cats: [...form.querySelectorAll(`input[name="licCat${i}"]:checked`)].map(x => x.value), expiry: form.querySelector('#licExp' + i).value }));
+  if (!two && !licences[0].cats.length && !licences[0].expiry) licences.length = 0; // nothing typed: just the pistol question
+  for (const l of licences) {
+    const which = two ? (l.i ? 'the second licence' : 'the first licence') : 'the licence';
+    if (!l.cats.length) return fail(`Please tick the categories on ${which}.`, `input[name="licCat${l.i}"]`);
+    if (!l.expiry) return fail(`Please choose the expiry date of ${which}.`, '#licExp' + l.i);
+  }
+  const hasH = licences.some(l => l.cats.includes('H'));
+  const classes = hasH ? HANDGUN_CLASSES.filter(([k]) => form.querySelector('#licCls' + k).checked).map(([k]) => ({ key: k, since: form.querySelector('#licSince' + k).value })) : [];
+  const missing = classes.find(c => !c.since);
+  if (missing) return fail(`Please choose the date Class ${missing.key} was obtained.`, '#licSince' + missing.key);
+  if (classes.find(c => c.since > todayIso())) return fail("A date obtained can't be in the future. Please check it.");
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    const cond = document.getElementById('hgCond'), no = document.getElementById('hgNoAttend');
-    SHOOT.data = await memberApi('memberHandgunSave', [classes, classes.length && cond ? { conditions: cond.value.trim(), noAttend: no.checked } : { conditions: '', noAttend: false }]);
-    SHOOT.note = classes.length ? 'Saved. Your handgun shoots are counted below.' : "Saved. The handgun count won't show.";
-    if (viewingOther()) SHOOT.note = SHOOT.note.replace('Your', ME.viewing.first + "'s");
-    SHOOT.tab = 'overview';
-    const f = document.getElementById('hgForm'); if (f) f.remove();
-    if (currentPage === 'me/results') render(true); else go('#/me/results');
+    SHOOT.data = await memberApi('memberLicenceSave', [{ licences: licences.map(l => ({ cats: l.cats, expiry: l.expiry })), classes, noAttend: pick('licNoAtt') === 'yes', towards: hasH ? '' : pick('licTowards') }]);
+    LIC.note = 'Saved.'; LIC.second = false;
+    form.remove(); go('#/me/licence');
   } catch (e) {
     if (e.signedOut) return;
     btn.disabled = false; btn.textContent = label;
-    if (error) { error.textContent = e.message; error.hidden = false; } else { SHOOT.note = e.message; render(true); }
+    fail(e.message);
   }
 }
+view.addEventListener('click', e => {
+  const t = e.target, tw = t.closest('[data-lic-towards]'), two = t.closest('[data-lic-second]');
+  if (tw) licenceTowards(tw);
+  if (two) {
+    const on = two.dataset.licSecond === '1';
+    LIC.second = on;
+    document.getElementById('licBlock1').hidden = !on; document.getElementById('licAddSecond').hidden = on;
+    if (!on) document.querySelectorAll('input[name="licCat1"]').forEach(x => { x.checked = false; });
+    licSync();
+    if (on) document.querySelector('input[name="licCat1"]').focus();
+  }
+});
+view.addEventListener('change', e => {
+  if (/^licCat/.test(e.target.name)) licSync();
+  if (e.target.dataset.licCls) document.getElementById('licSinceWrap' + e.target.dataset.licCls).hidden = !e.target.checked;
+});
+view.addEventListener('submit', e => { if (e.target.id === 'licForm') { e.preventDefault(); saveLicence(e.target); } });
 view.addEventListener('click', e => {
   const t = e.target;
   const tab = t.closest('[data-shoot-tab]'), pb = t.closest('[data-shoot-pb]'), ed = t.closest('[data-shoot-edit]');
@@ -3462,15 +3570,12 @@ view.addEventListener('click', e => {
   const rc = t.closest('[data-rclass]');
   if (rc) { SHOOT.rkey = rc.dataset.rclass; go('#/me/rclass'); }
   if (t.closest('[data-rc-clear]')) saveResultClass('', t.closest('[data-rc-clear]'));
-  if (t.closest('[data-hg-none]')) saveHandgun([], t.closest('[data-hg-none]'));
-  if (t.closest('[data-hg-tick]')) tickHandgun(t.closest('[data-hg-tick]').dataset.hgTick);
 });
 view.addEventListener('change', e => {
   // Add a shoot: the class question only for pistol; the accredited tick only for Class C
   if (e.target.name === 'shType') document.getElementById('shPistol').hidden = e.target.value !== 'Pistol';
   if (e.target.name === 'shClass') document.getElementById('shAccWrap').hidden = e.target.value !== 'C';
   if (e.target.name === 'rcClass') document.getElementById('rcAccWrap').hidden = e.target.value !== 'C';
-  if (e.target.id === 'hgNoAttend') document.getElementById('hgNoAttendNote').hidden = !e.target.checked;
 });
 view.addEventListener('change', e => { if (e.target.matches('[data-shoot-comp]')) { SHOOT.comp = e.target.value; render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); } });
 view.addEventListener('submit', e => {
@@ -3480,14 +3585,6 @@ view.addEventListener('submit', e => {
     const picked = e.target.querySelector('input[name="rcClass"]:checked'), error = document.getElementById('rcError');
     if (!picked) { error.textContent = 'Please choose which class of pistol.'; error.hidden = false; return; }
     saveResultClass(picked.value, document.getElementById('rcSubmit'));
-  }
-  if (e.target.id === 'hgForm') {
-    e.preventDefault();
-    const held = HANDGUN_CLASSES.filter(([key]) => document.getElementById('calc' + key).checked).map(([key]) => ({ key, months: Number(document.getElementById('calcMonths' + key).value) }));
-    const error = document.getElementById('hgError');
-    if (/\d[\d\s-]{4,}\d/.test(document.getElementById('hgCond').value)) { error.textContent = 'Please type only the condition codes from your licence, not your licence number.'; error.hidden = false; return document.getElementById('hgCond').focus(); }
-    if (!held.length) { error.textContent = `Please tick at least one class, or choose "I don't have a handgun licence".`; error.hidden = false; return; }
-    saveHandgun(held, document.getElementById('hgSubmit'));
   }
 });
 /* My details: members change their own, and it is saved straight away with no club team approval.
@@ -3507,6 +3604,7 @@ function meDetails() {
     <div class="page-title">${meBack}<h1>${other ? esc(who) + "'s" : 'My'} details</h1>${viewingLine()}</div>
     <section class="section">
       ${meNote ? `<p class="notice" role="status">${esc(meNote)}</p>` : ''}
+      ${(ME.inFamily || (ME.family && ME.family.length > 1)) && !other ? `<div class="card list fam-row">${spRow(ICON.people, 'My family', '#/me/family', 'Who is in your family membership')}</div>` : ''}
       <div class="card form">
         ${row('Name', ME.name)}
         ${row('SSAA number', ME.ssaa || 'None on our records')}
@@ -3514,7 +3612,6 @@ function meDetails() {
         ${other ? '' : `${row('Email', ME.email || 'None on our records')}
         <a class="btn btn-outline btn-big" href="#/me/email">${ICON.mail}Change my email</a>`}
       </div>
-      ${ME.inFamily && !other ? `<a class="btn btn-outline btn-big" href="#/me/family">${ICON.people}My family</a>` : ''}
     </section>
     <section class="section"><form class="card form" id="detailsForm" novalidate>
       <label class="field-label" for="mdKnown">Known as <span class="field-hint">optional, e.g. Bob</span></label>
@@ -4461,6 +4558,71 @@ view.addEventListener('click', e => {
   if (b) setEntry(b);
   if (e.target.closest('[data-roster-reload]')) { ROSTER = { data: null, state: '' }; render(true); }
 });
+
+/* ---------- Member Home shortcuts (v3.2.0) ---------- */
+/* Enter a comp: the upcoming competitions, each with I'm in */
+function compsView() {
+  entriesWanted();
+  const list = events().filter(isCompetition), signedIn = !!(member || session);
+  return `
+    <div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Enter a comp</h1>
+      <p class="muted">${signedIn ? "Tap I'm in to let the club know you're coming. It isn't binding, and there's nothing to pay here." : "Sign in on Me to say you're coming."}</p></div>
+    <section class="section">${state('events', 3, () => list.length ? `<div class="card list">${list.map(ev => `
+      <div class="list-row">${dateBlock(ev.date)}
+        <div class="list-main"><div class="list-title">${esc(ev.title)}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
+          <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
+          ${entryBlock(ev)}</div></div>`).join('')}</div>` : empty('No competitions coming up', 'New competitions appear here as soon as the club team posts them.'))}</section>`;
+}
+/* Range rules & safety: opens the club document "Range rules"; until there is one, says it's coming */
+function rulesView() {
+  if (!DOCS && !docsState) setTimeout(loadDocs, 0);
+  const doc = rangeRulesDoc(), head = `<div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Range rules &amp; safety</h1></div>`;
+  if (!DOCS && docsState !== 'failed' && docsState !== 'members') return head + `<section class="section">${skeletonRows(1)}</section>`;
+  return head + `<section class="section">${doc ? `<div class="card list"><a class="menu-row doc-row" href="${esc(doc.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.doc}</span>
+      <span class="list-main"><b class="doc-name">${esc(doc.name)}</b>${doc.what ? `<span class="doc-what">${esc(doc.what)}</span>` : ''}</span>${ICON.chev}</a></div>`
+    : empty('Range rules coming soon', 'The club is putting them in On Target. Until then, please follow the range officer on duty.')}</section>`;
+}
+/* Ravenshoe's police, medical centre and fire station (from the club) */
+const EMERGENCY_PLACES = [
+  { name: 'Ravenshoe Police Station', address: '1 Carrick Street, Ravenshoe', hours: 'Open Monday to Thursday, 8am–1pm',
+    note: "It isn't staffed 24/7. For non-urgent matters out of hours, call Policelink on 131 444.", calls: [['(07) 4097 6200', '0740976200'], ['131 444', '131444']] },
+  { name: 'Ravenshoe Medical Centre', address: '62 Grigg Street, Ravenshoe', hours: 'Open 8:30am–5pm', calls: [['07 4097 6269', '0740976269']] },
+  { name: 'Ravenshoe Fire Station', address: '16 Theta Street, Ravenshoe QLD 4888', calls: [['0467 821 503', '+61467821503']] }
+];
+/* Emergency contacts for members: 000 first, the range address to give them, then the local services */
+function emergencyInfoView() {
+  const maps = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('311 Cemetery Road, Ravenshoe QLD');
+  return `
+    <div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Emergency contacts</h1></div>
+    <section class="section">
+      <p class="notice notice-red" role="note"><b>In a medical emergency, call 000 first.</b></p>
+      <a class="btn btn-emergency btn-big" href="tel:000">${ICON.call}Call 000</a>
+      <div class="card list">
+        <div class="menu-row"><span class="tile-ico">${ICON.pin}</span><span class="row-text">Range address<span class="muted">311 Cemetery Road, Ravenshoe</span></span></div>
+        ${spRow(ICON.pin, 'Open the range in Maps', maps)}
+      </div>
+      <p class="muted">Tell the range officer on duty straight away.</p>
+      <h2 class="sp-head">Local services</h2>
+      ${EMERGENCY_PLACES.map(x => `<div class="card em-place">
+        <div class="list-title">${esc(x.name)}</div>
+        <div class="muted">${esc(x.address)}</div>
+        ${x.hours ? `<div class="muted">${esc(x.hours)}</div>` : ''}
+        ${x.note ? `<p class="muted em-note">${esc(x.note)}</p>` : ''}
+        <div class="btn-row">${x.calls.map(c => `<a class="btn btn-outline" href="tel:${c[1]}">${ICON.call}${esc(c[0])}</a>`).join('')}</div>
+      </div>`).join('')}
+      ${session ? `<div class="card list">${spRow(ICON.firstaid, "Look up a member's emergency contact", '#/committee/emergency', 'Club team only')}</div>` : ''}
+    </section>`;
+}
+/* Contact the club: the club email and Facebook page (no personal numbers) */
+const FACEBOOK_URL = 'https://www.facebook.com/ravenshoegunclub';
+function contactView() {
+  return `
+    <div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Contact the club</h1></div>
+    <section class="section"><div class="card list">
+      ${spRow(ICON.mail, 'Email the club', 'mailto:info@ravenshoegunclub.com.au', 'info@ravenshoegunclub.com.au')}
+      ${spRow(ICON.web, 'Facebook page', FACEBOOK_URL, 'Ravenshoe &amp; District Sporting Shooters')}
+    </div></section>`;
+}
 
 /* Reserve for a competition: pick the event, then tap the benches it needs */
 async function loadBenchEvents() {
