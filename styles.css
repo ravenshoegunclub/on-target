@@ -323,6 +323,19 @@ button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px s
 .rs-class { grid-column: 1; }
 .rs-score { grid-column: 2 / -1; }
 .rs-place { display: inline-block; min-width: 40px; text-align: center; font-size: 13px; margin-right: 4px; }
+/* v2.9.0: the shooter picker, the Visitor tick and the "not linked" note */
+.rs-pick { grid-column: 1 / -1; margin: -6px 0 10px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.rs-option { display: block; width: 100%; min-height: 48px; padding: 10px 14px; border: 0; border-top: 1px solid var(--line-soft); background: none; color: var(--text-2);
+  font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.rs-option:first-child { border-top: 0; }
+.rs-option b { color: var(--text); font-weight: 600; }
+.rs-option:hover, .rs-option[aria-selected="true"] { background: var(--tint); }
+.rs-none { margin: 0; padding: 12px 14px; font-size: 14.5px; }
+.rs-member b { font-weight: 700; }
+.rs-member.rs-warn { color: var(--gold-text); }
+.rs-visitor { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; min-height: 44px; margin: -6px 0 6px; font-size: 15px; font-weight: 600; color: var(--text-2); cursor: pointer; }
+.rs-visitor input { width: 22px; height: 22px; accent-color: var(--maroon); margin: 0; }
+.rs-visitor .muted { font-weight: 400; }
 .rs-tools { flex-wrap: wrap; margin: 10px 0; }
 .rs-tools .btn { flex: 1 1 140px; }
 @media (min-width: 600px) {
@@ -331,7 +344,9 @@ button.menu-row { width: 100%; background: none; border: 0; border-bottom: 1px s
   .rs-class { grid-column: 2; grid-row: 1; }
   .rs-score { grid-column: 3; grid-row: 1; }
   .rs-remove { grid-column: 4; grid-row: 1; }
-  .rs-member { grid-row: 2; }
+  .rs-pick { grid-row: 2; margin-top: 4px; }
+  .rs-member { grid-row: 3; margin-top: 6px; }
+  .rs-visitor { grid-row: 4; margin-top: 0; }
 }
 
 /* Add photos: thumbnails */
@@ -764,3 +779,26 @@ body.signpost .menu-row.admin-row .tile-ico svg { width: 18px; height: 18px; }
 .rs-open-now b, .rs-open-now .muted { display: block; }
 .rs-days .choice { justify-content: flex-start; }
 .choices-row.rs-days { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* v2.9.0: My shooting, "Are these yours?" */
+.claim-row { align-items: flex-start; }
+.claim-row .muted b { color: var(--text); font-weight: 600; }
+.claim-btns { margin-top: 10px; flex-wrap: wrap; }
+.claim-btns .btn { flex: 1 1 120px; min-height: 44px; }
+.claim-unlink { flex: 0 0 auto; align-self: center; min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--accent);
+  font: 600 14.5px Poppins, sans-serif; text-decoration: underline; cursor: pointer; }
+.claim-unlink:disabled { opacity: .5; }
+
+/* v2.9.0: Link old results (admins) */
+.or-group, .or-flag { margin-bottom: 12px; }
+.or-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.or-head b { font: 800 18px Montserrat, sans-serif; color: var(--heading); }
+.or-group .rs-pick { margin: 4px 0 8px; }
+.or-chosen { margin: 8px 0 4px; }
+.or-chosen.or-none { color: var(--text-2); font-weight: 400; }
+.or-lines { margin: 6px 0 4px; }
+.or-lines summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; color: var(--accent); }
+.or-line { margin-top: 6px; }
+.or-btns { margin-top: 10px; flex-wrap: wrap; }
+.or-btns .btn { flex: 1 1 140px; min-height: 48px; }
+.or-flag p { margin: 6px 0 0; }

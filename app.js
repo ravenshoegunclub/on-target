@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.9.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -484,12 +484,13 @@ const VIEWS = {
       if (!editing) { location.replace('#/committee/manage'); return ''; } // e.g. the page was reloaded
       return editing.kind === 'event' ? eventForm(editing.item) : editing.kind === 'results' ? resultsForm(editing.item) : photoEditForm(editing.item);
     }
-    if (['payments', 'members', 'people', 'person', 'signups', 'member', 'import'].includes(sub)) {
+    if (['payments', 'members', 'people', 'person', 'signups', 'member', 'import', 'oldresults'].includes(sub)) {
       if (!session.admin) return `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Admin</h1></div>
         <section class="section">${empty('Admins only', 'Only admins can use this part of On Target.')}</section>`;
       if (sub === 'person' && !personEdit) { location.replace('#/committee/people'); return ''; } // e.g. the page was reloaded
       if (sub === 'member') return memberAdminView(arg);
       if (sub === 'import') return importView();
+      if (sub === 'oldresults') return oldResultsView();
       return sub === 'signups' ? signupsView() : sub === 'payments' ? paymentsView() : sub === 'members' ? membersView() : sub === 'people' ? peopleView() : personForm(personEdit);
     }
     location.replace('#/admin'); return ''; // the club team's home is the Club admin screen
@@ -780,7 +781,7 @@ async function loadAdminSummary(force) {
   loadSignupCount();
   try {
     const d = await committeeApi('membersSummary') || {};
-    const sum = { season: d.season || '', notRenewed: Number(d.notRenewed) || 0, overdue: Number(d.overdue) || 0, pending: Number(d.pending) || 0 };
+    const sum = { season: d.season || '', notRenewed: Number(d.notRenewed) || 0, overdue: Number(d.overdue) || 0, pending: Number(d.pending) || 0, claimFlags: Number(d.claimFlags) || 0 };
     const same = JSON.stringify(sum) === JSON.stringify(ADMIN.summary);
     ADMIN.summary = sum; ADMIN.mem.season = sum.season || '';
     if (!same && ON_ME()) render(true);
@@ -1313,7 +1314,7 @@ function sendReply(form) {
 }
 
 /* ---------- Post results ---------- */
-let MEMBERS = null;          // [{id, name, short}] from the server; kept in memory only, never saved on the phone
+let MEMBERS = null;          // [{id, name, short, first, last, known, ssaa}] from the server; kept in memory only, never saved on the phone
 let membersFailed = false, membersLoading = false;
 let sameDay = null;          // {date, discipline} carried over by "Add another competition for the same day"
 
@@ -1332,18 +1333,26 @@ function memberFor(name) {
   const hits = key && MEMBERS ? MEMBERS.filter(m => m.name.toLowerCase() === key) : [];
   return hits.length === 1 ? hits[0] : null;
 }
-function shooterOptions() {
-  const members = MEMBERS || [];
-  const taken = new Set(members.map(m => m.name.toLowerCase()));
-  const past = uniq(pastComps().flatMap(c => c.rows.map(r => r.shooter))).filter(n => !taken.has(n.toLowerCase())).sort((a, b) => a.localeCompare(b));
-  return members.map(m => `<option value="${esc(m.name)}" label="Club member"></option>`).join('') + options(past);
+/* The shooter picker (v2.9.0): members whose first name, Known as or surname starts with each word typed, or whose SSAA number has
+   the digits typed. Only the club team ever sees this list. Exact first names and nicknames come first. */
+function memberMatches(text) {
+  const words = String(text || '').toLowerCase().replace(/["“”(),.]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length || !MEMBERS) return [];
+  const parts = v => String(v || '').toLowerCase().split(/[\s'-]+/).filter(Boolean), num = v => String(v || '').replace(/\D/g, '').replace(/^0+/, '');
+  return MEMBERS.map(m => {
+    const names = [...parts(m.first), ...parts(m.known), ...parts(m.last)], ssaa = num(m.ssaa);
+    const ok = words.every(w => names.some(n => n.startsWith(w)) || (/^\d+$/.test(w) && num(w) && ssaa.includes(num(w))));
+    const exact = [m.first, m.known].some(n => String(n || '').toLowerCase() === words[0]);
+    return ok ? { m, rank: exact ? 0 : 1 } : null;
+  }).filter(Boolean).sort((a, b) => a.rank - b.rank || a.m.name.localeCompare(b.m.name)).slice(0, 6).map(x => x.m);
 }
+/* "Gordon Gentle ("Gordo") · SSAA 000002", so two Gordons can be told apart */
+const memberLabel = m => `<b>${esc(m.name)}</b>${m.known ? ` ("${esc(m.known)}")` : ''}${m.ssaa ? ` · SSAA ${esc(m.ssaa)}` : ''}`;
 
 /* Suggestion lists (by datalist id). Kept up to date when fresh club data arrives while a form is open. */
 const SUGGEST = {
   rsCompList: () => options(uniq(pastComps().map(c => c.competition))),
   rsClassList: () => options(uniq(pastComps().flatMap(c => c.rows.map(r => r['class'])))),
-  rsShooterList: shooterOptions,
   phAlbumList: () => options(uniq(['Around the range', ...photos().map(p => p.album)]))
 };
 function refreshSuggestions() {
@@ -1351,13 +1360,17 @@ function refreshSuggestions() {
 }
 
 /* `r` is an existing result row when editing; its member link is kept for as long as the name is not changed */
+let rowCount = 0;
 function shooterRow(r) {
   r = r || {};
+  const n = ++rowCount;
   return `<div class="rs-row" role="group"${r.memberId ? ` data-member-id="${esc(r.memberId)}" data-linked="${esc(r.shooter)}"` : ''}>
     <label class="field-label rs-shooter"><span class="chip rs-place"></span> Shooter
-      <input class="field" data-f="shooter" list="rsShooterList" maxlength="60" autocomplete="off" autocapitalize="words" value="${esc(r.shooter || '')}"></label>
+      <input class="field" data-f="shooter" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="rsPick${n}" maxlength="60" autocomplete="off" autocapitalize="words" value="${esc(r.shooter || '')}"></label>
     <button type="button" class="icon-btn soft rs-remove" data-remove>${ICON.close}</button>
+    <div class="rs-pick" id="rsPick${n}" role="listbox" aria-label="Members" hidden></div>
     <p class="rs-member" hidden></p>
+    <label class="rs-visitor"><input type="checkbox" data-visitor${r.visitor ? ' checked' : ''}> Visitor <span class="muted">(not a member)</span></label>
     <label class="field-label rs-class">Class
       <input class="field" data-f="class" list="rsClassList" maxlength="30" autocomplete="off" value="${esc(r['class'] || '')}"></label>
     <label class="field-label rs-score">Score
@@ -1386,7 +1399,6 @@ function resultsForm(item) {
       <input class="field" id="rsComp" maxlength="80" list="rsCompList" autocomplete="off" value="${esc(start.competition || '')}" required>
       <datalist id="rsCompList">${SUGGEST.rsCompList()}</datalist>
       <datalist id="rsClassList">${SUGGEST.rsClassList()}</datalist>
-      <datalist id="rsShooterList">${SUGGEST.rsShooterList()}</datalist>
 
       <h2 class="form-head">Shooters</h2>
       <p class="muted" id="rsHint">${membersHint()}</p>
@@ -1402,7 +1414,7 @@ function resultsForm(item) {
 }
 function membersHint() {
   if (membersFailed) return "Couldn't load the member names. You can still type each name.";
-  return 'Start typing a name and pick the member from the list. For a visitor, just type their name.';
+  return 'Start typing a first name, nickname, surname or SSAA number, then pick the member from the list. For someone who isn\'t a member, tick Visitor.';
 }
 
 function resultsPosted() {
@@ -1444,28 +1456,66 @@ function tidyRows(form) {
     const place = rowEmpty(row) && i < lastFilled ? '' : placeLabel(++n); // an empty row between shooters gets no place
     row.querySelector('.rs-place').textContent = place || '–';
     row.setAttribute('aria-label', place ? place + ' place' : 'Empty row');
-    const name = rowValue(row, 'shooter'), m = linkFor(row), note = row.querySelector('.rs-member');
+    const name = rowValue(row, 'shooter'), m = linkFor(row), note = row.querySelector('.rs-member'), visitor = row.querySelector('[data-visitor]').checked;
     row.querySelector('[data-remove]').setAttribute('aria-label', name ? 'Remove ' + name : 'Remove this empty row');
-    note.hidden = !m;
-    note.innerHTML = !m ? '' : m.kept ? `${ICON.check}Member` : `${ICON.check}Member · shows as ${esc(m.short)} on the results`;
+    // Not linked and not a visitor: said once they have moved on from the box (or tried to post)
+    const loose = name && !m && !visitor && (form.dataset.tried || document.activeElement !== row.querySelector('[data-f="shooter"]'));
+    note.hidden = !m && !loose;
+    note.classList.toggle('rs-warn', !!loose);
+    note.innerHTML = m ? `${ICON.check}<span>Member${m.full ? ` · ${memberLabel(m.full)}` : ''}${m.kept ? '' : ` · shows as ${esc(m.short)} on the results`}</span>`
+      : loose ? `${ICON.alert}<span>Not linked to a member: pick from the list, or tick Visitor</span>` : '';
   });
   const count = rows.filter(row => !rowEmpty(row)).length, verb = form.dataset.mode === 'edit' ? 'Save' : 'Post';
   const btn = form.querySelector('#rsSubmit');
-  if (!btn.disabled) btn.textContent = count ? `${verb} ${count} result${count === 1 ? '' : 's'}` : `${verb} results`;
+  if (!btn.disabled) btn.textContent = form.dataset.anyway ? `${verb} anyway` : count ? `${verb} ${count} result${count === 1 ? '' : 's'}` : `${verb} results`;
+}
+const looseRows = form => [...form.querySelectorAll('.rs-row')].filter(row => !rowEmpty(row) && !linkFor(row) && !row.querySelector('[data-visitor]').checked);
+
+/* The picker under a shooter box: up to 6 members matching what is typed */
+function showPicks(input) {
+  const row = input.closest('.rs-row'), box = row.querySelector('.rs-pick'), text = input.value.trim();
+  const list = row.querySelector('[data-visitor]').checked || linkFor(row) ? [] : memberMatches(text);
+  box.innerHTML = list.map((m, i) => `<button type="button" class="rs-option" role="option" id="${box.id}o${i}" aria-selected="false" data-member-pick="${esc(m.id)}">${memberLabel(m)}</button>`).join('')
+    + (text && !list.length && MEMBERS && !linkFor(row) && !row.querySelector('[data-visitor]').checked ? '<p class="muted rs-none">No member found. Tick Visitor if they aren\'t a member.</p>' : '');
+  box.hidden = !box.innerHTML;
+  input.setAttribute('aria-expanded', String(!!list.length));
+  input.removeAttribute('aria-activedescendant');
+}
+function hidePicks(row) {
+  const box = row.querySelector('.rs-pick'), input = row.querySelector('[data-f="shooter"]');
+  box.hidden = true; box.innerHTML = '';
+  input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
+}
+function pickMember(row, id) {
+  const m = (MEMBERS || []).find(x => x.id === id), input = row.querySelector('[data-f="shooter"]');
+  if (!m) return;
+  input.value = m.name;
+  row.dataset.memberId = m.id; row.dataset.linked = m.name;
+  row.querySelector('[data-visitor]').checked = false;
+  hidePicks(row);
+  tidyRows(row.closest('form'));
 }
 
-/* The member a row is linked to: one picked from the list, or the link an existing result already had (while its name is unchanged) */
+/* The member a row is linked to: one picked from the list (while the name is unchanged), the link an existing result already had,
+   or a full name typed that belongs to exactly one member. A visitor is never linked. */
 function linkFor(row) {
-  const name = rowValue(row, 'shooter'), m = memberFor(name);
-  if (m) return m;
-  return row.dataset.memberId && name === row.dataset.linked ? { id: row.dataset.memberId, short: name, kept: true } : null;
+  if (row.querySelector('[data-visitor]').checked) return null;
+  const name = rowValue(row, 'shooter');
+  if (row.dataset.memberId && name === row.dataset.linked) {
+    const full = (MEMBERS || []).find(x => x.id === row.dataset.memberId);
+    // Picked just now: saved under its public name. Already saved: kept as it was.
+    return full && full.name === name ? { id: full.id, short: full.short, full } : { id: row.dataset.memberId, short: name, full, kept: true };
+  }
+  const m = memberFor(name);
+  return m ? { id: m.id, short: m.short, full: m } : null;
 }
 
 const rsDiscipline = form => (form.querySelector('input[name="rsDisc"]:checked') || {}).value || '';
 /* Everything typed in the results form, to tell whether it has changed since it was opened */
 function resultsSnapshot(form) {
   return JSON.stringify([form.querySelector('#rsDate').value, rsDiscipline(form), form.querySelector('#rsBP').checked, form.querySelector('#rsComp').value.trim(),
-    [...form.querySelectorAll('.rs-row')].filter(row => [...row.querySelectorAll('input')].some(i => i.value.trim())).map(row => ['shooter', 'class', 'score'].map(f => rowValue(row, f)))]);
+    [...form.querySelectorAll('.rs-row')].filter(row => [...row.querySelectorAll('input:not([type="checkbox"])')].some(i => i.value.trim()))
+      .map(row => [...['shooter', 'class', 'score'].map(f => rowValue(row, f)), row.querySelector('[data-visitor]').checked, row.dataset.memberId || ''])]);
 }
 
 /* 95, 95.5 or "195.7x" / "195-7x" (score then number of Xs). No number sorts last. */
@@ -1501,10 +1551,18 @@ async function postResultsForm(form) {
   if (!comp.discipline) return fail('Please choose the discipline: Pistol, Rifle or Clay.', form.querySelector('input[name="rsDisc"]'));
   if (!comp.competition) return fail('Please enter the competition name.', form.querySelector('#rsComp'));
   if (!filled.length) return fail('Please add at least one shooter.', form.querySelector('[data-f="shooter"]'));
+  // Names not linked to a member and not ticked as a visitor: say so once, then they can be saved anyway
+  const loose = looseRows(form), verb = form.dataset.mode === 'edit' ? 'Save' : 'Post';
+  if (loose.length && !form.dataset.anyway) {
+    form.dataset.tried = form.dataset.anyway = '1';
+    tidyRows(form);
+    return fail(`${loose.length === 1 ? '1 shooter is' : loose.length + ' shooters are'} not linked to a member: pick each one from the list, or tick Visitor. To ${verb.toLowerCase()} them as they are, tap "${verb} anyway".`, loose[0].querySelector('[data-f="shooter"]'));
+  }
   comp.rows = filled.map((row, i) => {
     const m = linkFor(row);
     const r = { place: String(i + 1), shooter: m ? m.short : rowValue(row, 'shooter'), 'class': rowValue(row, 'class'), score: rowValue(row, 'score') };
     if (m) r.memberId = m.id;
+    else if (row.querySelector('[data-visitor]').checked) r.visitor = true;
     return r;
   });
   if (form.dataset.mode === 'edit') {
@@ -1749,7 +1807,7 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
@@ -1766,6 +1824,8 @@ function render(quiet) {
     if (page !== 'committee/person') personEdit = null;
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
+    if (page !== 'me/results') CLAIMS.note = '';
+    if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
     benchLeave(page);
     familyLeave(page);
     if (page !== 'me/email') emailChange = null;
@@ -1947,7 +2007,45 @@ view.addEventListener('change', dateHint);
 view.addEventListener('input', e => {
   const form = e.target.form, err = form && form.querySelector('.form-error');
   if (err) err.hidden = true;
-  if (form && form.id === 'resultsForm') tidyRows(form);
+  if (form && form.id === 'resultsForm') {
+    delete form.dataset.anyway;
+    if (e.target.dataset.f === 'shooter') showPicks(e.target);
+    tidyRows(form);
+  }
+});
+/* The shooter picker (v2.9.0): arrow keys move through the members, Enter picks, Escape closes */
+view.addEventListener('keydown', e => {
+  if (e.target.dataset.f !== 'shooter' || !e.target.closest('#resultsForm')) return;
+  const row = e.target.closest('.rs-row'), opts = [...row.querySelectorAll('.rs-option')];
+  const at = opts.findIndex(o => o.getAttribute('aria-selected') === 'true');
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && opts.length) {
+    e.preventDefault();
+    const next = e.key === 'ArrowDown' ? (at + 1) % opts.length : (at <= 0 ? opts.length : at) - 1;
+    opts.forEach((o, i) => o.setAttribute('aria-selected', String(i === next)));
+    e.target.setAttribute('aria-activedescendant', opts[next].id);
+    opts[next].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && opts.length) {
+    e.preventDefault(); // never posts the form from inside the picker
+    pickMember(row, opts[Math.max(0, at)].dataset.memberPick);
+  } else if (e.key === 'Escape' && !row.querySelector('.rs-pick').hidden) { e.preventDefault(); hidePicks(row); }
+});
+view.addEventListener('mousedown', e => { if (e.target.closest('.rs-option')) e.preventDefault(); }); // keep the box focused while picking
+view.addEventListener('click', e => {
+  const opt = e.target.closest('[data-member-pick]');
+  if (opt) { const row = opt.closest('.rs-row'); pickMember(row, opt.dataset.memberPick); row.querySelector('[data-f="shooter"]').focus(); }
+});
+view.addEventListener('focusin', e => { if (e.target.dataset.f === 'shooter' && e.target.closest('#resultsForm') && e.target.value.trim()) showPicks(e.target); });
+view.addEventListener('focusout', e => {
+  if (e.target.dataset.f !== 'shooter' || !e.target.closest('#resultsForm')) return;
+  const row = e.target.closest('.rs-row'), form = e.target.form;
+  setTimeout(() => { if (!row.contains(document.activeElement)) hidePicks(row); if (form.isConnected) tidyRows(form); }, 120);
+});
+view.addEventListener('change', e => {
+  if (!e.target.matches('[data-visitor]') || !e.target.closest('#resultsForm')) return;
+  const row = e.target.closest('.rs-row'), form = e.target.form;
+  if (e.target.checked) hidePicks(row);
+  delete form.dataset.anyway; form.querySelector('#rsError').hidden = true;
+  tidyRows(form);
 });
 
 /* Leaving a results form with something typed in it, or while photos are uploading: ask first */
@@ -2510,7 +2608,7 @@ const isInstalled = () => (window.matchMedia && window.matchMedia('(display-mode
 /* Me (v2.6.1): just personal. Signing in, the membership card and shortcuts, Renew, and the app itself (Club admin for the club team).
    The club's own links live on the Club tab. */
 /* Everything waiting for the club team: new messages and booking requests, and for admins payments and app sign-ups too */
-const adminWaiting = () => !session ? 0 : (msgUnread || 0) + (BENCH.waiting || 0) + (session.admin ? ((ADMIN.summary && ADMIN.summary.pending) || 0) + (ADMIN.signCount || 0) : 0);
+const adminWaiting = () => !session ? 0 : (msgUnread || 0) + (BENCH.waiting || 0) + (session.admin ? ((ADMIN.summary && ADMIN.summary.pending) || 0) + (ADMIN.signCount || 0) + ((ADMIN.summary && ADMIN.summary.claimFlags) || 0) : 0);
 function loadAdminCounts() { if (session) { loadUnread(); loadBenchCount(); if (session.admin) loadAdminSummary(); } }
 function meView(sub) {
   const signedIn = !!(member || session), linked = !!(signedIn && ME && ME.linked);
@@ -2705,7 +2803,8 @@ function adminView(sub) {
       ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
       ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
-        + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet'))}
+        + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet')
+        + row(ICON.trophy, 'Link old results', '#/committee/oldresults', count(sum && sum.claimFlags, 'to check'), 'Older results to members'))}
         ${sum && (sum.season === 'renew' || sum.season === 'followup') ? `<div class="admin-counts">
           ${sum.season === 'renew' ? `<a class="admin-count amber" href="#/committee/members" data-mem-filter="notRenewed">Not renewed yet: <b>${sum.notRenewed}</b></a>` : ''}
           ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
@@ -2879,20 +2978,79 @@ function installApp() {
   openSheet(installSheet, document.getElementById('installClose'));
 }
 const meBack = `<a class="back-link" href="#/me">${ICON.chev}My membership</a>`;
+/* My shooting (v2.9.0): the results linked to them, and "Are these yours?" for older results posted before they were linked.
+   A member can claim, hide or unlink for themselves, or for a junior they are viewing; another adult's are theirs alone. */
+let CLAIMS = { auth: '', data: null, state: '', note: '' };
+async function loadClaims() {
+  const auth = meAuth();
+  if (CLAIMS.state === 'loading' && CLAIMS.auth === auth) return;
+  CLAIMS = { auth, data: null, state: 'loading', note: CLAIMS.auth === auth ? CLAIMS.note : '' };
+  try { CLAIMS.data = await memberApi('memberClaimList'); CLAIMS.state = ''; }
+  catch (e) { if (e.signedOut) return; CLAIMS.state = 'failed'; }
+  if (CLAIMS.auth === meAuth() && currentPage === 'me/results') render(true);
+}
+const resultLine = r => [r.place && placeLabel(r.place) + ' place', r.score && 'Score ' + esc(r.score), r['class'] && 'Class ' + esc(r['class'])].filter(Boolean).join(' · ');
 function meResults() {
-  const next = events().find(e => /competition/i.test(e.discipline || ''));
+  const next = events().find(e => /competition/i.test(e.discipline || '')), other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  if (ME.canClaim && (CLAIMS.auth !== meAuth() || (!CLAIMS.data && !CLAIMS.state))) setTimeout(loadClaims, 0);
+  const c = CLAIMS.auth === meAuth() ? CLAIMS.data : null;
+  const claims = !ME.canClaim ? '' : c && c.items.length ? `
+    <section class="section">
+      <div class="section-head"><h2 class="caps-head">Are these ${other ? who + "'s" : 'yours'}?</h2></div>
+      <p class="muted">Results from before On Target linked them to members, under a name like ${other ? who + "'s" : 'yours'}. Tap Yes to add one to ${other ? who + "'s" : 'your'} results.</p>
+      <div class="card list">${c.items.map(r => `
+        <div class="list-row claim-row">${dateBlock(r.date)}
+          <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
+            <div class="muted">Listed as <b>${esc(r.shooter)}</b>${resultLine(r) ? ' · ' + resultLine(r) : ''}</div>
+            <div class="btn-row claim-btns">
+              <button type="button" class="btn btn-primary" data-claim-yes="${esc(r.key)}">Yes, ${other ? who + "'s" : 'mine'}</button>
+              <button type="button" class="btn btn-outline" data-claim-no="${esc(r.key)}">Not ${other ? who : 'me'}</button>
+            </div></div>
+        </div>`).join('')}</div>
+      ${c.more ? `<p class="muted">And ${c.more} more. They show here as you go through these.</p>` : ''}
+    </section>` : c && c.waiting ? '' : CLAIMS.state === 'loading' && CLAIMS.auth === meAuth() ? `<section class="section">${skeletonRows(1)}</section>` : '';
+  const waiting = c && c.waiting ? `<p class="muted">${c.waiting === 1 ? '1 result' : c.waiting + ' results'} ${other ? who : 'you'} claimed ${c.waiting === 1 ? 'is' : 'are'} with the club team to check.</p>` : '';
   return `
-    <div class="page-title">${meBack}<h1>${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} results</h1>${viewingLine()}${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
+    <div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} shooting</h1>${viewingLine()}${ME.results.length ? `<p class="muted">${esc(resultsSummary())}</p>` : ''}</div>
+    ${CLAIMS.note && CLAIMS.auth === meAuth() ? `<section class="section"><p class="notice" role="status">${esc(CLAIMS.note)}</p></section>` : ''}
     <section class="section">${ME.results.length ? `<div class="card list">${ME.results.map(r => `
       <div class="list-row">${dateBlock(r.date)}
         <div class="list-main"><div class="list-title">${esc(r.competition)}</div>
-          <div class="muted">${[r.place && placeLabel(r.place) + ' place', r.score && 'Score ' + esc(r.score)].filter(Boolean).join(' · ')}</div></div>
-      </div>`).join('')}</div>` : `<div class="card empty">
+          <div class="muted">${resultLine(r)}</div></div>
+        ${ME.canClaim && r.key ? `<button type="button" class="btn-link claim-unlink" data-unlink="${esc(r.key)}" aria-label="Not ${other ? who + "'s" : 'mine'}: ${esc(r.competition)}, ${esc(shortDate(r.date))}">Not ${other ? who + "'s" : 'mine'}?</button>` : ''}
+      </div>`).join('')}</div>${waiting}` : `${waiting}<div class="card empty">
       <div class="empty-title">No competition results yet</div>
       <p class="muted">Fancy having a go? ${next ? `Next competition: ${esc(shortDate(next.date))}${next.start ? ', ' + esc(niceTime(next.start) || next.start) : ''}. ` : ''}All levels welcome.</p>
       <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
-    </div>`}</section>`;
+    </div>`}</section>
+    ${claims}`;
 }
+async function claimResult(btn, key, yes) {
+  if (btn.disabled) return;
+  view.querySelectorAll('[data-claim-yes],[data-claim-no],[data-unlink]').forEach(b => { b.disabled = true; });
+  btn.textContent = yes ? 'Adding…' : 'Hiding…';
+  try {
+    const out = await memberApi('memberClaim', [key, yes]);
+    ME = out.me; CLAIMS.data = out.claims; CLAIMS.note = out.message || '';
+  } catch (e) {
+    if (e.signedOut) return;
+    CLAIMS.note = e.message; CLAIMS.data = null; CLAIMS.state = '';
+  }
+  render(true);
+}
+function askUnlink(key) {
+  const r = ME.results.find(x => x.key === key), other = viewingOther();
+  if (!r) return;
+  confirmAsk({ title: `Take this off ${other ? ME.viewing.first + "'s" : 'your'} results?`, text: `${r.competition}, ${shortDate(r.date)}. Use this if it was linked to ${other ? ME.viewing.first : 'you'} by mistake. It won't be suggested again.`,
+    yes: 'Yes, take it off', busy: 'Taking it off…', no: 'No, keep it', run: () => memberApi('memberUnlink', [key]),
+    done: out => { ME = out.me; CLAIMS.data = out.claims; CLAIMS.note = out.message || ''; render(true); } });
+}
+view.addEventListener('click', e => {
+  const yes = e.target.closest('[data-claim-yes]'), no = e.target.closest('[data-claim-no]'), un = e.target.closest('[data-unlink]');
+  if (yes) claimResult(yes, yes.dataset.claimYes, true);
+  if (no) claimResult(no, no.dataset.claimNo, false);
+  if (un && !un.disabled) askUnlink(un.dataset.unlink);
+});
 /* My details: members change their own, and it is saved straight away with no club team approval.
    Name and SSAA number are the two things only the club can change. */
 function meDetails() {
@@ -2920,6 +3078,9 @@ function meDetails() {
       ${ME.inFamily && !other ? `<a class="btn btn-outline btn-big" href="#/me/family">${ICON.people}My family</a>` : ''}
     </section>
     <section class="section"><form class="card form" id="detailsForm" novalidate>
+      <label class="field-label" for="mdKnown">Known as <span class="field-hint">optional, e.g. Bob</span></label>
+      <input class="field" id="mdKnown" maxlength="30" autocomplete="off" autocapitalize="words" value="${esc(ME.knownAs || '')}" aria-describedby="mdKnownHint">
+      <p class="muted" id="mdKnownHint">The name ${other ? esc(who) + ' goes' : 'you go'} by at the range. It helps the club team find ${other ? 'them' : 'you'} when they post results.</p>
       <label class="field-label" for="mdMobile">Mobile <span class="field-hint">optional</span></label>
       <input class="field" id="mdMobile" type="tel" inputmode="tel" autocomplete="${other ? 'off' : 'tel'}" maxlength="30" value="${esc(ME.mobile || '')}">
       <h2 class="form-head">Emergency contact <span class="field-hint">optional</span></h2>
@@ -2943,7 +3104,7 @@ async function saveDetails(form) {
   if (btn.disabled) return;
   const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
   const tick = id => { const box = form.querySelector(id); return box ? box.checked : undefined; }, label = btn.textContent;
-  const d = { mobile: val('#mdMobile'), emName: val('#mdEmName'), emRelation: val('#mdEmRelation'), emPhone: val('#mdEmPhone'), news: !!tick('#mdNews'), hide: tick('#mdHide') };
+  const d = { known: val('#mdKnown').replace(/["“”]/g, ''), mobile: val('#mdMobile'), emName: val('#mdEmName'), emRelation: val('#mdEmRelation'), emPhone: val('#mdEmPhone'), news: !!tick('#mdNews'), hide: tick('#mdHide') };
   if ((d.emName || d.emRelation || d.emPhone) && !d.emName) return fail("Please type the emergency contact's name.", '#mdEmName');
   if (d.emName && !d.emPhone) return fail("Please type the emergency contact's phone number.", '#mdEmPhone');
   error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
@@ -4101,6 +4262,13 @@ function memberAdminView(arg) {
         <div class="mem-badges"><span class="mbadge mbadge-${b[0]}">${b[1]}</span>${me ? tags(me) : ''}</div>
       </div>
     </section>
+    <section class="section"><form class="card form" id="knownForm" novalidate>
+      <label class="field-label" for="kaText">Known as <span class="field-hint">optional, e.g. Bob</span></label>
+      <input class="field" id="kaText" maxlength="30" autocomplete="off" autocapitalize="words" value="${esc(d.known || '')}">
+      <p class="muted">Helps the club team find ${esc(d.name)} when posting results. Members can also change it in My details.</p>
+      <p class="form-error" id="kaError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-outline btn-big" id="kaSave">Save "Known as"</button>
+    </form></section>
     <section class="section">
       <div class="section-head"><h2 class="caps-head">Family</h2></div>
       ${fam ? `<p class="muted">${fam.isPrimary ? `${esc(d.name)} pays for this family membership. Everyone in it has the same status.` : fam.primary ? `In ${esc(fam.primary.name)}'s family. <a href="#/committee/member/${encodeURIComponent(fam.primary.id)}">Open ${esc(fam.primary.name)}</a> to add people.` : 'In a family whose paying member can no longer be found.'}</p>
@@ -4158,7 +4326,8 @@ function askRemoveFromFamily(id) {
    The file is read here, on the admin's own device (an Excel .xlsx or a .csv), and only the rows are sent.
    The server first says what WOULD happen to every row; nothing is added until the admin agrees. */
 const IMPORT_COLS = [['last', /^(surname|last name|family name)\b/], ['first', /^(first name|given name|first)\b/], ['ssaa', /ssaa/], ['type', /single or family|^membership/], ['group', /family group/],
-  ['paidTo', /paid up to|paid to|^expiry/], ['mobile', /mobile|phone/], ['email', /e ?mail/], ['notes', /^notes?\b/], ['yob', /year of birth|birth year|\byob\b/]];
+  ['paidTo', /paid up to|paid to|^expiry/], ['mobile', /mobile|phone/], ['email', /e ?mail/], ['notes', /^notes?\b/], ['yob', /year of birth|birth year|\byob\b/],
+  ['known', /^(known as|nickname|preferred name|goes by)\b/]];
 /* A heading as typed ("Surname *", "SURNAME:", "First Name (required)") -> plain lower-case words, so small differences don't matter */
 const importHead = v => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 /* A date as typed in the spreadsheet -> yyyy-mm-dd, or the text itself when it can't be read (the server then says so) */
@@ -4248,7 +4417,7 @@ function importRows(grids) {
   cells.slice(head + 1).forEach((r, i) => {
     const get = key => key in at && r ? clean(r[at[key]]) : '';
     const row = { line: head + i + 2, last: get('last'), first: get('first'), ssaa: get('ssaa').replace(/\.0$/, ''), type: get('type'), group: get('group'), paidTo: importDate(get('paidTo')),
-      mobile: get('mobile'), email: get('email'), notes: get('notes'), yob: get('yob').replace(/\.0$/, '') };
+      mobile: get('mobile'), email: get('email'), notes: get('notes'), yob: get('yob').replace(/\.0$/, ''), known: get('known').replace(/["“”]/g, '') };
     if (/^\d{9}$/.test(row.mobile) && /^[2-478]/.test(row.mobile)) row.mobile = '0' + row.mobile; // Excel drops the leading 0 of a number
     // The template's own example rows are never members: the ones whose surname starts "EXAMPLE –" (any kind of dash)
     if (/^example\s*[–—-]/i.test(row.last)) examples++;
@@ -4287,7 +4456,7 @@ function importView() {
     <section class="section">
       ${IMPORT.note ? `<p class="notice" role="status">${esc(IMPORT.note)}</p>` : ''}
       <div class="card form">
-        <p>Use the <b>RDSS Members list – template</b>. Its headings are: Surname, First name, SSAA member number, Single or Family, Family group, Paid up to, Mobile, Email, Notes, Year of birth (juniors only).</p>
+        <p>Use the <b>RDSS Members list – template</b>. Its headings are: Surname, First name, Known as, SSAA member number, Single or Family, Family group, Paid up to, Mobile, Email, Notes, Year of birth (juniors only).</p>
         <p class="muted">Give everyone in one family the same name under “Family group”. The first adult listed in a family is taken as the one who pays.</p>
         <input type="file" id="imFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
         <button type="button" class="btn ${r ? 'btn-outline' : 'btn-primary'} btn-big" data-import-choose${IMPORT.state === 'reading' || IMPORT.state === 'checking' ? ' disabled' : ''}>${ICON.doc}${IMPORT.name ? 'Choose a different file' : 'Choose the file'}</button>
@@ -4326,10 +4495,186 @@ view.addEventListener('click', e => {
 view.addEventListener('submit', e => {
   if (e.target.id === 'famEmailForm') { e.preventDefault(); familyEmail(e.target); }
   if (e.target.id === 'famAddForm') { e.preventDefault(); addToFamily(e.target); }
+  if (e.target.id === 'knownForm') { e.preventDefault(); saveKnownAs(e.target); }
 });
+/* Admins: a member's "Known as" (v2.9.0) */
+async function saveKnownAs(form) {
+  const btn = form.querySelector('#kaSave'), error = form.querySelector('#kaError'), label = btn.textContent;
+  if (btn.disabled) return;
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const out = await committeeApi('memberSetKnownAs', [MEMADMIN.id, form.querySelector('#kaText').value.trim().replace(/["“”]/g, '')]);
+    MEMADMIN.note = (out && out.message) || 'Saved.'; if (MEMADMIN.data) MEMADMIN.data.known = out.known;
+    MEMBERS = null; // the shooter picker loads the names again, with the new nickname
+    form.remove(); render();
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    error.textContent = e.message; error.hidden = false;
+  }
+}
 view.addEventListener('change', e => {
   if (e.target.id === 'imFile' && e.target.files[0]) chooseImport(e.target.files[0]);
   if (e.target.name === 'faWho') { const old = e.target.value === 'old', form = e.target.form; form.querySelector('#faOld').hidden = !old; form.querySelector('#faNew').hidden = old; }
+});
+
+/* ---------- Link old results (v2.9.0, admins only) ----------
+   Results posted before shooters were picked from the members list have no member linked. They are grouped by the name
+   on the results, each with a suggested member; an admin links them one name at a time (all the results, or just the
+   ticked ones), or marks a name as a visitor. Results that a second member has claimed are listed first, to sort out. */
+let OLDRES = { data: null, state: '', note: '', filter: '', who: {} };   // who: the member chosen for each name, by group number
+async function loadOldResults() {
+  if (OLDRES.state === 'loading') return;
+  OLDRES.state = 'loading';
+  if (!MEMBERS) loadMembers();
+  try {
+    OLDRES.data = await committeeApi('oldResults'); OLDRES.state = ''; OLDRES.who = {};
+    OLDRES.data.groups.forEach((g, i) => { if (g.suggest) OLDRES.who[i] = g.suggest.id; });
+  } catch (e) { if (e.signedOut) { OLDRES.state = ''; return; } OLDRES.state = 'failed'; OLDRES.error = e.message; }
+  if (currentPage === 'committee/oldresults') render(true);
+}
+const orMember = id => (MEMBERS || []).find(m => m.id === id) || null;
+function orChosen(i) {
+  const g = OLDRES.data.groups[i], id = OLDRES.who[i], m = orMember(id) || (g.suggest && g.suggest.id === id ? g.suggest : null);
+  if (m) return `${ICON.check}<span>${id === (g.suggest && g.suggest.id) ? 'Suggested: ' : ''}${memberLabel(m)}</span>`;
+  if (g.could.length) return `<span>Could be ${g.could.map(c => esc(c.name)).join(' or ')}. Type to choose.</span>`;
+  return '<span>No member has this name. Type to search, or mark them as a visitor.</span>';
+}
+function orGroup(g, i) {
+  const n = g.lines.length, linked = !!OLDRES.who[i];
+  return `<div class="card or-group" data-or="${i}">
+    <div class="or-head"><b>${esc(g.name)}</b><span class="muted">${n} result${n === 1 ? '' : 's'}</span></div>
+    <label class="field-label" for="orWho${i}">Member</label>
+    <input class="field" id="orWho${i}" data-or-who="${i}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="orPick${i}" maxlength="60" autocomplete="off"
+      placeholder="Name, nickname or SSAA number" value="${esc(linked ? ((orMember(OLDRES.who[i]) || g.suggest || {}).name || '') : '')}">
+    <div class="rs-pick" id="orPick${i}" role="listbox" aria-label="Members" hidden></div>
+    <p class="rs-member or-chosen${linked ? '' : ' or-none'}">${orChosen(i)}</p>
+    <details class="or-lines"><summary>Choose which results (all ${n} ticked)</summary>
+      ${g.lines.map((l, j) => `<label class="choice or-line"><input type="checkbox" data-or-line="${j}" checked>
+        <span><span class="choice-title">${esc(l.competition)}, ${esc(niceDate(l.date))}</span><span class="choice-text">${resultLine(l) || 'No place or score'}</span></span></label>`).join('')}
+    </details>
+    <div class="btn-row or-btns">
+      <button type="button" class="btn btn-primary" data-or-link="${i}"${linked ? '' : ' disabled'}>Link ${n === 1 ? 'it' : 'all ' + n}</button>
+      <button type="button" class="btn btn-outline" data-or-visitor="${i}">Visitor</button>
+    </div>
+  </div>`;
+}
+function oldResultsView() {
+  if (!OLDRES.data && OLDRES.state !== 'failed') setTimeout(loadOldResults, 0);
+  const d = OLDRES.data, q = OLDRES.filter.toLowerCase();
+  const head = `<div class="page-title">${adminBack}<h1>Link old results</h1><p class="muted">Results posted before shooters were picked from the members list. Link each name to the member, so the results show in their My shooting.</p></div>`;
+  if (!d) return head + `<section class="section">${OLDRES.state === 'failed' ? `<div class="card empty"><div class="empty-title">Couldn't load the results</div><p class="muted">${esc(OLDRES.error || '')}</p>
+    <button type="button" class="btn btn-outline" data-or-reload>${ICON.refresh}Try again</button></div>` : skeletonRows(4)}</section>`;
+  const shown = d.groups.map((g, i) => [g, i]).filter(([g]) => !q || g.name.toLowerCase().includes(q)), max = 40;
+  return head + `
+    ${OLDRES.note ? `<section class="section"><p class="notice" role="status">${esc(OLDRES.note)}</p></section>` : ''}
+    ${d.flags.length ? `<section class="section">
+      <div class="section-head"><h2 class="caps-head">Claimed by two members</h2></div>
+      <p class="muted">A member said these are theirs, but they were already linked to someone else. Nothing has changed until you choose.</p>
+      ${d.flags.map(f => `<div class="card or-flag">
+        <div class="list-title">${esc(f.competition)}, ${esc(niceDate(f.date))}</div>
+        <p class="muted">Listed as <b>${esc(f.shooter)}</b>${f.score ? ' · Score ' + esc(f.score) : ''}. Linked to <b>${esc(f.linkedTo)}</b>; <b>${esc(f.member)}</b> says it's theirs${f.by ? ' (' + esc(f.by) + ' asked for them)' : ''}.</p>
+        <div class="btn-row or-btns">
+          <button type="button" class="btn btn-primary" data-claim-move="${esc(f.id)}">Give it to ${esc(f.member)}</button>
+          <button type="button" class="btn btn-outline" data-claim-keep="${esc(f.id)}">Keep with ${esc(f.linkedTo)}</button>
+        </div></div>`).join('')}
+    </section>` : ''}
+    <section class="section">
+      ${d.groups.length ? `<div class="section-head"><h2 class="caps-head">${d.lines} result${d.lines === 1 ? '' : 's'} under ${d.groups.length} name${d.groups.length === 1 ? '' : 's'}</h2></div>
+      <div class="card form" role="search"><label class="field-label" for="orFilter">Find a name</label>
+        <input class="field" id="orFilter" type="search" autocomplete="off" value="${esc(OLDRES.filter)}" placeholder="e.g. Gordon"></div>
+      <div id="orGroups">${shown.slice(0, max).map(([g, i]) => orGroup(g, i)).join('') || '<p class="muted">No names match.</p>'}</div>
+      ${shown.length > max ? `<p class="muted">Showing the ${max} names with the most results. Type a name above to find the other ${shown.length - max}.</p>` : ''}`
+      : empty('All linked', 'Every result is linked to a member or marked as a visitor.')}
+    </section>`;
+}
+function orPicks(input) {
+  const i = Number(input.dataset.orWho), box = document.getElementById('orPick' + i), list = memberMatches(input.value);
+  box.innerHTML = list.map((m, j) => `<button type="button" class="rs-option" role="option" id="orPick${i}o${j}" aria-selected="false" data-or-pick="${esc(m.id)}">${memberLabel(m)}</button>`).join('');
+  box.hidden = !list.length; input.setAttribute('aria-expanded', String(!!list.length));
+}
+function orSet(i, id) {
+  const card = view.querySelector(`[data-or="${i}"]`); if (!card) return;
+  if (id) OLDRES.who[i] = id; else delete OLDRES.who[i];
+  const m = orMember(id), input = card.querySelector('[data-or-who]'), box = card.querySelector('.rs-pick');
+  if (m) input.value = m.name;
+  box.hidden = true; box.innerHTML = ''; input.setAttribute('aria-expanded', 'false');
+  const note = card.querySelector('.or-chosen'); note.innerHTML = orChosen(i); note.classList.toggle('or-none', !id);
+  card.querySelector('[data-or-link]').disabled = !id;
+}
+function orTicked(i) {
+  const card = view.querySelector(`[data-or="${i}"]`), g = OLDRES.data.groups[i];
+  return [...card.querySelectorAll('[data-or-line]')].filter(b => b.checked).map(b => g.lines[Number(b.dataset.orLine)].key);
+}
+function orDone(out) { OLDRES.note = (out && out.message) || 'Done.'; OLDRES.data = null; OLDRES.state = ''; ADMIN.summaryAt = 0; render(true); view.focus(); }
+async function orLink(btn, i) {
+  const keys = orTicked(i), id = OLDRES.who[i];
+  if (!id || btn.disabled) return;
+  if (!keys.length) { OLDRES.note = 'Tick at least one result to link.'; return render(true); }
+  btn.disabled = true; btn.textContent = 'Linking…';
+  try { orDone(await committeeApi('oldResultsLink', [keys, id])); }
+  catch (e) { if (e.signedOut) return; btn.disabled = false; btn.textContent = 'Link'; OLDRES.note = e.message; render(true); }
+}
+function orVisitor(i) {
+  const keys = orTicked(i), g = OLDRES.data.groups[i];
+  if (!keys.length) { OLDRES.note = 'Tick at least one result first.'; return render(true); }
+  confirmAsk({ title: `Mark ${g.name} as a visitor?`, text: `${keys.length === 1 ? 'This result' : 'These ' + keys.length + ' results'} will stay on the results as they are, and leave this list. They won't be suggested to members.`,
+    yes: 'Yes, a visitor', busy: 'Saving…', no: 'No, go back', run: () => committeeApi('oldResultsVisitor', [keys]), done: orDone });
+}
+async function orResolve(btn, id, move) {
+  if (btn.disabled) return;
+  view.querySelectorAll('[data-claim-move],[data-claim-keep]').forEach(b => { b.disabled = true; });
+  btn.textContent = 'Saving…';
+  try { orDone(await committeeApi('claimResolve', [id, move])); }
+  catch (e) { if (e.signedOut) return; OLDRES.note = e.message; OLDRES.data = null; render(true); }
+}
+view.addEventListener('input', e => {
+  if (e.target.id === 'orFilter') {
+    OLDRES.filter = e.target.value.trim();
+    const q = OLDRES.filter.toLowerCase(), box = document.getElementById('orGroups');
+    box.innerHTML = OLDRES.data.groups.map((g, i) => [g, i]).filter(([g]) => !q || g.name.toLowerCase().includes(q)).slice(0, 40).map(([g, i]) => orGroup(g, i)).join('') || '<p class="muted">No names match.</p>';
+  }
+  if (e.target.dataset.orWho !== undefined) {
+    const i = Number(e.target.dataset.orWho), m = orMember(OLDRES.who[i]);
+    if (!m || m.name !== e.target.value) orSet(i, ''); // typing again un-chooses
+    orPicks(e.target);
+  }
+});
+view.addEventListener('keydown', e => {
+  if (e.target.id === 'orFilter' && e.key === 'Enter') e.preventDefault();
+  if (e.target.dataset.orWho === undefined) return;
+  const i = Number(e.target.dataset.orWho), opts = [...document.getElementById('orPick' + i).querySelectorAll('.rs-option')];
+  const at = opts.findIndex(o => o.getAttribute('aria-selected') === 'true');
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && opts.length) {
+    e.preventDefault();
+    const next = e.key === 'ArrowDown' ? (at + 1) % opts.length : (at <= 0 ? opts.length : at) - 1;
+    opts.forEach((o, j) => o.setAttribute('aria-selected', String(j === next)));
+    e.target.setAttribute('aria-activedescendant', opts[next].id);
+  } else if (e.key === 'Enter' && opts.length) { e.preventDefault(); orSet(i, opts[Math.max(0, at)].dataset.orPick); }
+  else if (e.key === 'Escape') { const box = document.getElementById('orPick' + i); box.hidden = true; }
+});
+view.addEventListener('focusout', e => {
+  if (e.target.dataset.orWho === undefined) return;
+  const box = document.getElementById('orPick' + e.target.dataset.orWho);
+  setTimeout(() => { if (box && !box.contains(document.activeElement)) box.hidden = true; }, 150);
+});
+view.addEventListener('change', e => {
+  if (e.target.dataset.orLine === undefined) return;
+  const card = e.target.closest('[data-or]'), boxes = [...card.querySelectorAll('[data-or-line]')], on = boxes.filter(b => b.checked).length;
+  card.querySelector('summary').textContent = `Choose which results (${on === boxes.length ? 'all ' + on : on + ' of ' + boxes.length} ticked)`;
+  const link = card.querySelector('[data-or-link]');
+  link.textContent = on === boxes.length ? (on === 1 ? 'Link it' : 'Link all ' + on) : `Link ${on}`;
+});
+view.addEventListener('mousedown', e => { if (e.target.closest('[data-or-pick]')) e.preventDefault(); });
+view.addEventListener('click', e => {
+  let v; const hit = attr => { const x = e.target.closest(`[${attr}]`); if (!x || x.disabled) return null; v = x.getAttribute(attr); return x; };
+  let b;
+  if ((b = hit('data-or-pick'))) { const i = Number(b.closest('[data-or]').dataset.or); orSet(i, v); }
+  if ((b = hit('data-or-link'))) orLink(b, Number(v));
+  if (hit('data-or-visitor')) orVisitor(Number(v));
+  if ((b = hit('data-claim-move'))) orResolve(b, v, true);
+  if ((b = hit('data-claim-keep'))) orResolve(b, v, false);
+  if (hit('data-or-reload')) { OLDRES.state = ''; render(true); }
 });
 
 drawDot();
@@ -4356,3 +4701,4 @@ window.addEventListener('load', () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js?v=' + APP_VERSION));
 }
+
