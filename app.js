@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.0.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -3038,10 +3038,12 @@ const fyStart = () => financialYear().from + '-07-01';
 const isPistol = r => /pistol|handgun/i.test(r.discipline || r.type || '');
 /* Everything they've shot, newest first: RDSS results and shoots elsewhere, in one shape */
 function shootLines() {
-  const d = shootData(), rdss = ME.results.map(r => ({ rdss: true, key: r.key, date: r.date, name: r.competition, place: r.place, score: r.score,
-    cls: r['class'], comp: true, pistol: isPistol(r), where: 'RDSS' }));
+  // pc: the pistol class. RDSS results don't record it, so it is only known there when they hold just one class.
+  const d = shootData(), only = d && d.handgun.classes.length === 1 ? d.handgun.classes[0].key : '';
+  const rdss = ME.results.map(r => ({ rdss: true, key: r.key, date: r.date, name: r.competition, place: r.place, score: r.score,
+    cls: r['class'], comp: true, pistol: isPistol(r), pc: isPistol(r) ? only : '', where: 'RDSS' }));
   const own = d ? d.log.map(s => ({ rdss: false, id: s.id, date: s.date, name: s.what, place: s.place, score: s.score, comp: s.kind === 'Competition',
-    pistol: s.type === 'Pistol', where: s.club, type: s.type, kind: s.kind })) : [];
+    pistol: s.type === 'Pistol', pc: s.type === 'Pistol' ? s.cls || only : '', accredited: !!s.accredited, where: s.club, type: s.type, kind: s.kind })) : [];
   return rdss.concat(own).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
 }
 const sameComp = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
@@ -3103,28 +3105,52 @@ function handgunCard(lines, d) {
         <p class="muted">${other ? `Does ${who} hold` : 'Hold'} a handgun licence? Tell On Target which classes, and it counts ${other ? 'their' : 'your'} shoots towards the year's requirement.</p>
         <div class="btn-row"><a class="btn btn-primary" href="#/me/handgun">Choose classes</a><button type="button" class="btn btn-outline" data-hg-none>${other ? 'No licence' : "I don't have one"}</button></div></div></div>` : '';
   if (!d.handgun.classes.length) return '';
-  const need = shootsNeeded(d.handgun.classes), from = fyStart(), daysSeen = new Map();
+  const from = fyStart(), daysSeen = new Map();
   lines.filter(l => l.pistol && l.date >= from).forEach(l => { const was = daysSeen.get(l.date); daysSeen.set(l.date, { rdss: (was && was.rdss) || l.rdss, comp: (was && was.comp) || l.comp }); });
   const all = [...daysSeen.values()], done = all.length, comps = all.filter(v => v.comp).length, here = all.filter(v => v.rdss).length;
-  const total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
-  const r = 26, c = 2 * Math.PI * r, part = total ? Math.min(1, done / total) : 1;
-  const ring = `<div class="shoot-ring" role="img" aria-label="${done} of ${total} handgun shoots"><svg viewBox="0 0 64 64" aria-hidden="true">
+  const links = `<div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a>${d.canEdit ? ' · <a href="#/me/handgun">Change classes</a>' : ''}</div>`;
+  const r = 26, c = 2 * Math.PI * r;
+  const ringOf = (part, label, text) => `<div class="shoot-ring" role="img" aria-label="${label}"><svg viewBox="0 0 64 64" aria-hidden="true">
       <circle class="ring-bg" cx="32" cy="32" r="${r}"/><circle class="ring-fg" cx="32" cy="32" r="${r}" stroke-dasharray="${c * part} ${c}" transform="rotate(-90 32 32)"/></svg>
-      <span aria-hidden="true">${done}/${total}</span></div>`;
-  const status = left || compsLeft ? [left && `${left} more needed by 30 June`, need.classes.length > 1 && `${Math.min(comps, need.competitions)} of ${need.competitions} competitions done`].filter(Boolean).join('. ')
-    : 'Done for this year. Well shot!';
-  return `<div class="card shoot-hg">${ring}
+      <span aria-hidden="true">${text}</span></div>`;
+  // Their licence conditions say no attendance is needed (as they entered it): no requirements shown, just the count
+  if (d.handgun.noAttend) return `<div class="card shoot-hg">${ringOf(1, `${done} handgun shoots`, done)}
     <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
       <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
-      <div class="muted">${status}</div>
-      <div class="shoot-hg-links"><a href="#/calculator">How it's worked out</a>${d.canEdit ? ' · <a href="#/me/handgun">Change classes</a>' : ''}</div></div></div>`;
+      <div class="muted"><b>No attendance requirement (as entered by you)</b>${d.handgun.conditions ? `. Conditions: ${esc(d.handgun.conditions)}` : ''}</div>${links}</div></div>`;
+  const need = shootsNeeded(d.handgun.classes), total = need.total, left = Math.max(0, total - done), compsLeft = Math.max(0, need.competitions - comps);
+  const status = left || compsLeft ? [left && `${left} more needed by 30 June`, need.classes.length > 1 && `${Math.min(comps, need.competitions)} of ${need.competitions} competitions done`].filter(Boolean).join('. ')
+    : 'Done for this year. Well shot!';
+  return `<div class="card shoot-hg-wrap"><div class="shoot-hg">${ringOf(total ? Math.min(1, done / total) : 1, `${done} of ${total} handgun shoots`, `${done}/${total}`)}
+    <div class="shoot-hg-text"><div class="list-title">Handgun shoots this year</div>
+      <div class="muted">${here} at RDSS · ${done - here} elsewhere</div>
+      <div class="muted">${status}</div>${links}</div></div>
+    ${handgunBreakdown(lines, need, d)}</div>`;
+}
+/* Under the ring: what each class needs this year, by the calculator's rules (shootsNeeded), and how far along they are.
+   A shoot counts towards a class when it was entered with that class; RDSS results don't record the class. */
+function handgunBreakdown(lines, need, d) {
+  const from = fyStart(), name = key => HANDGUN_CLASSES.find(c => c[0] === key)[1], one = need.classes.length === 1;
+  const dayCount = list => new Set(list.map(l => l.date)).size, pistol = lines.filter(l => l.pistol && l.date >= from);
+  const row = (title, n, of, note) => `<div class="hg-row"><div class="hg-main"><div class="hg-title">${title}</div>${note ? `<div class="muted">${note}</div>` : ''}</div>
+    <b class="hg-n">${Math.min(n, of)}<span> of ${of}</span></b></div>`;
+  const rows = need.classes.map(c => row(`${c.key} – ${esc(name(c.key))}`, dayCount(pistol.filter(l => l.pc === c.key)), c.shoots,
+    one ? 'Every shoot must be a handgun shooting competition' : `Shoots in this class`)).join('');
+  const compRow = one ? '' : row('Handgun competitions', dayCount(pistol.filter(l => l.comp)), need.competitions, 'At least this many of all the shoots must be competitions');
+  const accRow = need.accredited === null ? '' : row('Class C accredited events', dayCount(pistol.filter(l => l.pc === 'C' && l.accredited)), need.accredited, 'Metallic silhouette or single action');
+  const unknown = one ? 0 : dayCount(pistol.filter(l => !l.pc));
+  return `<div class="hg-break"><div class="hg-head"><h3 class="sp-head">What the licence needs</h3><span class="mbadge hg-guide">Guide only</span></div>
+    ${rows}${compRow}${accRow}
+    ${unknown ? `<p class="muted">${unknown} pistol shoot${unknown === 1 ? '' : 's'} with no class yet: RDSS results don't record which class of pistol was used. They count in the total above.</p>` : ''}
+    ${need.partYear ? '<p class="muted">Part-year with several classes: please check your exact numbers with QPS Weapons Licensing.</p>' : ''}
+    <p class="muted">A guide only. Only one shoot a day counts. Keep your own participation record signed by a range officer.</p></div>`;
 }
 function shootOverview(lines, d) {
   const from = fyStart(), year = lines.filter(l => l.comp && l.date >= from);
   const comps = scoredComps(lines), comp = comps.find(c => sameComp(c.name, SHOOT.comp)) || comps.find(c => c.points.length > 1) || comps[0];
   const avg = comp ? comp.points.reduce((a, p) => a + p.score, 0) / comp.points.length : null;
   const tile = (n, label) => `<div class="card shoot-stat"><b>${n}</b><span>${label}</span></div>`;
-  const stats = `<div class="shoot-stats">${tile(year.length, `competition${year.length === 1 ? '' : 's'} this year`)}${tile(avg === null ? '–' : Math.round(avg * 10) / 10, comp ? 'average, ' + esc(comp.name) : 'average')}${tile(year.filter(l => [1, 2, 3].includes(Number(l.place))).length, 'podiums this year')}</div>`;
+  const stats = `<div class="shoot-stats">${tile(year.length, `total competition${year.length === 1 ? '' : 's'} this year`)}${tile(avg === null ? '–' : Math.round(avg * 10) / 10, comp ? 'average, ' + esc(comp.name) : 'average')}${tile(year.filter(l => [1, 2, 3].includes(Number(l.place))).length, 'podiums this year')}</div>`;
   let chart = '';
   if (comp) {
     const ch = shootChart(comp), rank = classRank(comp);
@@ -3178,12 +3204,13 @@ function meResults() {
   if (SHOOT.auth !== meAuth() || (!SHOOT.data && !SHOOT.state)) setTimeout(loadShooting, 0);
   const d = shootData(), lines = shootLines(), tab = SHOOT.tab;
   const note = (CLAIMS.note && CLAIMS.auth === meAuth() ? CLAIMS.note : '') || SHOOT.note;
-  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log']].map(t => `
+  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log'], ['card', 'Pistol card']].map(t => `
     <button type="button" data-shoot-tab="${t[0]}" aria-pressed="${tab === t[0]}">${t[1]}</button>`).join('')}</div>`;
   const next = events().find(e => /competition/i.test(e.discipline || ''));
   const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
     : !d ? `<section class="section">${skeletonRows(3)}</section>`
     : tab === 'log' ? shootLog(lines, d)
+    : tab === 'card' ? pistolCard(lines, d)
     : shootOverview(lines, d);
   const none = d && !lines.length && tab === 'overview' ? `<section class="section"><div class="card empty">
       <div class="empty-title">No competition results yet</div>
@@ -3196,6 +3223,34 @@ function meResults() {
     <section class="section">${seg}</section>
     ${body}${none}`;
 }
+/* Pistol attendance card (v3.0.1): laid out like the paper card, one financial year at a time, newest first.
+   RDSS results fill in by themselves; shoots elsewhere are the member's own entries. Only one shoot a day counts. */
+function pistolCard(lines, d) {
+  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
+  const fyOf = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
+  const pistol = lines.filter(l => l.pistol), years = [...new Set(pistol.map(l => fyOf(l.date)))].sort((a, b) => b - a);
+  const banner = `<p class="notice">This does not replace your paper pistol attendance card or book.</p>`;
+  const add = can ? `<a class="shoot-add" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : '';
+  if (!pistol.length) return `<section class="section shoot-log">${banner}${add}<div class="card empty"><div class="empty-title">No pistol shoots yet</div>
+    <p class="muted">Pistol results at RDSS show here by themselves.${can ? ' Pistol shoots elsewhere show once added.' : ''}</p></div></section>`;
+  const table = y => {
+    const rows = pistol.filter(l => fyOf(l.date) === y);
+    return `<h2 class="sp-head">${y}–${String(y + 1).slice(2)} <span class="pc-count">${new Set(rows.map(l => l.date)).size} day${new Set(rows.map(l => l.date)).size === 1 ? '' : 's'}</span></h2>
+    <div class="card pc-card"><table class="pc-table">
+      <caption class="sr-only">Pistol attendance, 1 July ${y} to 30 June ${y + 1}</caption>
+      <colgroup><col class="pc-w-date"><col class="pc-w-venue"><col class="pc-w-event"><col class="pc-w-kind"><col class="pc-w-class"></colgroup>
+      <thead><tr><th scope="col">Date</th><th scope="col">Venue</th><th scope="col">Event</th><th scope="col">Comp or prac&shy;tice</th><th scope="col">Class</th></tr></thead>
+      <tbody>${rows.map(l => `<tr>
+        <td>${esc(shortDate(l.date).replace(/^\w+ /, ''))}</td>
+        <td>${esc(l.where)}<br>${l.rdss ? `<span class="mbadge mbadge-ok shoot-tag">${ICON.check}RDSS</span>` : `<span class="mbadge shoot-tag shoot-tag-own">Added by ${other ? who : 'you'}</span>`}</td>
+        <td>${!l.rdss && can ? `<button type="button" class="pc-edit" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${esc(l.name)}</button>` : esc(l.name)}${l.accredited ? '<br><span class="muted">Accredited</span>' : ''}</td>
+        <td>${l.comp ? 'Comp' : 'Practice'}</td>
+        <td>${l.pc ? esc(l.pc) : '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+  };
+  const noClass = pistol.some(l => !l.pc) ? `<p class="muted">A dash under Class: the class wasn't recorded. RDSS results don't record which class of pistol was used.</p>` : '';
+  return `<section class="section shoot-log">${banner}${add}${years.map(table).join('')}${noClass}
+    ${can && pistol.some(l => !l.rdss) ? '<p class="muted">Tap one of your own entries to change or remove it.</p>' : ''}</section>`;
+}
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
 function shootForm() {
@@ -3203,6 +3258,7 @@ function shootForm() {
   if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title"><a class="back-link" href="#/me/results">${ICON.chev}My shooting</a><h1>Add a shoot</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('your shooting log', 'data-shoot-reload') : skeletonRows(2)}</section>`; }
   if (!d.canEdit) { location.replace('#/me/results'); return ''; }
   const s = (SHOOT.edit && d.log.find(x => x.id === SHOOT.edit)) || { date: todayIso(), type: 'Pistol', kind: 'Competition' };
+  const held = d.handgun.classes, cls = s.cls || (!s.id && held.length === 1 ? held[0].key : '');
   const pills = (name, list, picked) => list.map(v => `<label class="choice"><input type="radio" name="${name}" value="${v}"${v === picked ? ' checked' : ''}><span class="choice-title">${v}</span></label>`).join('');
   return `
     <div class="page-title"><a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a><h1>${s.id ? 'Change a shoot' : 'Add a shoot elsewhere'}</h1>${viewingLine()}
@@ -3216,7 +3272,12 @@ function shootForm() {
       <input class="field" id="shClub" maxlength="80" autocapitalize="words" autocomplete="off" list="shClubs" value="${esc(s.club || '')}">
       <datalist id="shClubs">${options(uniq(d.log.map(x => x.club)))}</datalist>
       <fieldset class="choices choices-row shoot-types"><legend class="field-label">Type</legend>${pills('shType', SHOOT_TYPES, s.type)}</fieldset>
-      <p class="muted">Pistol shoots count towards the handgun shoots for the year.</p>
+      <div id="shPistol"${s.type === 'Pistol' ? '' : ' hidden'}>
+        <fieldset class="choices choices-row shoot-classes"><legend class="field-label">Which class of pistol?</legend>${HANDGUN_CLASSES.map(([key, name]) => `<label class="choice"><input type="radio" name="shClass" value="${key}"${key === cls ? ' checked' : ''}><span><span class="choice-title">${key}</span><span class="choice-text">${esc(name)}</span></span></label>`).join('')}</fieldset>
+        <label class="choice" id="shAccWrap"${cls === 'C' ? '' : ' hidden'}><input type="checkbox" id="shAcc"${s.accredited ? ' checked' : ''}>
+          <span><span class="choice-title">Accredited event</span><span class="choice-text">Metallic silhouette or single action. Counts towards Class C.</span></span></label>
+        <p class="muted">It counts towards that class's handgun shoots for the year.</p>
+      </div>
       <fieldset class="choices choices-row shoot-kinds"><legend class="field-label">Competition or practice?</legend>${pills('shKind', ['Competition', 'Practice'], s.kind)}</fieldset>
       <div class="shoot-pair">
         <div><label class="field-label" for="shPlace">Place <span class="field-hint">optional</span></label>
@@ -3237,10 +3298,12 @@ async function saveShoot(form) {
   const fail = (msg, id) => { error.textContent = msg; error.hidden = false; if (id) form.querySelector(id).focus(); };
   const pick = name => (form.querySelector(`input[name="${name}"]:checked`) || {}).value || '';
   const s = { id: form.dataset.id, date: val('#shDate'), what: val('#shWhat'), club: val('#shClub'), type: pick('shType'), kind: pick('shKind'), place: val('#shPlace').replace(/(st|nd|rd|th)$/i, ''), score: val('#shScore'), notes: val('#shNotes') };
+  s.cls = s.type === 'Pistol' ? pick('shClass') : ''; s.accredited = s.cls === 'C' && form.querySelector('#shAcc').checked;
   if (!s.date) return fail('Please choose the day of the shoot.', '#shDate');
   if (s.date > todayIso()) return fail("That day hasn't happened yet. Please choose the day of the shoot.", '#shDate');
   if (!s.what) return fail('Please type what was shot, e.g. "ISSF 25m Pistol" or "Practice".', '#shWhat');
   if (!s.club) return fail('Please type where, e.g. "Atherton Pistol Club".', '#shClub');
+  if (s.type === 'Pistol' && !s.cls) return fail('Please choose which class of pistol.', 'input[name="shClass"]');
   error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try {
     SHOOT.data = await memberApi('memberShootSave', [s]);
@@ -3277,6 +3340,13 @@ function handgunView() {
           <select class="field" id="calcMonths${key}" aria-label="Months held class ${key} this financial year">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}"${i + 1 === (held(key) ? held(key).months : 12) ? ' selected' : ''}>${i + 1} month${i ? 's' : ''}</option>`).join('')}</select></div>
       </div>`).join('')}
       <p class="muted">“Held” = whole months this financial year (1 July – 30 June). Leave at 12 if it's been all year. From 1 July it goes back to 12 by itself.</p>
+      <h2 class="form-head">Licence conditions <span class="field-hint">optional</span></h2>
+      <label class="field-label" for="hgCond">Condition codes, as written on the licence</label>
+      <input class="field" id="hgCond" maxlength="80" autocomplete="off" value="${esc(d.handgun.conditions || '')}" aria-describedby="hgCondHint">
+      <p class="muted" id="hgCondHint">Type them exactly as they appear. Don't type the licence number: On Target never keeps it.</p>
+      <label class="choice"><input type="checkbox" id="hgNoAttend"${d.handgun.noAttend ? ' checked' : ''}>
+        <span><span class="choice-title">My conditions don't require competition attendance</span><span class="choice-text">On Target then doesn't show the shoots needed.</span></span></label>
+      <p class="muted" id="hgNoAttendNote"${d.handgun.noAttend ? '' : ' hidden'}>My shooting will show "No attendance requirement (as entered by you)". Check with QPS Weapons Licensing if unsure.</p>
       <p class="form-error" id="hgError" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-big" id="hgSubmit">Save</button>
       <button type="button" class="btn btn-outline btn-big" data-hg-none>${other ? who + " doesn't" : "I don't"} have a handgun licence</button>
@@ -3287,7 +3357,8 @@ async function saveHandgun(classes, btn) {
   const label = btn.textContent, error = document.getElementById('hgError');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    SHOOT.data = await memberApi('memberHandgunSave', [classes]);
+    const cond = document.getElementById('hgCond'), no = document.getElementById('hgNoAttend');
+    SHOOT.data = await memberApi('memberHandgunSave', [classes, classes.length && cond ? { conditions: cond.value.trim(), noAttend: no.checked } : { conditions: '', noAttend: false }]);
     SHOOT.note = classes.length ? 'Saved. Your handgun shoots are counted below.' : "Saved. The handgun count won't show.";
     if (viewingOther()) SHOOT.note = SHOOT.note.replace('Your', ME.viewing.first + "'s");
     SHOOT.tab = 'overview';
@@ -3309,6 +3380,12 @@ view.addEventListener('click', e => {
   if (t.closest('[data-shoot-remove]')) askRemoveShoot();
   if (t.closest('[data-hg-none]')) saveHandgun([], t.closest('[data-hg-none]'));
 });
+view.addEventListener('change', e => {
+  // Add a shoot: the class question only for pistol; the accredited tick only for Class C
+  if (e.target.name === 'shType') document.getElementById('shPistol').hidden = e.target.value !== 'Pistol';
+  if (e.target.name === 'shClass') document.getElementById('shAccWrap').hidden = e.target.value !== 'C';
+  if (e.target.id === 'hgNoAttend') document.getElementById('hgNoAttendNote').hidden = !e.target.checked;
+});
 view.addEventListener('change', e => { if (e.target.matches('[data-shoot-comp]')) { SHOOT.comp = e.target.value; render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); } });
 view.addEventListener('submit', e => {
   if (e.target.id === 'shootForm') { e.preventDefault(); saveShoot(e.target); }
@@ -3316,6 +3393,7 @@ view.addEventListener('submit', e => {
     e.preventDefault();
     const held = HANDGUN_CLASSES.filter(([key]) => document.getElementById('calc' + key).checked).map(([key]) => ({ key, months: Number(document.getElementById('calcMonths' + key).value) }));
     const error = document.getElementById('hgError');
+    if (/\d[\d\s-]{4,}\d/.test(document.getElementById('hgCond').value)) { error.textContent = 'Please type only the condition codes from your licence, not your licence number.'; error.hidden = false; return document.getElementById('hgCond').focus(); }
     if (!held.length) { error.textContent = `Please tick at least one class, or choose "I don't have a handgun licence".`; error.hidden = false; return; }
     saveHandgun(held, document.getElementById('hgSubmit'));
   }

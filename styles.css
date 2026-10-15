@@ -1,4 +1,4 @@
-/* On Target v3.0.0 — club styles */
+/* On Target v3.0.1 — club styles */
 :root {
   --maroon: #5C0F1F;
   --crimson: #9B1B35;
@@ -858,3 +858,34 @@ body.signpost .menu-row.admin-row .tile-ico svg { width: 18px; height: 18px; }
 .shoot-log .row-text, .pb-row .row-text { flex: 1 1 auto; }
 .sc-pb { stroke: none; }
 button.log-row { font: inherit; color: inherit; }
+
+/* v3.0.1: handgun requirements by class, and the pistol attendance card */
+.shoot-hg-wrap { padding: 0; }
+.shoot-hg-wrap > .shoot-hg { box-shadow: none; }
+.hg-break { border-top: 1px solid var(--line-soft); padding: 4px 16px 14px; }
+.hg-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hg-head .sp-head { margin: 12px 0 6px; }
+.hg-guide { background: var(--gold-soft); color: var(--gold-text); }
+.hg-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.hg-main { flex: 1; min-width: 0; }
+.hg-title { font-weight: 600; font-size: 15px; }
+.hg-row .muted { font-size: 13.5px; }
+.hg-n { font: 800 20px Montserrat, sans-serif; color: var(--heading); white-space: nowrap; }
+.hg-n span { font: 500 13px Poppins, sans-serif; color: var(--text-2); }
+.hg-break > p.muted { font-size: 13.5px; margin: 10px 0 0; }
+.choices-row.shoot-classes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.choices-row.shoot-classes .choice { justify-content: flex-start; text-align: left; }
+.pc-count { font: 500 13px Poppins, sans-serif; color: var(--text-2); text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.pc-card { padding: 4px 10px; overflow-x: auto; }
+.pc-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.pc-table th { text-align: left; font: 700 11.5px Poppins, sans-serif; color: var(--text-2); text-transform: uppercase; letter-spacing: .03em; padding: 8px 4px; border-bottom: 2px solid var(--line); vertical-align: bottom; }
+.pc-table td { padding: 9px 4px; border-bottom: 1px solid var(--line-soft); vertical-align: top; overflow-wrap: anywhere; }
+.pc-table tr:last-child td { border-bottom: 0; }
+.pc-table td:first-child { white-space: nowrap; font-weight: 600; }
+.pc-table td:last-child { text-align: center; font-weight: 700; }
+.pc-table .shoot-tag { margin-top: 3px; font-size: 10.5px; padding: 2px 6px; }
+.pc-edit { border: 0; background: none; padding: 0; min-height: 44px; text-align: left; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.shoot-log > .notice { margin-bottom: 12px; }
+.pc-table { table-layout: fixed; }
+.pc-w-date { width: 17%; } .pc-w-venue { width: 27%; } .pc-w-event { width: 28%; } .pc-w-kind { width: 16%; } .pc-w-class { width: 12%; }
+.pc-table td { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
