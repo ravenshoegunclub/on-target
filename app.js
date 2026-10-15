@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.2.0';
+const APP_VERSION = '3.2.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -66,6 +66,7 @@ const ICON = {
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DAYS_LONG = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 function parseDate(iso) { const [y, m, d] = String(iso).split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1); }
 function mon(d) { return MONTHS[d.getMonth()].charAt(0) + MONTHS[d.getMonth()].slice(1).toLowerCase(); }
@@ -398,30 +399,20 @@ const VIEWS = {
       <div class="page-title"><h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1></div>
       <section class="section" aria-label="Next at the range">${nextBox}</section>
       <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
-      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e), entryLine(e)))).join('')) : ''}
-      ${spGroup('Latest', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
+      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, mine ? '#/comps' : '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e), entryLine(e)))).join('')) : ''}
+      ${spGroup('Latest News', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
   },
 
   events() {
     if (session || (member && ME && ME.linked) ? !PRIVATE || PRIVATE_FOR !== privateFor() : false) loadPrivate();
-    entriesWanted();
-    const list = eventsShown();
+    const list = eventsShown(), mode = EVV.mode;
+    const seg = `<div class="seg rv-seg" role="group" aria-label="How to show the events">${RES_MODES.map(m => `
+      <button type="button" data-ev-mode="${m[0]}" aria-pressed="${mode === m[0]}">${m[1]}</button>`).join('')}</div>`;
     return `
       <div class="page-title"><h1>Events</h1><p class="muted">Competition days, training and club events</p></div>
-      <section class="section">
-        ${state('events', 4, () => list.length ? `<div class="card list">
-          ${list.map((ev, i) => `
-            <div class="list-row">${dateBlock(ev.date)}
-              <div class="list-main">
-                <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
-                <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
-                ${ev.description ? `<div class="muted desc">${esc(ev.description)}</div>` : ''}
-                ${!ev.audience && isCompetition(ev) ? entryBlock(ev) : ''}
-              </div>
-              <button type="button" class="icon-btn soft" data-cal="${i}" aria-label="Add ${esc(ev.title)} to calendar">${ICON.calendar}</button>
-            </div>`).join('')}
-        </div>` : empty('No upcoming events', 'New events appear here as soon as the club team posts them.'))}
-      </section>`;
+      <section class="section">${seg}</section>
+      ${state('events', 4, () => !list.length ? `<section class="section">${empty('No upcoming events', 'New events appear here as soon as the club team posts them.')}</section>`
+        : mode === 'type' ? eventsByType(list) : mode === 'date' ? eventsByDate(list) : `<section class="section">${eventRows(list, list)}</section>`)}`;
   },
 
   results() {
@@ -595,6 +586,75 @@ function eventsShown() {
   const today = todayIso();
   const extra = PRIVATE && PRIVATE_FOR && PRIVATE_FOR === privateFor() ? PRIVATE.filter(e => e.date >= today) : [];
   return [...events(), ...extra].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+/* ----- Events: By date | By type | All, the same as Results. The view and type last picked are remembered on the phone. ----- */
+const EVV = (() => {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('ot:eventsView')); } catch (e) { /* storage blocked */ }
+  saved = saved || {};
+  return { mode: RES_MODES.some(m => m[0] === saved.mode) ? saved.mode : 'all', type: saved.type || '', day: '', picking: false };
+})();
+function saveEvView() { try { localStorage.setItem('ot:eventsView', JSON.stringify({ mode: EVV.mode, type: EVV.type })); } catch (e) { /* storage blocked */ } }
+const eventWord = n => n + (n === 1 ? ' event' : ' events');
+/* An event's type is its "Type of event" (Pistol, Rifle and Clay matched whatever the capitals); none shows under Other */
+const eventType = ev => { const t = String(ev.discipline || '').trim(); return mainDiscipline(ev) || (t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Other'); };
+function eventTypes(list) {
+  const n = {};
+  list.forEach(ev => { const t = eventType(ev); n[t] = (n[t] || 0) + 1; });
+  const rank = t => { const i = RES_TYPE_ORDER.indexOf(t); return i < 0 ? (t === 'Other' ? 100 : 99) : i; };
+  return Object.keys(n).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1)).map(t => ({ type: t, count: n[t] }));
+}
+/* The event rows; `all` is the whole list, so the calendar button finds the right event */
+function eventRows(shown, all) {
+  return `<div class="card list">${shown.map(ev => `
+    <div class="list-row">${dateBlock(ev.date)}
+      <div class="list-main">
+        <div class="list-title">${esc(ev.title)}${ev.audience ? ' ' + badge(ev.audience) : ''}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
+        <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
+        ${ev.description ? `<div class="muted desc">${esc(ev.description)}</div>` : ''}
+      </div>
+      <button type="button" class="icon-btn soft" data-cal="${all.indexOf(ev)}" aria-label="Add ${esc(ev.title)} to calendar">${ICON.calendar}</button>
+    </div>`).join('')}</div>`;
+}
+/* By date: one day at a time, soonest first. ‹ is the day before, › the day after; the date box opens the list of days. */
+function eventsByDate(list) {
+  const dates = [...new Set(list.map(ev => ev.date))];
+  let i = dates.indexOf(EVV.day);
+  if (i < 0) { i = 0; EVV.day = dates[0]; }
+  const d = dates[i], on = x => list.filter(ev => ev.date === x);
+  const arrow = (to, dir, label) => `<button type="button" class="icon-btn rv-arrow" data-ev-dir="${label.charAt(0)}" data-ev-day="${to || ''}"${to ? '' : ' disabled'} aria-label="${to ? label + ': ' + longDate(to) : 'No ' + label.toLowerCase()}">${dir}</button>`;
+  const bar = `<div class="rv-datebar">
+      ${arrow(dates[i - 1], '&lsaquo;', 'Earlier event day')}
+      <button type="button" class="rv-datebox" data-ev-pick aria-expanded="${EVV.picking}">
+        <span><span class="rv-date">${longDate(d)}</span><span class="muted">${eventWord(on(d).length)}</span></span>${ICON.chev}
+      </button>
+      ${arrow(dates[i + 1], '&rsaquo;', 'Later event day')}
+    </div>`;
+  if (EVV.picking) {
+    const months = [];
+    dates.forEach(x => { const m = MONTHS_LONG[parseDate(x).getMonth()] + ' ' + x.slice(0, 4); let g = months.find(v => v.m === m); if (!g) { g = { m, days: [] }; months.push(g); } g.days.push(x); });
+    return `<section class="section">${bar}</section>
+      <section class="section rv-picker" aria-label="Choose a day">${months.map(g => `
+        <h2 class="day-head">${g.m}</h2>
+        <div class="card list">${g.days.map(x => `
+          <button type="button" class="list-row link-row rv-pick-row" data-ev-day="${x}" aria-current="${x === d}">
+            <span class="list-main"><span class="list-title">${longDate(x)}</span><span class="muted">${esc(on(x).map(ev => ev.title).join(', '))}</span></span>
+            ${x === d ? '<span class="chip">Showing</span>' : ICON.chev}
+          </button>`).join('')}</div>`).join('')}
+      </section>`;
+  }
+  return `<section class="section">${bar}</section>
+    <section class="section">${eventRows(on(d), list)}</section>`;
+}
+/* By type: chips for each type of event, then that type's events, soonest first */
+function eventsByType(list) {
+  const types = eventTypes(list);
+  if (!types.some(t => t.type === EVV.type)) EVV.type = types[0].type;
+  const shown = list.filter(ev => eventType(ev) === EVV.type);
+  return `<section class="section"><div class="chips" role="group" aria-label="Type of event">${types.map(t => `
+      <button type="button" class="chip-btn" data-ev-type="${esc(t.type)}" aria-pressed="${t.type === EVV.type}">${esc(t.type)}</button>`).join('')}</div>
+      <p class="muted rv-count">${eventWord(shown.length)}</p></section>
+    <section class="section">${eventRows(shown, list)}</section>`;
 }
 
 /* ---------- Manage posts ---------- */
@@ -1905,6 +1965,17 @@ view.addEventListener('click', e => {
       RES.day = b.dataset.rvDay; RES.picking = false; resRender();
       const again = dir && view.querySelector(`[data-rv-dir="${dir}"]:not([disabled])`); // keep stepping with the same arrow
       (again || view.querySelector('[data-rv-pick]')).focus();
+    }
+  }
+  if (t.closest('[data-ev-mode]')) { EVV.mode = t.closest('[data-ev-mode]').dataset.evMode; EVV.picking = false; saveEvView(); render(true); view.querySelector(`[data-ev-mode="${EVV.mode}"]`).focus(); }
+  if (t.closest('[data-ev-type]')) { EVV.type = t.closest('[data-ev-type]').dataset.evType; saveEvView(); render(true); view.querySelector(`[data-ev-type="${CSS.escape(EVV.type)}"]`).focus(); }
+  if (t.closest('[data-ev-pick]')) { EVV.picking = !EVV.picking; render(true); view.querySelector('[data-ev-pick]').focus(); }
+  if (t.closest('[data-ev-day]')) {
+    const b = t.closest('[data-ev-day]'), dir = b.dataset.evDir;
+    if (b.dataset.evDay) {
+      EVV.day = b.dataset.evDay; EVV.picking = false; render(true);
+      const again = dir && view.querySelector(`[data-ev-dir="${dir}"]:not([disabled])`); // keep stepping with the same arrow
+      (again || view.querySelector('[data-ev-pick]')).focus();
     }
   }
   if (t.closest('[data-me-reload]')) { ME = null; meState = ''; relinking = false; render(true); }
@@ -4437,7 +4508,7 @@ async function addWalkIn(form) {
 }
 
 /* ---------- "I'm in" for competitions (v3.1.0) ----------
-   A signed-in member taps I'm in on a competition in Events (again, or Can't make it, to withdraw), for themselves or a
+   A signed-in member taps I'm in on a competition in Enter a comp (again, or Can't make it, to withdraw), for themselves or a
    junior in their family. Open until the start time. Members see how many are going; the club team sees the names in
    Club admin (Competition entries). Not binding, no payment. Kept by the server (entryInfo), in memory only here. */
 let ENTRY = { auth: '', data: null, state: '', at: 0, busy: '', err: null };
@@ -4459,10 +4530,10 @@ async function loadEntries() {
   ENTRY = { auth, data: ENTRY.auth === auth ? ENTRY.data : null, state: 'loading', at: Date.now(), busy: '', err: null };
   try { const d = await memberApi('entryInfo', [], true); if (ENTRY.auth !== auth) return; ENTRY.data = d; ENTRY.state = ''; ENTRY.at = Date.now(); }
   catch (e) { if (e.signedOut || ENTRY.auth !== auth) return; ENTRY.state = 'failed'; }
-  if (['events', 'home', 'me/bookings'].includes(currentPage)) render(true);
+  if (['comps', 'home', 'me/bookings'].includes(currentPage)) render(true);
 }
 const entryGoing = (key, who) => { const d = entryData(); return !!(d && d.mine.some(m => m.key === key && m.whoKey === who && m.status === 'Going')); };
-/* Under a competition in Events: the I'm in button (one per person for a family with juniors) and how many are going */
+/* Under a competition in Enter a comp (and only there, v3.2.1): the I'm in button (one per person for a family with juniors) and how many are going */
 function entryBlock(ev) {
   const c = entryComp(ev), d = entryData();
   if (!c) return '';
@@ -4483,12 +4554,13 @@ function entryBlock(ev) {
       return btn(p.key, name, on, `${p.self ? 'Me' : p.first}${on ? ': going. Tap to withdraw' : ": I'm in"}, ${c.title}`);
     }).join('')}${count}</div>${err}<p class="muted entry-note">Tap a name, or tap again to withdraw. Lets the club know you're coming.</p></div>`;
 }
-/* Home, Coming up: "You're in" and how many are going */
+/* Home, Coming up: "You're in" and how many are going (text only; the I'm in button is only in Enter a comp) */
 function entryLine(ev) {
   const c = entryComp(ev);
   if (!c || c.closed) return '';
   const d = entryData(), mine = d.mine.filter(m => m.key === c.key && m.status === 'Going');
-  return joinDot(mine.length ? (mine.some(m => m.self) ? "You're in" : mine.map(m => m.who).join(' and ') + "'s in") : '', c.going ? c.going + ' going' : '');
+  // Plain text: Coming up's joinDot escapes it (escaping it here as well showed "You&#39;re in")
+  return [mine.length ? (mine.some(m => m.self) ? "You're in" : mine.map(m => m.who).join(' and ') + "'s in") : '', c.going ? c.going + ' going' : ''].filter(Boolean).join(' · ');
 }
 async function setEntry(btn) {
   if (ENTRY.busy || btn.disabled) return;
@@ -4520,11 +4592,11 @@ function entriesSection() {
       <article class="card book-card">
         <div class="event-row">${dateBlock(m.date)}
           <div><div class="event-title">${esc(m.title)}</div>
-            <div class="muted">${joinDot(m.self ? '' : esc(m.who), DAYS_LONG[parseDate(m.date).getDay()], m.start && esc(niceTime(m.start) || m.start))}</div>
+            <div class="muted">${joinDot(m.self ? '' : m.who, DAYS_LONG[parseDate(m.date).getDay()], m.start && (niceTime(m.start) || m.start))}</div>
             ${m.status === 'Cancelled' ? `<span class="me-pill me-pill-grey">Cancelled</span>${m.note ? ` <span class="muted">${esc(m.note)}</span>` : ''}` : `<span class="me-pill me-pill-ok">${m.self ? "You're in" : esc(m.who) + "'s in"}</span>`}</div></div>
         ${m.status === 'Going' && m.open ? `<div class="btn-row"><button type="button" class="btn btn-outline" data-entry="${esc(m.key)}" data-entry-who="${esc(m.whoKey)}" data-entry-going="0">${ICON.close}Can't make it</button></div>` : ''}
-      </article>`).join('') : `<p class="muted">Going to a competition? Tap I'm in on it in Events. It lets the club know you're coming.</p>`}
-    <a class="btn btn-outline btn-big" href="#/events">${ICON.calendar}See competitions</a>
+      </article>`).join('') : `<p class="muted">Going to a competition? Tap I'm in on it in Enter a comp. It lets the club know you're coming.</p>`}
+    <a class="btn btn-outline btn-big" href="#/comps">${ICON.trophy}Enter a comp</a>
   </section>`;
 }
 /* Club admin, Competition entries: who's coming to each upcoming competition, for setting up and squadding */
@@ -4545,7 +4617,7 @@ function entriesAdminView() {
     return `<article class="card roster-card">
       <div class="event-row">${dateBlock(c.date)}
         <div><div class="event-title">${esc(c.title)}</div>
-          <div class="muted">${joinDot(DAYS_LONG[parseDate(c.date).getDay()], c.start && esc(niceTime(c.start) || c.start), c.discipline && esc(c.discipline))}</div>
+          <div class="muted">${joinDot(DAYS_LONG[parseDate(c.date).getDay()], c.start && (niceTime(c.start) || c.start), c.discipline)}</div>
           ${c.closed ? `<span class="badge badge-closed">Range closed</span> <span class="muted">${esc(c.closed)}</span>` : `<b>${live.length} going</b>${!c.open ? ' <span class="muted">· entries closed</span>' : ''}`}</div></div>
       ${c.going.length ? `<ol class="roster">${c.going.map(g => `<li${g.cancelled ? ' class="roster-off"' : ''}><span>${esc(g.name)}${g.junior ? ' <span class="junior-tag">Junior</span>' : ''}</span>
         <span class="muted">${g.cancelled ? 'Cancelled' : g.cls ? 'Class ' + esc(g.cls) : ''}</span></li>`).join('')}</ol>` : '<p class="muted">Nobody yet.</p>'}
