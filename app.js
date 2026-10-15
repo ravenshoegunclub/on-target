@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.0.1';
+const APP_VERSION = '3.0.2';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -1809,7 +1809,7 @@ let currentPage = '', currentHash = location.hash;
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'shoot', 'handgun', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'shoot', 'handgun', 'rclass', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && sub === 'post' ? '/post' : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
@@ -1827,6 +1827,7 @@ function render(quiet) {
     if (page !== 'me/details') meNote = '';
     if (page !== 'me/results') { CLAIMS.note = ''; SHOOT.note = ''; }
     if (page !== 'me/shoot' && page !== 'me/results') SHOOT.edit = null;
+    if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
     benchLeave(page);
     familyLeave(page);
@@ -2619,6 +2620,7 @@ function meView(sub) {
   else if (sub === 'results') return meResults();
   else if (sub === 'shoot') return shootForm();
   else if (sub === 'handgun') return handgunView();
+  else if (sub === 'rclass') return resultClassView();
   else if (sub === 'details') return meDetails();
   else if (sub === 'email') return meEmail();
   else if (sub === 'book') return bookView();
@@ -3023,25 +3025,26 @@ view.addEventListener('click', e => {
 /* My shooting (v3.0.0): Overview (handgun shoots this year, a few numbers, progress in one competition, personal bests)
    and Log (RDSS results, shoots elsewhere the member adds, and "Are these yours?").
    Shoots elsewhere and the handgun classes are kept by the server (memberShooting), in memory only here. */
-let SHOOT = { auth: '', data: null, state: '', tab: 'overview', comp: '', note: '', edit: null };
+let SHOOT = { auth: '', data: null, state: '', tab: 'overview', comp: '', note: '', edit: null, rkey: null };
 async function loadShooting() {
   const auth = meAuth();
   if (SHOOT.state === 'loading' && SHOOT.auth === auth) return;
-  if (SHOOT.auth !== auth) SHOOT = { auth, data: null, state: '', tab: SHOOT.tab, comp: '', note: '', edit: null };
+  if (SHOOT.auth !== auth) SHOOT = { auth, data: null, state: '', tab: SHOOT.tab, comp: '', note: '', edit: null, rkey: null };
   SHOOT.state = 'loading';
   try { SHOOT.data = await memberApi('memberShooting'); SHOOT.state = ''; }
   catch (e) { if (e.signedOut) return; SHOOT.state = 'failed'; }
-  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|handgun)$/.test(currentPage)) render(true);
+  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|handgun|rclass)$/.test(currentPage)) render(true);
 }
 const shootData = () => (SHOOT.auth === meAuth() ? SHOOT.data : null);
 const fyStart = () => financialYear().from + '-07-01';
 const isPistol = r => /pistol|handgun/i.test(r.discipline || r.type || '');
 /* Everything they've shot, newest first: RDSS results and shoots elsewhere, in one shape */
 function shootLines() {
-  // pc: the pistol class. RDSS results don't record it, so it is only known there when they hold just one class.
-  const d = shootData(), only = d && d.handgun.classes.length === 1 ? d.handgun.classes[0].key : '';
+  // pc: the pistol class. RDSS results don't record it: the member sets it themselves (v3.0.2), or it is taken as their one class.
+  const d = shootData(), only = d && d.handgun.classes.length === 1 ? d.handgun.classes[0].key : '', set = (d && d.rdssClasses) || {};
   const rdss = ME.results.map(r => ({ rdss: true, key: r.key, date: r.date, name: r.competition, place: r.place, score: r.score,
-    cls: r['class'], comp: true, pistol: isPistol(r), pc: isPistol(r) ? only : '', where: 'RDSS' }));
+    cls: r['class'], comp: true, pistol: isPistol(r), pc: isPistol(r) ? (set[r.key] || {}).cls || only : '', pcSet: !!set[r.key],
+    accredited: isPistol(r) && !!(set[r.key] || {}).accredited, where: 'RDSS' }));
   const own = d ? d.log.map(s => ({ rdss: false, id: s.id, date: s.date, name: s.what, place: s.place, score: s.score, comp: s.kind === 'Competition',
     pistol: s.type === 'Pistol', pc: s.type === 'Pistol' ? s.cls || only : '', accredited: !!s.accredited, where: s.club, type: s.type, kind: s.kind })) : [];
   return rdss.concat(own).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
@@ -3141,7 +3144,7 @@ function handgunBreakdown(lines, need, d) {
   const unknown = one ? 0 : dayCount(pistol.filter(l => !l.pc));
   return `<div class="hg-break"><div class="hg-head"><h3 class="sp-head">What the licence needs</h3><span class="mbadge hg-guide">Guide only</span></div>
     ${rows}${compRow}${accRow}
-    ${unknown ? `<p class="muted">${unknown} pistol shoot${unknown === 1 ? '' : 's'} with no class yet: RDSS results don't record which class of pistol was used. They count in the total above.</p>` : ''}
+    ${unknown ? `<p class="muted">${unknown} pistol shoot${unknown === 1 ? '' : 's'} with no class yet. They count in the total above.${d.canEdit ? ' To set the class, tap the result in the Log or the Pistol card.' : ''}</p>` : ''}
     ${need.partYear ? '<p class="muted">Part-year with several classes: please check your exact numbers with QPS Weapons Licensing.</p>' : ''}
     <p class="muted">A guide only. Only one shoot a day counts. Keep your own participation record signed by a range officer.</p></div>`;
 }
@@ -3172,10 +3175,11 @@ function shootLog(lines, d) {
   const byYear = {};
   lines.forEach(l => { (byYear[l.date.slice(0, 4)] = byYear[l.date.slice(0, 4)] || []).push(l); });
   const row = l => {
-    const sub = joinDot(shortDate(l.date), l.where, l.place && placeLabel(l.place), l.score && esc(l.score), !l.rdss && l.kind === 'Practice' && !/practice/i.test(l.name) && 'Practice');
+    const sub = joinDot(shortDate(l.date), l.where, l.rdss && l.pistol && (l.pc ? 'Class ' + esc(l.pc) : 'Class not set'), l.place && placeLabel(l.place), l.score && esc(l.score), !l.rdss && l.kind === 'Practice' && !/practice/i.test(l.name) && 'Practice');
     const tag = l.rdss ? `<span class="mbadge mbadge-ok shoot-tag">${ICON.check}RDSS</span>` : `<span class="mbadge shoot-tag shoot-tag-own">Added by ${other ? who : 'you'}</span>`;
     const main = `<span class="pb-ico">${l.comp ? ICON.trophy : ICON.target}</span><span class="row-text">${esc(l.name)}<span class="muted">${sub}</span></span>${tag}`;
     if (!l.rdss) return can ? `<button type="button" class="menu-row log-row" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${main}${ICON.chev}</button>` : `<div class="menu-row log-row">${main}</div>`;
+    if (l.pistol && can && l.key) return `<button type="button" class="menu-row log-row" data-rclass="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}, at RDSS: ${l.pcSet ? 'Class ' + esc(l.pc) + '. Change the class' : 'set the class of pistol'}">${main}${ICON.chev}</button>`;
     return ME.canClaim && l.key ? `<button type="button" class="menu-row log-row" data-unlink="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}, at RDSS. Tap if it isn't ${other ? who + "'s" : 'yours'}.">${main}</button>` : `<div class="menu-row log-row">${main}</div>`;
   };
   const add = can ? `<a class="shoot-add" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : '';
@@ -3194,7 +3198,7 @@ function shootLog(lines, d) {
       </div>`).join('')}</div>
     ${c.more ? `<p class="muted">And ${c.more} more. They show here as you go through these.</p>` : ''}`
     : CLAIMS.state === 'loading' && CLAIMS.auth === meAuth() ? skeletonRows(1) : '';
-  const unlinkTip = ME.canClaim && lines.some(l => l.rdss) ? `<p class="muted">An RDSS result here that isn't ${other ? who + "'s" : 'yours'}? Tap it to take it off.</p>` : '';
+  const unlinkTip = ME.canClaim && lines.some(l => l.rdss) ? `<p class="muted">${can && lines.some(l => l.rdss && l.pistol) ? 'Tap an RDSS pistol result to set the class of pistol. ' : ''}An RDSS result here that isn't ${other ? who + "'s" : 'yours'}? Tap it to take it off.</p>` : '';
   return `<section class="section shoot-log">${add}${list}${unlinkTip}${waiting}${claims}
     <p class="muted shoot-foot">Shoots at other clubs are ${other ? who + "'s" : 'your'} own record. Those clubs keep the official one.</p></section>`;
 }
@@ -3243,13 +3247,14 @@ function pistolCard(lines, d) {
       <tbody>${rows.map(l => `<tr>
         <td>${esc(shortDate(l.date).replace(/^\w+ /, ''))}</td>
         <td>${esc(l.where)}<br>${l.rdss ? `<span class="mbadge mbadge-ok shoot-tag">${ICON.check}RDSS</span>` : `<span class="mbadge shoot-tag shoot-tag-own">Added by ${other ? who : 'you'}</span>`}</td>
-        <td>${!l.rdss && can ? `<button type="button" class="pc-edit" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${esc(l.name)}</button>` : esc(l.name)}${l.accredited ? '<br><span class="muted">Accredited</span>' : ''}</td>
+        <td>${!l.rdss && can ? `<button type="button" class="pc-edit" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${esc(l.name)}</button>`
+          : l.rdss && can && l.key ? `<button type="button" class="pc-edit" data-rclass="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: set the class of pistol">${esc(l.name)}</button>` : esc(l.name)}${l.accredited ? '<br><span class="muted">Accredited</span>' : ''}</td>
         <td>${l.comp ? 'Comp' : 'Practice'}</td>
         <td>${l.pc ? esc(l.pc) : '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table></div>`;
   };
-  const noClass = pistol.some(l => !l.pc) ? `<p class="muted">A dash under Class: the class wasn't recorded. RDSS results don't record which class of pistol was used.</p>` : '';
+  const noClass = pistol.some(l => !l.pc) ? `<p class="muted">A dash under Class: the class hasn't been set.${can ? ' Tap the event to set it.' : ''}</p>` : '';
   return `<section class="section shoot-log">${banner}${add}${years.map(table).join('')}${noClass}
-    ${can && pistol.some(l => !l.rdss) ? '<p class="muted">Tap one of your own entries to change or remove it.</p>' : ''}</section>`;
+    ${can ? '<p class="muted">Tap an event to set its class, or to change or remove one of your own entries.</p>' : ''}</section>`;
 }
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
@@ -3322,6 +3327,44 @@ function askRemoveShoot() {
     yes: 'Yes, remove it', busy: 'Removing…', no: 'No, keep it', run: () => memberApi('memberShootRemove', [s.id]),
     done: out => { SHOOT.data = out; SHOOT.note = 'Removed.'; SHOOT.tab = 'log'; SHOOT.edit = null; const f = document.getElementById('shootForm'); if (f) f.remove(); go('#/me/results'); } });
 }
+/* The class of pistol on one of their RDSS results (#/me/rclass, v3.0.2): the member's own record, the result itself is unchanged */
+function resultClassView() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  const back = `<a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a>`;
+  if (!d) { if (!SHOOT.state) setTimeout(loadShooting, 0); return `<div class="page-title">${back}<h1>Class of pistol</h1></div><section class="section">${SHOOT.state === 'failed' ? loadFailed('your shooting log', 'data-shoot-reload') : skeletonRows(2)}</section>`; }
+  const l = shootLines().find(x => x.rdss && x.key === SHOOT.rkey);
+  if (!d.canEdit || !l) { location.replace('#/me/results'); return ''; }
+  const set = (d.rdssClasses || {})[l.key] || {}, cls = set.cls || (!l.pistol ? '' : l.pc);
+  return `
+    <div class="page-title">${back}<h1>Class of pistol</h1>${viewingLine()}</div>
+    <section class="section"><div class="card"><div class="list-title">${esc(l.name)}</div>
+      <p class="muted">${joinDot(shortDate(l.date) + ' ' + l.date.slice(0, 4), 'RDSS', l.place && placeLabel(l.place) + ' place', l.score && 'Score ' + esc(l.score))}</p></div></section>
+    <section class="section"><form class="card form" id="rcForm" novalidate>
+      ${l.pistol ? `<fieldset class="choices choices-row shoot-classes"><legend class="field-label">Which class of pistol ${other ? 'did ' + who : 'did you'} use?</legend>${HANDGUN_CLASSES.map(([key, name]) => `<label class="choice"><input type="radio" name="rcClass" value="${key}"${key === cls ? ' checked' : ''}><span><span class="choice-title">${key}</span><span class="choice-text">${esc(name)}</span></span></label>`).join('')}</fieldset>
+      <label class="choice" id="rcAccWrap"${cls === 'C' ? '' : ' hidden'}><input type="checkbox" id="rcAcc"${set.accredited ? ' checked' : ''}>
+        <span><span class="choice-title">Accredited event</span><span class="choice-text">Metallic silhouette or single action. Counts towards Class C.</span></span></label>
+      <p class="muted">It counts towards that class's handgun shoots for the year. Only ${other ? who : 'you'} see${other ? 's' : ''} this: the club's results don't change.</p>
+      <p class="form-error" id="rcError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="rcSubmit">Save</button>
+      ${set.cls ? '<button type="button" class="btn btn-outline btn-big" data-rc-clear>Clear the class</button>' : ''}` : ''}
+      ${ME.canClaim ? `<p class="muted">Not ${other ? who + "'s" : 'yours'}? It was linked by mistake.</p><button type="button" class="btn btn-outline btn-big" data-unlink="${esc(l.key)}">Take it off ${other ? who + "'s" : 'my'} results</button>` : ''}
+    </form></section>`;
+}
+async function saveResultClass(cls, btn) {
+  if (btn.disabled) return;
+  const label = btn.textContent, error = document.getElementById('rcError'), acc = document.getElementById('rcAcc');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    SHOOT.data = await memberApi('memberResultClass', [SHOOT.rkey, cls, cls === 'C' && !!(acc && acc.checked)]);
+    SHOOT.note = cls ? 'Saved. It counts towards Class ' + cls + '.' : 'Class cleared.'; SHOOT.rkey = null;
+    const f = document.getElementById('rcForm'); if (f) f.remove();
+    go('#/me/results');
+  } catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = label;
+    if (error) { error.textContent = e.message; error.hidden = false; }
+  }
+}
 /* Handgun classes (#/me/handgun): the same choices as the calculator, saved so My shooting can count */
 function handgunView() {
   const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '', fy = financialYear();
@@ -3378,17 +3421,27 @@ view.addEventListener('click', e => {
   if (ed) { SHOOT.edit = ed.dataset.shootEdit; go('#/me/shoot'); }
   if (t.closest('[data-shoot-reload]')) { SHOOT.state = ''; SHOOT.data = null; render(true); }
   if (t.closest('[data-shoot-remove]')) askRemoveShoot();
+  const rc = t.closest('[data-rclass]');
+  if (rc) { SHOOT.rkey = rc.dataset.rclass; go('#/me/rclass'); }
+  if (t.closest('[data-rc-clear]')) saveResultClass('', t.closest('[data-rc-clear]'));
   if (t.closest('[data-hg-none]')) saveHandgun([], t.closest('[data-hg-none]'));
 });
 view.addEventListener('change', e => {
   // Add a shoot: the class question only for pistol; the accredited tick only for Class C
   if (e.target.name === 'shType') document.getElementById('shPistol').hidden = e.target.value !== 'Pistol';
   if (e.target.name === 'shClass') document.getElementById('shAccWrap').hidden = e.target.value !== 'C';
+  if (e.target.name === 'rcClass') document.getElementById('rcAccWrap').hidden = e.target.value !== 'C';
   if (e.target.id === 'hgNoAttend') document.getElementById('hgNoAttendNote').hidden = !e.target.checked;
 });
 view.addEventListener('change', e => { if (e.target.matches('[data-shoot-comp]')) { SHOOT.comp = e.target.value; render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); } });
 view.addEventListener('submit', e => {
   if (e.target.id === 'shootForm') { e.preventDefault(); saveShoot(e.target); }
+  if (e.target.id === 'rcForm') {
+    e.preventDefault();
+    const picked = e.target.querySelector('input[name="rcClass"]:checked'), error = document.getElementById('rcError');
+    if (!picked) { error.textContent = 'Please choose which class of pistol.'; error.hidden = false; return; }
+    saveResultClass(picked.value, document.getElementById('rcSubmit'));
+  }
   if (e.target.id === 'hgForm') {
     e.preventDefault();
     const held = HANDGUN_CLASSES.filter(([key]) => document.getElementById('calc' + key).checked).map(([key]) => ({ key, months: Number(document.getElementById('calcMonths' + key).value) }));
