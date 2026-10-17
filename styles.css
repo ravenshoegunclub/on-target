@@ -523,6 +523,9 @@ select.field { -webkit-appearance: none; appearance: none; background-image: lin
 .share-pics { display: flex; gap: 6px; overflow-x: auto; flex: 0 0 auto; }
 .share-pics[hidden] { display: none; }
 .share-panel .btn[hidden] { display: none; }
+.pick-list { display: flex; flex-direction: column; gap: 12px; }
+.pick-list .btn { flex-direction: column; gap: 2px; white-space: normal; text-align: center; padding: 8px 14px; }
+.pick-list .btn small { font-weight: 400; font-size: 13px; opacity: .9; }
 .share-pics img { height: 96px; width: 96px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; background: var(--tint); }
 .share-pics img:only-child { width: 100%; height: auto; max-height: 200px; object-fit: contain; }
 .share-pics.share-card img:only-child { max-height: 34vh; border-radius: 12px; box-shadow: 0 0 0 1px var(--line); }

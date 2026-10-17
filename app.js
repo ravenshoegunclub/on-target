@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.2.1';
+const APP_VERSION = '3.2.2';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -710,7 +710,7 @@ function manageView() {
         <div class="card list">${evs.slice(split).map((ev, i) => row(ev, split + i)).join('')}</div>` : '');
     }
     if (manageTab === 'results') {
-      return MANAGE.results.length ? `<p class="muted">Share makes a picture and a caption with every competition from that day. The picture shows the top 3 in each.</p>
+      return MANAGE.results.length ? `<p class="muted">Share makes a picture and a caption with every competition from that day (the top 3 in each), or just one competition.</p>
         <div class="card list">${MANAGE.results.map((g, i) => `
         <div class="manage-item"><button type="button" class="list-row manage-row" data-edit="results:${i}"><span class="list-ico">${ICON.trophy}</span>
           <span class="list-main"><span class="list-title">${esc(g.competition || 'No name')}</span>
@@ -2238,7 +2238,8 @@ function signOut() {
 /* Sheets (simple dialogs) */
 const sheet = document.getElementById('sheet'), leaveSheet = document.getElementById('leaveSheet');
 const confirmSheet = document.getElementById('confirmSheet'), shareSheet = document.getElementById('shareSheet'), installSheet = document.getElementById('installSheet');
-const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet, installSheet];
+const pickSheet = document.getElementById('pickSheet');
+const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet, installSheet, pickSheet];
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
 let sheetOpener = null;
@@ -2257,7 +2258,7 @@ function closeSheets() {
 }
 /* The sign-in sheet: the club team's PIN, or (step = 'code') the code a member has just been emailed */
 function openSignIn(note, step) {
-  leaveSheet.hidden = true; confirmSheet.hidden = true; shareSheet.hidden = true; installSheet.hidden = true; endShare();
+  leaveSheet.hidden = true; confirmSheet.hidden = true; shareSheet.hidden = true; installSheet.hidden = true; pickSheet.hidden = true; endShare();
   pinBox.value = ''; signInError.hidden = true;
   signInNote.textContent = note || ''; signInNote.hidden = !note;
   openSheet(sheet, signInStep(step === 'code' ? 'code' : 'pin'));
@@ -2268,6 +2269,7 @@ SHEETS.forEach(el => el.addEventListener('click', e => { if (e.target === el) cl
 document.getElementById('leaveStay').addEventListener('click', closeSheets);
 document.getElementById('confirmNo').addEventListener('click', closeSheets);
 document.getElementById('shareClose').addEventListener('click', closeSheets);
+document.getElementById('pickCancel').addEventListener('click', closeSheets);
 document.getElementById('leaveGo').addEventListener('click', () => {
   const to = leavingTo; leavingTo = null;
   sheetOpener = null; closeSheets();
@@ -2317,10 +2319,10 @@ function eventCaption(ev) {
     ...(ev.description ? [ev.description] : []),
     '', 'Visitors welcome.', 'Details: ' + SITE, '', TAGS].join('\n');
 }
-/* Every competition from one day, with all the placings */
-function resultsCaption(date) {
+/* Every competition from one day (or just one of them), with all the placings */
+function resultsCaption(date, only) {
   const out = ['\u{1F3AF} Results \u2013 ' + longDate(date), ''];
-  MANAGE.results.filter(g => g.date === date).forEach(g => {
+  (only ? [only] : MANAGE.results.filter(g => g.date === date)).forEach(g => {
     out.push(g.competition + (g.discipline ? ' (' + g.discipline + ')' : ''));
     g.rows.forEach((r, i) => { const p = Number(r.place) || i + 1; out.push(`${MEDALS[p - 1] || p + '.'} ${r.shooter}${r['class'] ? ' (' + r['class'] + ')' : ''} \u2013 ${r.score}`); });
     out.push('');
@@ -2547,6 +2549,33 @@ function resultsPicture(date) {
     });
   });
 }
+/* One competition: up to 12 placings with class and score, in the same frame and card as the day's picture */
+function competitionPicture(g) {
+  return picMake(x => {
+    const pad = 40, top = 290, l = pad, w = PIC_W - pad * 2, list = g.rows.slice(0, 12), more = g.rows.length - list.length, foot = more > 0 ? 50 : 10;
+    const step = Math.min(68, Math.floor((PIC_H - 130 - top - 150 - foot) / Math.max(1, list.length))); // a long list closes up to stay above the footer
+    const h = 150 + list.length * step + foot, medal = ['#E9B44C', '#C9C9C9', '#CD7F32'];
+    picFrame(x, 'RESULTS · ' + longDate(g.date).toUpperCase(), g.competition || 'Competition results', 'Full results: ' + SITE + '/results');
+    picPanel(x, l, top, w, h);
+    x.fillStyle = '#9B1B35'; x.font = '700 26px Montserrat, sans-serif';
+    x.fillText(picFit(x, (String(g.discipline || 'Competition') + ' · ' + g.rows.length + (g.rows.length === 1 ? ' shooter' : ' shooters')).toUpperCase(), w - 88), l + 44, top + 72);
+    x.fillStyle = '#E9B44C'; x.fillRect(l + 44, top + 96, 90, 6);
+    list.forEach((r, i) => {
+      const p = Number(r.place) || i + 1, y = top + 175 + i * step, score = String(r.score == null ? '' : r.score), cls = r['class'] ? 'Class ' + r['class'] : '';
+      if (i) { x.fillStyle = '#EEE6E8'; x.fillRect(l + 44, y - 50, w - 88, 2); }
+      x.beginPath(); x.arc(l + 76, y - 12, 24, 0, Math.PI * 2); x.fillStyle = medal[p - 1] || '#EFE7E9'; x.fill();
+      x.fillStyle = p === 3 ? '#fff' : '#5C0F1F'; x.font = '800 24px Montserrat, sans-serif'; x.textAlign = 'center'; x.fillText(String(p), l + 76, y - 3); x.textAlign = 'left';
+      x.font = '600 34px Poppins, sans-serif'; const sw = x.measureText(score).width;
+      x.fillStyle = '#5C0F1F'; x.textAlign = 'right'; x.fillText(score, l + w - 44, y);
+      x.font = '500 26px Poppins, sans-serif'; const cw = cls ? x.measureText(cls).width + 30 : 0;
+      if (cls) { x.fillStyle = '#6B6B6B'; x.fillText(cls, l + w - 44 - sw - 30, y); }
+      x.textAlign = 'left'; x.fillStyle = '#1E1E1E'; x.font = '600 34px Poppins, sans-serif';
+      x.fillText(picFit(x, r.shooter, w - 166 - sw - cw - 30), l + 122, y);
+    });
+    if (more > 0) { x.fillStyle = '#6B6B6B'; x.font = '500 24px Poppins, sans-serif'; x.fillText(`+ ${more} more`, l + 44, top + h - 26); }
+  });
+}
+const fileWord = t => String(t || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Results';
 
 /* The Share button on an event or a result in Manage posts */
 function sharePost(what) {
@@ -2554,10 +2583,31 @@ function sharePost(what) {
   const item = (kind === 'event' ? manageEvents() : MANAGE.results)[Number(i)];
   if (!item) return;
   if (kind === 'event' && item.audience !== 'Everyone') return; // private and hidden events are never shared
-  openShare(kind === 'event'
-    ? { text: eventCaption(item), picture: { make: () => eventPicture(item), name: `rdss-event-${item.date}.jpg` } }
-    : { text: resultsCaption(item.date), picture: { make: () => resultsPicture(item.date), name: `rdss-results-${item.date}.jpg` } });
+  if (kind === 'event') return openShare({ text: eventCaption(item), picture: { make: () => eventPicture(item), name: `rdss-event-${item.date}.jpg` } });
+  // A competition day with more than one competition: the whole day, or just one of them
+  const day = MANAGE.results.map((g, k) => ({ g, k })).filter(o => o.g.date === item.date);
+  if (day.length < 2) return shareResults(item.date);
+  document.getElementById('pickDate').textContent = longDate(item.date);
+  document.getElementById('pickList').innerHTML = `
+    <button type="button" class="btn btn-primary btn-big pick-all" data-share-day="${esc(item.date)}">All results for the day<small>${day.length} competitions</small></button>
+    ${day.map(o => `<button type="button" class="btn btn-outline btn-big" data-share-one="${o.k}">${esc(o.g.competition || 'No name')}</button>`).join('')}`;
+  openSheet(pickSheet, pickSheet.querySelector('.pick-all'));
 }
+/* date: the whole competition day; one: a single competition from it */
+function shareResults(date, one) {
+  if (!pickSheet.hidden) { // the popup goes, and the share sheet returns focus to the Share button that opened it
+    pickSheet.hidden = true;
+    if (sheetOpener && document.contains(sheetOpener)) sheetOpener.focus();
+  }
+  openShare(one
+    ? { text: resultsCaption(one.date, one), picture: { make: () => competitionPicture(one), name: `RDSS-${fileWord(one.competition)}-${one.date}.jpg` } }
+    : { text: resultsCaption(date), picture: { make: () => resultsPicture(date), name: `rdss-results-${date}.jpg` } });
+}
+document.getElementById('pickList').addEventListener('click', e => {
+  const all = e.target.closest('[data-share-day]'), one = e.target.closest('[data-share-one]');
+  if (all) shareResults(all.dataset.shareDay);
+  else if (one && MANAGE && MANAGE.results[Number(one.dataset.shareOne)]) shareResults('', MANAGE.results[Number(one.dataset.shareOne)]);
+});
 /* Manage posts, Photos: ticking photos to share */
 function togglePick(tile) {
   const i = Number(tile.dataset.pick), at = sharePick.indexOf(i), note = document.getElementById('pickNote');
