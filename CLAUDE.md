@@ -168,7 +168,7 @@ The Apps Script project is cloned into `backend/` with clasp, Google's free comm
 
 ## Conventions
 
-- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **3.3.0**.
+- **Bump the version on every change:** `APP_VERSION` in `app.js`, every `?v=x.y.z` in `index.html`, `manifest.webmanifest` and `sw.js`, and `CACHE` in `sw.js`. Phones only pick up changes when these change. Current version: **3.3.1**.
 - Carl previews with `python3 -m http.server 8080` (he calls this "8080"). It is usually already running in another terminal.
 - Prefer complete, tidy files over scattered patches.
 - Commit messages: short, e.g. `On Target v1.2.0 committee sign-in`.

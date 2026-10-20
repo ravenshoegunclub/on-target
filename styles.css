@@ -278,13 +278,15 @@ button.rv-pick-row:last-child { border-bottom: 0; }
 textarea.field { min-height: 110px; resize: vertical; line-height: 1.5; }
 .field:focus { border-color: var(--accent); }
 /* Date boxes: iPhones give them their own width and centre the date, so both are overridden here */
-.date-wrap { position: relative; min-width: 0; }
+.date-wrap { position: relative; min-width: 0; width: 100%; container-type: inline-size; } /* sized by the layout, never by an empty iPhone date box (v3.3.1) */
 input[type="date"].field, input[type="time"].field { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; height: 50px; text-align: left; line-height: 1.5; }
 input[type="date"].field::-webkit-date-and-time-value, input[type="time"].field::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.5em; }
 /* Start and end time side by side */
 .time-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .time-pair .field-label { margin-bottom: 6px; }
-.date-hint { position: absolute; left: 15.5px; top: 0; height: 50px; display: flex; align-items: center; color: var(--text-3); font-size: 16px; pointer-events: none; }
+.date-hint { position: absolute; left: 15.5px; right: 14px; top: 0; height: 50px; display: flex; align-items: center; color: var(--text-3); font-size: 16px; pointer-events: none; white-space: nowrap; overflow: hidden; }
+.date-hint-short { display: none; }
+@container (max-width: 230px) { .date-hint-long { display: none; } .date-hint-short { display: inline; } } /* a narrow box says "Choose date" */
 .date-wrap:not(.no-date) .date-hint, .date-wrap:focus-within .date-hint { display: none; }
 .date-wrap.no-date input:not(:focus) { color: transparent; }
 .pin-box { min-height: 64px; text-align: center; font: 800 28px Montserrat, sans-serif; letter-spacing: 6px; }
@@ -657,6 +659,7 @@ button.menu-row.install-row .chev { color: #3A0A14; }
 .calc-held { display: flex; align-items: center; gap: 12px; padding-left: 48px; }
 .calc-held[hidden] { display: none; }
 .calc-held .field { margin: 0; flex: 1 1 auto; }
+.calc-held .date-wrap { flex: 1 1 0; } /* the box fills the rest of the row, empty or not (v3.3.1) */
 .calc-card { scroll-margin-top: 80px; }
 .calc-big { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .calc-big b { font: 800 64px/1 Montserrat, sans-serif; color: var(--gold); }

@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.3.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -1405,7 +1405,7 @@ const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const nextSaturday = () => { const d = new Date(); d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7 || 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 /* A date box. iPhones show an empty one as a blank box, so it gets its own "Tap to choose a date" hint. */
 const timeField = (id, value) => `<div class="date-wrap${time24(value) ? '' : ' no-date'}"><input class="field" type="time" id="${id}" value="${time24(value)}"><span class="date-hint" aria-hidden="true">Tap to set</span></div>`;
-const dateField = (id, value) => `<div class="date-wrap${value ? '' : ' no-date'}"><input class="field" type="date" id="${id}" value="${esc(value || '')}" required><span class="date-hint" aria-hidden="true">Tap to choose a date</span></div>`;
+const dateField = (id, value) => `<div class="date-wrap${value ? '' : ' no-date'}"><input class="field" type="date" id="${id}" value="${esc(value || '')}" required><span class="date-hint" aria-hidden="true"><span class="date-hint-long">Tap to choose a date</span><span class="date-hint-short">Choose date</span></span></div>`;
 const uniq = list => { const seen = new Set(); return list.map(v => String(v || '').trim()).filter(v => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())); };
 const options = list => list.map(v => `<option value="${esc(v)}"></option>`).join('');
 const pastComps = () => days().flatMap(d => d.competitions);
