@@ -839,7 +839,9 @@ body.signpost .menu-row.admin-row .tile-ico svg { width: 18px; height: 18px; }
 .shoot-chart { width: 100%; height: auto; display: block; margin: 6px 0 4px; overflow: visible; }
 .sc-line { fill: none; stroke: var(--crimson); stroke-width: 2.5; stroke-linejoin: round; }
 .sc-dot { fill: var(--crimson); }
-.sc-trend { stroke: var(--gold); stroke-width: 2; stroke-dasharray: 5 4; }
+.sc-avg { stroke: var(--text-3); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .55; }
+.sc-avg-label { fill: var(--text-3); stroke: none; font: 600 11px Poppins, sans-serif; }
+.sc-dot-pb { fill: var(--green); stroke: var(--card); stroke-width: 2; }
 .sc-pb { fill: var(--ok-text); font: 700 11px Poppins, sans-serif; }
 .shoot-chart-card > .muted { margin: 4px 0 0; }
 .pb-ico { flex: 0 0 28px; color: var(--accent); display: flex; }
@@ -937,3 +939,32 @@ button.log-row { font: inherit; color: inherit; }
 .switch-knob { position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
 .switch-on .switch-knob { left: 44px; }
 button.menu-row[disabled] { opacity: .6; cursor: default; }
+
+/* My shooting, one page (v3.4.0) */
+.shoot-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 10px; }
+.shoot-sum .shoot-stat { padding: 16px 8px; }
+.shoot-sum .shoot-stat b { font-size: 32px; line-height: 1.1; }
+.shoot-stat .stat-sub { font-size: 12.5px; color: var(--text-3); }
+.medals { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.medal-n { display: inline-flex; align-items: center; gap: 4px; font: 700 15px Poppins, sans-serif; color: var(--text); }
+.medal { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font: 800 11px Montserrat, sans-serif; color: #3A0A14; }
+.shoot-stat .medal { font-size: 11px; color: #3A0A14; }
+.medal-1 { background: #E9B44C; }
+.medal-2 { background: #C9CDD3; }
+.medal-3 { background: #CD8B4E; }
+.shoot-an .field { margin: 6px 0 10px; }
+.shoot-one-comp { color: var(--heading); margin: 4px 0 10px; }
+.shoot-an .shoot-stats { margin-bottom: 10px; }
+.trend-up, .trend-down { font-size: 14px; margin-left: 4px; vertical-align: 3px; }
+.trend-up { color: var(--ok-text); }
+.trend-down { color: var(--red-text); }
+.pb-box { padding: 0 16px; }
+.pb-box .pb-head { border-bottom: 0; font-weight: 600; }
+.pb-head .chev { transform: rotate(90deg); transition: transform .15s; }
+.pb-head[aria-expanded="true"] .chev { transform: rotate(-90deg); }
+.pb-list { max-height: 320px; overflow-y: auto; border-top: 1px solid var(--line-soft); }
+.pb-score { font: 800 18px Montserrat, sans-serif; color: var(--heading); margin-left: auto; }
+.shoot-log .seg { margin-bottom: 10px; }
+.shoot-dates { margin-bottom: 4px; }
+.shoot-year { margin-top: 14px; }
+.shoot-chart-card .shoot-chart { max-width: 560px; margin-left: auto; margin-right: auto; } /* stays a sensible size on a laptop */

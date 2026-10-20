@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.3.1';
+const APP_VERSION = '3.4.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -3207,11 +3207,20 @@ view.addEventListener('click', e => {
 /* My shooting (v3.0.0): Overview (handgun shoots this year, a few numbers, progress in one competition, personal bests)
    and Log (RDSS results, shoots elsewhere the member adds, and "Are these yours?").
    Shoots elsewhere and the handgun classes are kept by the server (memberShooting), in memory only here. */
-let SHOOT = { auth: '', data: null, state: '', tab: 'overview', comp: '', note: '', edit: null, rkey: null };
+let SHOOT = { auth: '', data: null, state: '', note: '', edit: null, rkey: null, pbOpen: false, from: '', until: '' };
+/* v3.4.0: the competition shown and the Log's view (By date | By type | All) and type are remembered on this phone, as Results does */
+const SHOOT_MODES = [['date', 'By date'], ['type', 'By type'], ['all', 'All']];
+const SHOOT_PREF = (() => {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('ot:shootView')); } catch (e) { /* storage blocked */ }
+  saved = saved || {};
+  return { mode: SHOOT_MODES.some(m => m[0] === saved.mode) ? saved.mode : 'all', type: saved.type || '', comp: saved.comp || '' };
+})();
+function saveShootPref() { try { localStorage.setItem('ot:shootView', JSON.stringify(SHOOT_PREF)); } catch (e) { /* storage blocked */ } }
 async function loadShooting() {
   const auth = meAuth();
   if (SHOOT.state === 'loading' && SHOOT.auth === auth) return;
-  if (SHOOT.auth !== auth) SHOOT = { auth, data: null, state: '', tab: SHOOT.tab, comp: '', note: '', edit: null, rkey: null };
+  if (SHOOT.auth !== auth) SHOOT = { auth, data: null, state: '', note: '', edit: null, rkey: null, pbOpen: false, from: '', until: '' };
   SHOOT.state = 'loading';
   try { SHOOT.data = await memberApi('memberShooting'); SHOOT.state = ''; }
   catch (e) { if (e.signedOut) return; SHOOT.state = 'failed'; }
@@ -3226,9 +3235,9 @@ function shootLines() {
   const d = shootData(), only = d && d.handgun.classes.length === 1 ? d.handgun.classes[0].key : '', set = (d && d.rdssClasses) || {};
   const rdss = ME.results.map(r => ({ rdss: true, key: r.key, date: r.date, name: r.competition, place: r.place, score: r.score,
     cls: r['class'], comp: true, pistol: isPistol(r), pc: isPistol(r) ? (set[r.key] || {}).cls || only : '', pcSet: !!set[r.key],
-    accredited: isPistol(r) && !!(set[r.key] || {}).accredited, where: 'RDSS' }));
+    accredited: isPistol(r) && !!(set[r.key] || {}).accredited, where: 'RDSS', type: mainDiscipline(r) || 'Other' }));
   const own = d ? d.log.map(s => ({ rdss: false, id: s.id, date: s.date, name: s.what, place: s.place, score: s.score, comp: s.kind === 'Competition',
-    pistol: s.type === 'Pistol', pc: s.type === 'Pistol' ? s.cls || only : '', accredited: !!s.accredited, where: s.club, type: s.type, kind: s.kind })) : [];
+    pistol: s.type === 'Pistol', pc: s.type === 'Pistol' ? s.cls || only : '', accredited: !!s.accredited, where: s.club, type: DISCIPLINES.includes(s.type) ? s.type : 'Other', kind: s.kind })) : [];
   return rdss.concat(own).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
 }
 const sameComp = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
@@ -3259,24 +3268,26 @@ function classRank(comp) {
   const avg = [...totals.entries()].map(([who, t]) => ({ who, avg: t.sum / t.n })).sort((a, b) => b.avg - a.avg);
   return `${placeLabel(avg.findIndex(a => a.who === me) + 1)} of ${avg.length} in Class ${esc(cls)} this year`;
 }
-/* A small line chart: the scores in one competition (last 12), a dashed trend line, and the best one marked */
-function shootChart(comp) {
-  const pts = comp.points.slice(-12), W = 300, H = 120, pad = { l: 10, r: 14, t: 22, b: 12 };
-  const ys = pts.map(p => p.score), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
-  const x = i => pts.length < 2 ? W / 2 : pad.l + i * (W - pad.l - pad.r) / (pts.length - 1);
+/* A small line chart: the scores in one competition (last 12), a faint dashed line for the average, and the best one marked
+   in green. The words under it ("Trending up") still come from the trend. With one score: just the point. */
+function shootChart(comp, avg) {
+  const pts = comp.points.slice(-12), W = 300, H = 120, pad = { l: 10, r: 32, t: 22, b: 12 }, one = pts.length < 2;
+  const ys = pts.map(p => p.score), lo = Math.min(...ys, one ? ys[0] : avg), hi = Math.max(...ys, one ? ys[0] : avg), span = hi - lo || 1;
+  const x = i => one ? (W - pad.r + pad.l) / 2 : pad.l + i * (W - pad.l - pad.r) / (pts.length - 1);
   const y = v => hi === lo ? (H + pad.t - pad.b) / 2 : pad.t + (hi - v) * (H - pad.t - pad.b) / span;
-  const best = ys.indexOf(Math.max(...ys)), newPb = best === pts.length - 1 && pts.length > 1;
-  let trend = '', slope = 0;
+  const best = ys.indexOf(Math.max(...ys)), newPb = best === pts.length - 1 && !one;
+  let slope = 0;
   if (pts.length >= 3) {
     const n = pts.length, mx = (n - 1) / 2, my = ys.reduce((a, b) => a + b, 0) / n;
     slope = ys.reduce((a, v, i) => a + (i - mx) * (v - my), 0) / ys.reduce((a, _, i) => a + (i - mx) ** 2, 0);
-    trend = `<line class="sc-trend" x1="${x(0)}" y1="${y(my - slope * mx)}" x2="${x(n - 1)}" y2="${y(my + slope * mx)}"/>`;
   }
-  const bx = x(best), anchor = bx > W - 60 ? 'end' : bx < 60 ? 'start' : 'middle';
-  const svg = `<svg class="shoot-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(comp.name)}: scores ${pts.map(p => p.score).join(', ')}, oldest first">
-    ${trend}<polyline class="sc-line" points="${pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')}"/>
-    ${pts.map((p, i) => `<circle class="sc-dot" cx="${x(i)}" cy="${y(p.score)}" r="4"/>`).join('')}
-    <text class="sc-pb" x="${bx}" y="${y(ys[best]) - 9}" text-anchor="${anchor}">${newPb ? 'New PB' : 'PB'} ${ys[best]}</text></svg>`;
+  const avgLine = one ? '' : `<line class="sc-avg" x1="${pad.l}" y1="${y(avg)}" x2="${W - pad.r}" y2="${y(avg)}"/><text class="sc-avg-label" x="${W - pad.r + 5}" y="${y(avg) + 4}">Avg</text>`;
+  const bx = x(best), anchor = bx > W - 70 ? 'end' : bx < 60 ? 'start' : 'middle';
+  const svg = `<svg class="shoot-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(comp.name)}: scores ${pts.map(p => p.score).join(', ')}, oldest first. Best ${ys[best]}${one ? '' : ', average ' + Math.round(avg * 10) / 10}">
+    ${avgLine}${one ? '' : `<polyline class="sc-line" points="${pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')}"/>`}
+    ${pts.map((p, i) => i === best ? '' : `<circle class="sc-dot" cx="${x(i)}" cy="${y(p.score)}" r="4"/>`).join('')}
+    <circle class="sc-dot-pb" cx="${bx}" cy="${y(ys[best])}" r="5.5"/>
+    <text class="sc-pb" x="${bx}" y="${y(ys[best]) - 10}" text-anchor="${anchor}">${newPb ? 'New PB' : 'PB'} ${ys[best]}</text></svg>`;
   const spread = span / Math.max(1, Math.abs(hi));
   const words = pts.length < 3 ? '' : Math.abs(slope) < Math.max(0.05, spread * Math.abs(hi) * 0.02) ? 'Holding steady' : slope > 0 ? 'Trending up' : 'Trending down';
   return { svg, words };
@@ -3338,31 +3349,64 @@ function handgunBreakdown(lines, need, d) {
     ${need.partYear ? '<p class="muted">Part-year with several classes: please check your exact numbers with QPS Weapons Licensing.</p>' : ''}
     <p class="muted">A guide only. Only one shoot a day counts. Keep your own participation record signed by a range officer.</p></div>`;
 }
-function shootOverview(lines, d) {
-  const from = fyStart(), year = lines.filter(l => l.comp && l.date >= from);
-  const comps = scoredComps(lines), comp = comps.find(c => sameComp(c.name, SHOOT.comp)) || comps.find(c => c.points.length > 1) || comps[0];
-  const avg = comp ? comp.points.reduce((a, p) => a + p.score, 0) / comp.points.length : null;
-  const tile = (n, label) => `<div class="card shoot-stat"><b>${n}</b><span>${label}</span></div>`;
-  const stats = `<div class="shoot-stats">${tile(year.length, `total competition${year.length === 1 ? '' : 's'} this year`)}${tile(avg === null ? '–' : Math.round(avg * 10) / 10, comp ? 'average, ' + esc(comp.name) : 'average')}${tile(year.filter(l => [1, 2, 3].includes(Number(l.place))).length, 'podiums this year')}</div>`;
-  let chart = '';
-  if (comp) {
-    const ch = shootChart(comp), rank = classRank(comp);
-    chart = `<div class="card shoot-chart-card" id="shootChart">
-      <div class="shoot-chart-head"><h2 class="list-title">${esc(comp.name)}</h2>
-        ${comps.length > 1 ? `<label class="shoot-change"><span>Change</span><select data-shoot-comp aria-label="Which competition to show">${comps.map(c => `<option value="${esc(c.name)}"${c === comp ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}</div>
-      ${comp.points.length > 1 ? ch.svg : `<p class="muted">One score so far: ${comp.points[0].score}. Shoot it again to see how you're going.</p>`}
-      ${ch.words || rank ? `<p class="muted">${[ch.words, rank].filter(Boolean).join(' · ')}</p>` : ''}</div>`;
-  }
-  const bests = comps.map(c => c.points.reduce((b, p) => p.score > b.score ? p : b)).map((p, i) => ({ ...p, comp: comps[i] })).sort((a, b) => a.date < b.date ? 1 : -1);
-  const pbs = bests.length ? `<section class="section"><h2 class="sp-head">Personal bests</h2><div class="card list">${bests.map(b => `
-      <button type="button" class="menu-row pb-row" data-shoot-pb="${esc(b.comp.name)}"><span class="pb-ico">${ICON.trophy}</span>
-        <span class="row-text">${esc(b.comp.name)}<span class="muted">${b.score} · ${esc(shortDate(b.date))} ${b.date.slice(0, 4)}${b.line.rdss ? '' : ' · ' + esc(b.line.where)}</span></span>${ICON.chev}</button>`).join('')}</div></section>` : '';
-  const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/licence"><span class="tile-ico">${ICON.card}</span><span class="row-text">Handgun shoots and pistol card<span class="muted">In ${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} licence</span></span>${ICON.chev}</a>` : '';
-  return `<section class="section shoot-over">${lic}${lines.length ? stats + chart : ''}</section>${pbs}`;
+/* My shooting (v3.4.0), one page: Pistol card, this calendar year's competitions and podiums, one competition analysed,
+   personal bests (folded away), then the Log */
+const medal = (n, count) => `<span class="medal-n"><span class="medal medal-${n}" aria-hidden="true">${n}</span><span class="sr-only">${placeLabel(n)}: </span>${count}</span>`;
+function shootSummary(lines) {
+  const year = String(new Date().getFullYear()), comps = lines.filter(l => l.comp && l.date.slice(0, 4) === year);
+  const at = n => comps.filter(l => parseInt(l.place, 10) === n).length, pods = at(1) + at(2) + at(3);
+  return `<div class="shoot-stats shoot-sum">
+    <div class="card shoot-stat"><b>${comps.length}</b><span>Competitions this year</span></div>
+    <div class="card shoot-stat"><b>${pods}</b><span>Podiums this year</span><span class="medals">${medal(1, at(1))}${medal(2, at(2))}${medal(3, at(3))}</span></div></div>`;
 }
-function shootLog(lines, d) {
+const NO_COMP_STATS = 'No competition results yet. Enter a comp and your stats will appear here.';
+function shootAnalysis(comps) {
+  if (!comps.length) return `<section class="section"><h2 class="sp-head">Competition analysis</h2><div class="card empty">
+    <p class="muted">${NO_COMP_STATS}</p><a class="btn btn-outline" href="#/comps">${ICON.trophy}Enter a comp</a></div></section>`;
+  // Their remembered choice, else the competition they've shot most (the most recent of those)
+  const most = comps.reduce((m, c) => c.points.length > m.points.length ? c : m, comps[0]);
+  const comp = comps.find(c => sameComp(c.name, SHOOT_PREF.comp)) || most, pts = comp.points, one = pts.length < 2;
+  const avg = pts.reduce((a, p) => a + p.score, 0) / pts.length, best = pts.reduce((b, p) => p.score > b.score ? p : b), last = pts[pts.length - 1];
+  const round = v => Math.round(v * 10) / 10, when = iso => `${shortDate(iso)} ${iso.slice(2, 4)}`;
+  const arrow = one || last.score === avg ? '' : last.score > avg ? `<span class="trend-up" aria-label="above average">▲</span>` : `<span class="trend-down" aria-label="below average">▼</span>`;
+  const box = (n, label, sub) => `<div class="card shoot-stat"><b>${n}</b><span>${label}</span>${sub ? `<span class="stat-sub">${sub}</span>` : ''}</div>`;
+  const ch = shootChart(comp, avg), rank = classRank(comp);
+  return `<section class="section shoot-an"><h2 class="sp-head">Competition analysis</h2>
+    ${comps.length > 1 ? `<label class="field-label" for="shootComp">Competition</label>
+      <select class="field" id="shootComp" data-shoot-comp>${comps.map(c => `<option value="${esc(c.name)}"${c === comp ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`
+      : `<div class="list-title shoot-one-comp">${esc(comp.name)}</div>`}
+    <div class="shoot-stats">${box(round(avg), 'Average score')}${box(best.score, 'Personal best', when(best.date))}${box(`${last.score}${arrow}`, 'Last score', when(last.date))}</div>
+    <div class="card shoot-chart-card" id="shootChart">${ch.svg}
+      ${ch.words || rank ? `<p class="muted">${[ch.words, rank].filter(Boolean).join(' · ')}</p>` : ''}
+      ${one ? `<p class="muted">One score so far. Shoot it again to see how you're going.</p>` : ''}</div></section>`;
+}
+function shootBests(comps) {
+  if (!comps.length) return '';
+  const bests = comps.map(c => ({ ...c.points.reduce((b, p) => p.score > b.score ? p : b), comp: c })).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  return `<section class="section"><div class="card pb-box">
+    <button type="button" class="menu-row pb-head" data-shoot-pbs aria-expanded="${SHOOT.pbOpen}" aria-controls="pbList"><span class="pb-ico">${ICON.trophy}</span>
+      <span class="row-text">Personal bests (${bests.length})</span>${ICON.chev}</button>
+    <div class="pb-list" id="pbList"${SHOOT.pbOpen ? '' : ' hidden'}>${bests.map(b => `
+      <button type="button" class="menu-row pb-row" data-shoot-pb="${esc(b.comp.name)}"><span class="row-text">${esc(b.comp.name)}<span class="muted">${esc(shortDate(b.date))} ${b.date.slice(0, 4)}${b.line.rdss ? '' : ' · ' + esc(b.line.where)}</span></span>
+        <b class="pb-score">${b.score}</b></button>`).join('')}</div></div></section>`;
+}
+function shootLog(all, d) {
   const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
   const c = CLAIMS.auth === meAuth() ? CLAIMS.data : null;
+  // v3.4.0: By date (From–Until, this year so far to start with) | By type (the types they've logged) | All
+  const mode = SHOOT_PREF.mode, rank = t => { const i = RES_TYPE_ORDER.indexOf(t); return i < 0 ? 99 : i; };
+  const types = [...new Set(all.map(l => l.type))].sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
+  if (mode === 'type' && !types.includes(SHOOT_PREF.type)) SHOOT_PREF.type = types[0] || '';
+  if (!SHOOT.from) SHOOT.from = new Date().getFullYear() + '-01-01';
+  if (!SHOOT.until) SHOOT.until = todayIso();
+  const lines = mode === 'date' ? all.filter(l => l.date >= SHOOT.from && l.date <= SHOOT.until) : mode === 'type' ? all.filter(l => l.type === SHOOT_PREF.type) : all;
+  const filters = !all.length ? '' : `<div class="seg" role="group" aria-label="How to show the log">${SHOOT_MODES.map(m => `
+      <button type="button" data-shoot-mode="${m[0]}" aria-pressed="${mode === m[0]}">${m[1]}</button>`).join('')}</div>
+    ${mode === 'date' ? `<div class="time-pair shoot-dates"><div><label class="field-label" for="shFrom">From</label>${dateField('shFrom', SHOOT.from)}</div>
+      <div><label class="field-label" for="shUntil">Until</label>${dateField('shUntil', SHOOT.until)}</div></div>`
+    : mode === 'type' ? `<div class="chips" role="group" aria-label="Type of shoot">${types.map(t => `
+      <button type="button" class="chip-btn" data-shoot-type="${esc(t)}" aria-pressed="${t === SHOOT_PREF.type}">${esc(t)}</button>`).join('')}</div>` : ''}
+    <p class="muted rv-count">${lines.length} shoot${lines.length === 1 ? '' : 's'}</p>`;
   const byYear = {};
   lines.forEach(l => { (byYear[l.date.slice(0, 4)] = byYear[l.date.slice(0, 4)] || []).push(l); });
   const row = l => {
@@ -3374,7 +3418,8 @@ function shootLog(lines, d) {
     return ME.canClaim && l.key ? `<button type="button" class="menu-row log-row" data-unlink="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}, at RDSS. Tap if it isn't ${other ? who + "'s" : 'yours'}.">${main}</button>` : `<div class="menu-row log-row">${main}</div>`;
   };
   const add = can ? `<a class="shoot-add" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : '';
-  const list = lines.length ? Object.keys(byYear).sort().reverse().map(y => `<h2 class="sp-head">${y}</h2><div class="card list">${byYear[y].map(row).join('')}</div>`).join('')
+  const list = lines.length ? Object.keys(byYear).sort().reverse().map(y => `<h3 class="sp-head shoot-year">${y}</h3><div class="card list">${byYear[y].map(row).join('')}</div>`).join('')
+    : all.length ? `<div class="card empty"><p class="muted">${mode === 'date' ? 'No shoots between those dates.' : 'No shoots of that type.'}</p></div>`
     : `<div class="card empty"><div class="empty-title">Nothing here yet</div><p class="muted">${other ? who + "'s" : 'Your'} results at RDSS show here by themselves.${can ? ' Shot somewhere else? Add it above.' : ''}</p></div>`;
   const waiting = c && c.waiting ? `<p class="muted">${c.waiting === 1 ? '1 result' : c.waiting + ' results'} ${other ? who : 'you'} claimed ${c.waiting === 1 ? 'is' : 'are'} with the club team to check.</p>` : '';
   const claims = !ME.canClaim ? '' : c && c.items.length ? `
@@ -3389,33 +3434,24 @@ function shootLog(lines, d) {
       </div>`).join('')}</div>
     ${c.more ? `<p class="muted">And ${c.more} more. They show here as you go through these.</p>` : ''}`
     : CLAIMS.state === 'loading' && CLAIMS.auth === meAuth() ? skeletonRows(1) : '';
-  const unlinkTip = ME.canClaim && lines.some(l => l.rdss) ? `<p class="muted">${can && lines.some(l => l.rdss && l.pistol) ? 'Tap an RDSS pistol result to set the class of pistol. ' : ''}An RDSS result here that isn't ${other ? who + "'s" : 'yours'}? Tap it to take it off.</p>` : '';
-  return `<section class="section shoot-log">${add}${list}${unlinkTip}${waiting}${claims}
+  const unlinkTip = ME.canClaim && all.some(l => l.rdss) ? `<p class="muted">${can && all.some(l => l.rdss && l.pistol) ? 'Tap an RDSS pistol result to set the class of pistol. ' : ''}An RDSS result here that isn't ${other ? who + "'s" : 'yours'}? Tap it to take it off.</p>` : '';
+  return `<section class="section shoot-log"><h2 class="sp-head">Log</h2>${filters}${add}${list}${unlinkTip}${waiting}${claims}
     <p class="muted shoot-foot">Shoots at other clubs are ${other ? who + "'s" : 'your'} own record. Those clubs keep the official one.</p></section>`;
 }
 function meResults() {
   const other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
   if (ME.canClaim && (CLAIMS.auth !== meAuth() || (!CLAIMS.data && !CLAIMS.state))) setTimeout(loadClaims, 0);
   if (SHOOT.auth !== meAuth() || (!SHOOT.data && !SHOOT.state)) setTimeout(loadShooting, 0);
-  const d = shootData(), lines = shootLines(), tab = SHOOT.tab;
+  const d = shootData(), lines = shootLines(), comps = d ? scoredComps(lines) : [];
   const note = (CLAIMS.note && CLAIMS.auth === meAuth() ? CLAIMS.note : '') || SHOOT.note;
-  const seg = `<div class="seg" role="group" aria-label="What to show">${[['overview', 'Overview'], ['log', 'Log']].map(t => `
-    <button type="button" data-shoot-tab="${t[0]}" aria-pressed="${tab === t[0]}">${t[1]}</button>`).join('')}</div>`;
-  const next = events().find(e => /competition/i.test(e.discipline || ''));
+  const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/licence"><span class="tile-ico">${ICON.card}</span><span class="row-text">Pistol card<span class="muted">In ${other ? who + "'s" : 'My'} licence</span></span>${ICON.chev}</a>` : '';
   const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
     : !d ? `<section class="section">${skeletonRows(3)}</section>`
-    : tab === 'log' ? shootLog(lines, d)
-    : shootOverview(lines, d);
-  const none = d && !lines.length && tab === 'overview' ? `<section class="section"><div class="card empty">
-      <div class="empty-title">No competition results yet</div>
-      <p class="muted">Fancy having a go? ${next ? `Next competition: ${esc(shortDate(next.date))}${next.start ? ', ' + esc(niceTime(next.start) || next.start) : ''}. ` : ''}All levels welcome.</p>
-      <a class="btn btn-outline" href="#/events">${ICON.calendar}See what's on</a>
-    </div></section>` : '';
+    : `<section class="section shoot-over">${lic}${shootSummary(lines)}</section>${shootAnalysis(comps)}${shootBests(comps)}${shootLog(lines, d)}`;
   return `
     <div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} shooting</h1>${viewingLine()}</div>
     ${note ? `<section class="section"><p class="notice" role="status">${esc(note)}</p></section>` : ''}
-    <section class="section">${seg}</section>
-    ${body}${none}`;
+    ${body}`;
 }
 /* Pistol attendance card (v3.0.1): laid out like the paper card, one financial year at a time, newest first.
    RDSS results fill in by themselves; shoots elsewhere are the member's own entries. Only one shoot a day counts. */
@@ -3502,7 +3538,7 @@ async function saveShoot(form) {
   error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
   try {
     SHOOT.data = await memberApi('memberShootSave', [s]);
-    SHOOT.note = s.id ? 'Saved.' : 'Added to the log.'; SHOOT.tab = 'log'; SHOOT.edit = null;
+    SHOOT.note = s.id ? 'Saved.' : 'Added to the log.'; SHOOT.edit = null;
     form.remove(); go('#/me/results');
   } catch (e) {
     if (e.signedOut) return;
@@ -3515,7 +3551,7 @@ function askRemoveShoot() {
   if (!s) return;
   confirmAsk({ title: 'Remove this shoot?', text: `${s.what}, ${shortDate(s.date)}, ${s.club}. It comes off the log.`,
     yes: 'Yes, remove it', busy: 'Removing…', no: 'No, keep it', run: () => memberApi('memberShootRemove', [s.id]),
-    done: out => { SHOOT.data = out; SHOOT.note = 'Removed.'; SHOOT.tab = 'log'; SHOOT.edit = null; const f = document.getElementById('shootForm'); if (f) f.remove(); go('#/me/results'); } });
+    done: out => { SHOOT.data = out; SHOOT.note = 'Removed.'; SHOOT.edit = null; const f = document.getElementById('shootForm'); if (f) f.remove(); go('#/me/results'); } });
 }
 /* The class of pistol on one of their RDSS results (#/me/rclass, v3.0.2): the member's own record, the result itself is unchanged */
 function resultClassView() {
@@ -3713,9 +3749,11 @@ view.addEventListener('change', e => {
 view.addEventListener('submit', e => { if (e.target.id === 'licForm') { e.preventDefault(); saveLicence(e.target); } });
 view.addEventListener('click', e => {
   const t = e.target;
-  const tab = t.closest('[data-shoot-tab]'), pb = t.closest('[data-shoot-pb]'), ed = t.closest('[data-shoot-edit]');
-  if (tab) { SHOOT.tab = tab.dataset.shootTab; SHOOT.note = ''; CLAIMS.note = ''; render(true); view.querySelector(`[data-shoot-tab="${SHOOT.tab}"]`).focus(); }
-  if (pb) { SHOOT.comp = pb.dataset.shootPb; render(true); const c = document.getElementById('shootChart'); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+  const pb = t.closest('[data-shoot-pb]'), ed = t.closest('[data-shoot-edit]'), mode = t.closest('[data-shoot-mode]'), type = t.closest('[data-shoot-type]');
+  if (t.closest('[data-shoot-pbs]')) { SHOOT.pbOpen = !SHOOT.pbOpen; render(true); const h = view.querySelector('[data-shoot-pbs]'); if (h) h.focus(); }
+  if (pb) { SHOOT_PREF.comp = pb.dataset.shootPb; saveShootPref(); render(true); const c = document.getElementById('shootChart'); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+  if (mode) { SHOOT_PREF.mode = mode.dataset.shootMode; saveShootPref(); render(true); const b = view.querySelector(`[data-shoot-mode="${SHOOT_PREF.mode}"]`); if (b) b.focus(); }
+  if (type) { SHOOT_PREF.type = type.dataset.shootType; saveShootPref(); render(true); const b = view.querySelector(`[data-shoot-type="${CSS.escape(SHOOT_PREF.type)}"]`); if (b) b.focus(); }
   if (ed) { SHOOT.edit = ed.dataset.shootEdit; go('#/me/shoot'); }
   if (t.closest('[data-shoot-reload]')) { SHOOT.state = ''; SHOOT.data = null; render(true); }
   if (t.closest('[data-shoot-remove]')) askRemoveShoot();
@@ -3729,7 +3767,13 @@ view.addEventListener('change', e => {
   if (e.target.name === 'shClass') document.getElementById('shAccWrap').hidden = e.target.value !== 'C';
   if (e.target.name === 'rcClass') document.getElementById('rcAccWrap').hidden = e.target.value !== 'C';
 });
-view.addEventListener('change', e => { if (e.target.matches('[data-shoot-comp]')) { SHOOT.comp = e.target.value; render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); } });
+view.addEventListener('change', e => {
+  if (e.target.matches('[data-shoot-comp]')) { SHOOT_PREF.comp = e.target.value; saveShootPref(); render(true); const s = view.querySelector('[data-shoot-comp]'); if (s) s.focus(); }
+  // The Log's From and Until: an emptied box goes back to this year so far
+  if ((e.target.id === 'shFrom' || e.target.id === 'shUntil') && currentPage === 'me/results') {
+    SHOOT[e.target.id === 'shFrom' ? 'from' : 'until'] = e.target.value; render(true);
+  }
+});
 view.addEventListener('submit', e => {
   if (e.target.id === 'shootForm') { e.preventDefault(); saveShoot(e.target); }
   if (e.target.id === 'rcForm') {
