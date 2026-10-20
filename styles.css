@@ -968,3 +968,24 @@ button.menu-row[disabled] { opacity: .6; cursor: default; }
 .shoot-dates { margin-bottom: 4px; }
 .shoot-year { margin-top: 14px; }
 .shoot-chart-card .shoot-chart { max-width: 560px; margin-left: auto; margin-right: auto; } /* stays a sensible size on a laptop */
+
+/* Achievements (v3.5.0): 3 across on a phone, 5 on a wider screen; badges not earned yet are greyed */
+.badge-card { padding: 14px 12px; }
+.badge-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+@media (min-width: 640px) { .badge-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.badge-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 10px; min-height: 44px; border: 0; border-radius: 12px; background: none; color: var(--text); cursor: pointer; font: inherit; text-align: center; }
+.badge-tile[aria-expanded="true"] { background: var(--tint); }
+.badge-svg { width: 60px; height: 60px; display: block; }
+svg.badge-svg { stroke: none; } /* not the outline every other icon gets */
+.badge-svg .bg-fill { fill: var(--ink); }
+.badge-off .badge-svg { filter: grayscale(1); opacity: .38; }
+.badge-name { font: 600 13.5px/1.25 Poppins, sans-serif; }
+.badge-off .badge-name { color: var(--text-2); }
+.badge-hint { font-size: 12px; line-height: 1.3; color: var(--text-3); }
+.badge-new { position: absolute; top: 4px; right: 50%; margin-right: -40px; background: var(--crimson); color: #fff; font: 700 11px/1 Poppins, sans-serif; padding: 4px 7px; border-radius: 10px; }
+.badge-sub { font: 700 12.5px Poppins, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin: 14px 4px 6px; }
+.badge-empty { margin: 4px 4px 0; text-align: center; }
+.badge-info { display: flex; gap: 14px; align-items: flex-start; margin: 8px 4px 4px; padding: 12px; border-radius: 12px; background: var(--tint); }
+.badge-info .badge-svg { flex: 0 0 56px; width: 56px; height: 56px; }
+.badge-info .muted { margin: 2px 0 0; }
+.badge-when { margin: 6px 0 0; font-weight: 600; font-size: 14px; color: var(--heading); }

@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.5.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -1907,7 +1907,7 @@ function render(quiet) {
     if (page !== 'committee/person') personEdit = null;
     if (page !== 'committee/signups') { ADMIN.signNote = ''; ADMIN.signups = null; ADMIN.signState = ''; }
     if (page !== 'me/details') meNote = '';
-    if (page !== 'me/results') { CLAIMS.note = ''; SHOOT.note = ''; }
+    if (page !== 'me/results') { CLAIMS.note = ''; SHOOT.note = ''; SHOOT.badgeFor = ''; SHOOT.badge = ''; }
     if (page !== 'me/shoot' && page !== 'me/results') SHOOT.edit = null;
     if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
     if (page !== 'committee/entries') ROSTER = { data: null, state: '' };
@@ -3390,6 +3390,121 @@ function shootBests(comps) {
       <button type="button" class="menu-row pb-row" data-shoot-pb="${esc(b.comp.name)}"><span class="row-text">${esc(b.comp.name)}<span class="muted">${esc(shortDate(b.date))} ${b.date.slice(0, 4)}${b.line.rdss ? '' : ' · ' + esc(b.line.where)}</span></span>
         <b class="pb-score">${b.score}</b></button>`).join('')}</div></div></section>`;
 }
+/* Achievements (v3.5.0): badges worked out from what On Target already holds, never awarded by hand, except an
+   occasion an admin marks (AWARD_BADGES, kept by the server). Earned ones in colour; the rest greyed under "Still to earn".
+   Firsts and milestones only, each dated the first time it was earned. They are worked out afresh every time, so a result
+   corrected or taken off changes them by itself. Shooting days are counted as the Pistol card counts them: one per date,
+   however many results and shoots that day. Pistol Card Complete is the one that repeats: one badge listing each licence
+   year met. "New" shows on a badge (or a new year of it) the first time My shooting is opened after it was earned; the ids
+   seen are kept on the phone. */
+const AWARD_BADGES = { openday2026: 'Open Day 2026' };
+const BADGES = [
+  { id: 'first', name: 'First Shot', what: 'Your first shoot in On Target.', hint: 'Log your first shoot', look: 'maroon', glyph: 'target' },
+  { id: 'regular', name: 'Regular', what: '10 shooting days logged.', hint: 'Shoot on 10 days', look: 'maroon', glyph: '10', goal: 10 },
+  { id: 'dedicated', name: 'Dedicated', what: '50 shooting days logged.', hint: 'Shoot on 50 days', look: 'maroon', glyph: '50', goal: 50 },
+  { id: 'competitor', name: 'Competitor', what: 'Your first competition.', hint: 'Enter your first competition', look: 'maroon', glyph: 'trophy' },
+  { id: 'podium', name: 'Podium', what: 'Your first top-3 finish in a competition.', hint: 'Finish in the top 3', look: 'bronze', glyph: 'podium' },
+  { id: 'champion', name: 'Champion', what: 'Your first win: 1st place in a competition.', hint: 'Win a competition', look: 'gold', glyph: 'star' },
+  { id: 'pb', name: 'Personal Best', what: 'The first time you beat your own best score in a competition.', hint: 'Beat your best score in a comp', look: 'silver', glyph: 'up' },
+  { id: 'allround', name: 'All-Rounder', what: 'Competed in 3 types of competition (Pistol, Rifle, Clay or Other).', hint: 'Compete in 3 types', look: 'maroon', glyph: 'three', goal: 3 },
+  { id: 'pistol', name: 'Pistol Card Complete', what: 'Met the pistol licence requirement for a licence year (1 July to 30 June), worked out the same way as My licence. Earned again each year you meet it.', hint: "Meet a year's pistol requirement", look: 'maroon', glyph: 'card' },
+  { id: 'openday2026', name: 'Open Day 2026', what: 'Came along to the club’s 2026 Open Day. Marked by the club.', hint: 'Come to the 2026 Open Day', look: 'gold', glyph: 'flag' }
+];
+const BADGE_LOOK = { maroon: ['#5C0F1F', '#7A1A2E', '#E9B44C'], gold: ['#A97A22', '#E9B44C', '#5C0F1F'], silver: ['#7D838B', '#C9CDD3', '#3A3F45'], bronze: ['#8A5528', '#CD8B4E', '#3A1E0A'] };
+const BADGE_GLYPH = {
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" class="bg-fill"/>',
+  trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  podium: '<path d="M2.5 20.5h19M9 20.5V8.5h6v12M3 20.5v-7h6M15 20.5v-5h6v5"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+  up: '<path d="M3 18l6-6 4 4 8-8M15 8h6v6"/>',
+  three: '<circle cx="12" cy="6.5" r="3.5"/><circle cx="6" cy="16.5" r="3.5"/><circle cx="18" cy="16.5" r="3.5"/>',
+  card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/>',
+  flag: '<path d="M6 21V3.5M6 4h11l-2.5 4.5L17 13H6"/>'
+};
+function badgeSvg(b) {
+  const [ring, inner, ink] = BADGE_LOOK[b.look], g = BADGE_GLYPH[b.glyph];
+  const mark = g ? `<g transform="translate(17 17) scale(1.25)" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="--ink:${ink}">${g}</g>`
+    : `<text x="32" y="39" text-anchor="middle" fill="${ink}" font-family="Montserrat, sans-serif" font-weight="800" font-size="19">${b.glyph}</text>`;
+  return `<svg class="badge-svg" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="${ring}"/><circle cx="32" cy="32" r="25" fill="${inner}" stroke="#E9B44C" stroke-width="1.5" stroke-opacity=".7"/>${mark}</svg>`;
+}
+/* Whole months a class is held in licence year fy (1 July fy to 30 June fy+1), as the server works it out for this year
+   (licenceMonths_): 12 if obtained before 1 July. A class saved without a date: its months this year, 12 in earlier years. */
+function classMonths(c, fy) {
+  if (!c.since) return fy === financialYear().from ? c.months : 12;
+  if (c.since <= fy + '-07-01') return 12;
+  const y = Number(c.since.slice(0, 4)), m = Number(c.since.slice(5, 7)), d = Number(c.since.slice(8, 10));
+  return Math.max(0, Math.min(12, (fy + 1 - y) * 12 + (7 - m) - (d > 1 ? 1 : 0)));
+}
+/* {got: {badge id: date first earned}, pistolYears: [{fy, date}], counts} */
+function badgesEarned(lines, d) {
+  const asc = lines.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0), comps = asc.filter(l => l.comp), got = {};
+  const first = (list, test) => { const l = list.find(test); return l ? l.date : ''; };
+  const days = [...new Set(asc.map(l => l.date))]; // one per date, as the Pistol card counts
+  if (days[0]) got.first = days[0];
+  if (days[9]) got.regular = days[9];
+  if (days[49]) got.dedicated = days[49];
+  if (comps[0]) got.competitor = comps[0].date;
+  got.podium = first(comps, l => [1, 2, 3].includes(parseInt(l.place, 10)));
+  got.champion = first(comps, l => parseInt(l.place, 10) === 1);
+  const bestSoFar = new Map();  // a score better than an earlier one in the same competition
+  got.pb = first(comps, l => {
+    const sc = scoreNumber(l.score), k = String(l.name).trim().toLowerCase();
+    if (sc === null) return false;
+    const was = bestSoFar.get(k);
+    if (was === undefined || sc > was) bestSoFar.set(k, sc);
+    return was !== undefined && sc > was;
+  });
+  const types = new Set();
+  got.allround = first(comps, l => { types.add(l.type); return types.size >= 3; });
+  // Each licence year: the handgun card's rule (My licence), one shoot a day, against shootsNeeded for the classes held that year
+  const hg = d && d.handgun, pistolYears = [];
+  if (hg && hg.classes.length && !hg.noAttend) {
+    const fyOf = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1), byYear = new Map();
+    asc.filter(l => l.pistol).forEach(l => { const y = fyOf(l.date), m = byYear.get(y) || new Map(); m.set(l.date, m.get(l.date) || l.comp); byYear.set(y, m); });
+    [...byYear.keys()].sort().forEach(fy => {
+      const held = hg.classes.map(c => ({ key: c.key, months: classMonths(c, fy) })).filter(c => c.months > 0), need = shootsNeeded(held);
+      if (!held.length || !need.total) return;
+      let done = 0, nComp = 0;
+      for (const [date, comp] of byYear.get(fy)) { done++; if (comp) nComp++; if (done >= need.total && nComp >= need.competitions) { pistolYears.push({ fy, date }); break; } }
+    });
+    if (pistolYears.length) got.pistol = pistolYears[0].date;
+  }
+  ((d && d.awards) || []).forEach(a => { if (AWARD_BADGES[a.id]) got[a.id] = a.date || ''; });
+  Object.keys(got).forEach(k => { if (!got[k]) delete got[k]; });
+  return { got, pistolYears, counts: { regular: days.length, dedicated: days.length, allround: new Set(comps.map(l => l.type)).size } };
+}
+const fyLabel = fy => `${fy}–${String(fy + 1).slice(2)}`;
+/* A short key for whose badges these are on this phone (not the email itself) */
+const badgeOwner = () => { const t = String((ME && ME.email) || '') + '|' + ((ME && ME.viewing && ME.viewing.key) || ''); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h.toString(36); };
+function badgesNew(got, pistolYears) {
+  const owner = badgeOwner();
+  if (SHOOT.badgeFor === owner) return SHOOT.badgeNew;
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem('ot:badgesSeen')) || {}; } catch (e) { /* storage blocked */ }
+  const had = seen[owner] || [], ids = Object.keys(got).concat(pistolYears.map(y => 'pistol:' + y.fy)); // a new year of Pistol Card Complete is new too
+  SHOOT.badgeFor = owner; SHOOT.badgeNew = ids.filter(id => !had.includes(id)).map(id => id.split(':')[0]);
+  seen[owner] = ids;
+  try { localStorage.setItem('ot:badgesSeen', JSON.stringify(seen)); } catch (e) { /* storage blocked */ }
+  return SHOOT.badgeNew;
+}
+function shootBadges(lines, d) {
+  const { got, counts, pistolYears } = badgesEarned(lines, d), fresh = badgesNew(got, pistolYears);
+  const years = pistolYears.map(y => fyLabel(y.fy)).join(', ');
+  const earned = BADGES.filter(b => got[b.id]), still = BADGES.filter(b => !got[b.id]), open = BADGES.find(b => b.id === SHOOT.badge);
+  const hint = b => b.id === 'pistol' && !(d.handgun.classes.length) ? 'For category H licence holders'
+    : b.id === 'pistol' && d.handgun.noAttend ? 'No attendance requirement' : b.goal && counts[b.id] ? `${b.hint} · ${Math.min(counts[b.id], b.goal)} so far` : b.hint;
+  const tile = (b, on) => `<button type="button" class="badge-tile${on ? '' : ' badge-off'}" data-badge="${b.id}" aria-expanded="${SHOOT.badge === b.id}" aria-controls="badgeInfo"
+      aria-label="${esc(b.name)}${on ? ', earned ' + esc(longDate(got[b.id])) : ', not earned yet'}${fresh.includes(b.id) ? ', new' : ''}">
+      ${badgeSvg(b)}${on && fresh.includes(b.id) ? '<span class="badge-new">New</span>' : ''}<span class="badge-name">${esc(b.name)}</span>${on ? (b.id === 'pistol' ? `<span class="badge-hint">${esc(years)}</span>` : '') : `<span class="badge-hint">${esc(hint(b))}</span>`}</button>`;
+  const info = open ? `<div class="badge-info" id="badgeInfo" role="status">${badgeSvg(open)}<div><div class="list-title">${esc(open.name)}</div>
+      <p class="muted">${esc(open.what)}</p><p class="badge-when">${!got[open.id] ? 'Not earned yet: ' + esc(hint(open).toLowerCase())
+        : open.id === 'pistol' ? pistolYears.map(y => `${esc(fyLabel(y.fy))}: earned ${esc(longDate(y.date))}`).join('<br>') : 'Earned ' + esc(longDate(got[open.id]))}</p></div></div>` : '';
+  const grid = list => `<div class="badge-grid">${list.map(b => tile(b, !!got[b.id])).join('')}</div>`;
+  return `<section class="section"><h2 class="sp-head">Achievements</h2><div class="card badge-card">
+    ${earned.length ? grid(earned) : `<p class="muted badge-empty">Log shoots and enter competitions to start earning badges.</p>`}
+    ${open && got[open.id] ? info : ''}
+    ${still.length ? `<h3 class="badge-sub">Still to earn</h3>${grid(still)}${open && !got[open.id] ? info : ''}` : ''}</div></section>`;
+}
 function shootLog(all, d) {
   const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
   const c = CLAIMS.auth === meAuth() ? CLAIMS.data : null;
@@ -3447,7 +3562,7 @@ function meResults() {
   const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/licence"><span class="tile-ico">${ICON.card}</span><span class="row-text">Pistol card<span class="muted">In ${other ? who + "'s" : 'My'} licence</span></span>${ICON.chev}</a>` : '';
   const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
     : !d ? `<section class="section">${skeletonRows(3)}</section>`
-    : `<section class="section shoot-over">${lic}${shootSummary(lines)}</section>${shootAnalysis(comps)}${shootBests(comps)}${shootLog(lines, d)}`;
+    : `<section class="section shoot-over">${lic}${shootSummary(lines)}</section>${shootAnalysis(comps)}${shootBests(comps)}${shootBadges(lines, d)}${shootLog(lines, d)}`;
   return `
     <div class="page-title">${meBack}<h1>${other ? who + "'s" : 'My'} shooting</h1>${viewingLine()}</div>
     ${note ? `<section class="section"><p class="notice" role="status">${esc(note)}</p></section>` : ''}
@@ -3750,6 +3865,8 @@ view.addEventListener('submit', e => { if (e.target.id === 'licForm') { e.preven
 view.addEventListener('click', e => {
   const t = e.target;
   const pb = t.closest('[data-shoot-pb]'), ed = t.closest('[data-shoot-edit]'), mode = t.closest('[data-shoot-mode]'), type = t.closest('[data-shoot-type]');
+  const bd = t.closest('[data-badge]');
+  if (bd) { SHOOT.badge = SHOOT.badge === bd.dataset.badge ? '' : bd.dataset.badge; render(true); const b = view.querySelector(`[data-badge="${SHOOT.badge || bd.dataset.badge}"]`); if (b) b.focus(); }
   if (t.closest('[data-shoot-pbs]')) { SHOOT.pbOpen = !SHOOT.pbOpen; render(true); const h = view.querySelector('[data-shoot-pbs]'); if (h) h.focus(); }
   if (pb) { SHOOT_PREF.comp = pb.dataset.shootPb; saveShootPref(); render(true); const c = document.getElementById('shootChart'); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
   if (mode) { SHOOT_PREF.mode = mode.dataset.shootMode; saveShootPref(); render(true); const b = view.querySelector(`[data-shoot-mode="${SHOOT_PREF.mode}"]`); if (b) b.focus(); }
@@ -5172,6 +5289,17 @@ async function loadMemberAdmin(id) {
   catch (e) { if (e.signedOut) { MEMADMIN.state = ''; return; } MEMADMIN.state = 'failed'; MEMADMIN.error = e.message; }
   if (currentPage === 'committee/member') render(true);
 }
+/* Admins: mark or unmark an occasion badge (v3.5.0), e.g. Open Day 2026 */
+async function awardBadge(btn) {
+  const id = btn.dataset.award, on = !!btn.dataset.awardOn;
+  btn.disabled = true; btn.textContent = on ? 'Marking…' : 'Taking it off…';
+  try {
+    const out = await committeeApi('badgeSet', [MEMADMIN.id, id, on]);
+    if (MEMADMIN.data) MEMADMIN.data.awards = out.awards;
+    MEMADMIN.note = out.message;
+  } catch (e) { if (e.signedOut) return; MEMADMIN.note = e.message; }
+  render(true);
+}
 function memberAdminView(arg) {
   const id = decodeURIComponent(arg || '');
   if (!id) { location.replace('#/committee/members'); return ''; }
@@ -5200,6 +5328,13 @@ function memberAdminView(arg) {
       <p class="form-error" id="kaError" role="alert" hidden></p>
       <button type="submit" class="btn btn-outline btn-big" id="kaSave">Save "Known as"</button>
     </form></section>
+    <section class="section">
+      <div class="section-head"><h2 class="caps-head">Badges</h2></div>
+      <div class="card list">${Object.keys(AWARD_BADGES).map(id => { const has = (d.awards || []).find(a => a.id === id); return `<div class="mem-row"><div class="list-main"><div class="list-title">${esc(AWARD_BADGES[id])}</div>
+        <div class="muted">${has ? 'Marked ' + esc(niceDate(has.date)) : 'Not marked'}</div></div>
+        <button type="button" class="btn btn-outline" data-award="${id}" data-award-on="${has ? '' : '1'}">${has ? 'Take it off' : 'Mark as attended'}</button></div>`; }).join('')}</div>
+      <p class="muted">Shows in their Achievements in My shooting. Every other badge is worked out by On Target.</p>
+    </section>
     <section class="section">
       <div class="section-head"><h2 class="caps-head">Family</h2></div>
       ${fam ? `<p class="muted">${fam.isPrimary ? `${esc(d.name)} pays for this family membership. Everyone in it has the same status.` : fam.primary ? `In ${esc(fam.primary.name)}'s family. <a href="#/committee/member/${encodeURIComponent(fam.primary.id)}">Open ${esc(fam.primary.name)}</a> to add people.` : 'In a family whose paying member can no longer be found.'}</p>
@@ -5420,6 +5555,8 @@ view.addEventListener('click', e => {
   if (hit('data-fam-back')) { FAM.email = ''; render(); }
   if (hit('data-memadmin-reload')) { MEMADMIN.state = ''; render(true); }
   if (hit('data-fam-remove')) askRemoveFromFamily(v);
+  const aw = hit('data-award');
+  if (aw) awardBadge(aw);
   if (hit('data-import-choose')) document.getElementById('imFile').click();
   if (hit('data-import-go')) askImport();
 });
