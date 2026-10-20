@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.10.0';
+const APP_VERSION = '3.10.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -282,7 +282,7 @@ function resultsPrint(date) {
     <table class="rp-table"><colgroup><col class="rp-c-place"><col class="rp-c-shooter"><col class="rp-c-class"><col class="rp-c-score"></colgroup>
       <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="rp-num">Score</th></tr></thead>
       <tbody>${rows.map(([i, r]) => { const p = Number(r.place), top = p >= 1 && p <= 3 ? p : 0;
-        return `<tr class="${i % 2 ? 'rp-alt' : ''}${top ? ' rp-top' : ''}"><td>${top ? `<span class="rp-dot rp-p${top}"></span>` : ''}${placeLabel(r.place)}</td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="rp-num">${esc(r.score)}</td></tr>`; }).join('')}</tbody></table></div>`;
+        return `<tr class="${i % 2 ? 'rp-alt' : ''}${top ? ' rp-top' : ''}"><td>${top ? `<span class="rp-dot rp-p${top}"></span>` : ''}<span class="rp-place">${esc(r.place)}</span></td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="rp-num">${esc(r.score)}</td></tr>`; }).join('')}</tbody></table></div>`;
   const key = `<div class="rp-key"><span><span class="rp-dot rp-p1"></span>1st</span><span><span class="rp-dot rp-p2"></span>2nd</span><span><span class="rp-dot rp-p3"></span>3rd</span>
       <span class="rp-key-note">Results are as recorded by the club on the day.</span></div>`;
 
@@ -324,7 +324,7 @@ function resultsPrint(date) {
   });
   if (!fits(keyH)) newPage();
   pages[pages.length - 1].push(key);
-  const printed = `Printed ${esc(fullDate(todayIso()))}`;
+  const printed = `Printed ${esc(longDate(todayIso()).replace(/^\S+ /, ''))}`; // "20 Oct 2026"
   root.innerHTML = pages.map((p, i) => page(i === 0, p.join(''), `${printed} · Page ${i + 1} of ${pages.length}`)).join('');
 
   // A4 portrait with no margin for these pages only (the Participation Card prints landscape)
