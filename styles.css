@@ -882,20 +882,8 @@ button.log-row { font: inherit; color: inherit; }
 .hg-break > p.muted { font-size: 13.5px; margin: 10px 0 0; }
 .choices-row.shoot-classes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .choices-row.shoot-classes .choice { justify-content: flex-start; text-align: left; }
-.pc-count { font: 500 13px Poppins, sans-serif; color: var(--text-2); text-transform: none; letter-spacing: 0; margin-left: 6px; }
-.pc-card { padding: 4px 10px; overflow-x: auto; }
-.pc-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.pc-table th { text-align: left; font: 700 11.5px Poppins, sans-serif; color: var(--text-2); text-transform: uppercase; letter-spacing: .03em; padding: 8px 4px; border-bottom: 2px solid var(--line); vertical-align: bottom; }
-.pc-table td { padding: 9px 4px; border-bottom: 1px solid var(--line-soft); vertical-align: top; overflow-wrap: anywhere; }
-.pc-table tr:last-child td { border-bottom: 0; }
-.pc-table td:first-child { white-space: nowrap; font-weight: 600; }
-.pc-table td:last-child { text-align: center; font-weight: 700; }
-.pc-table .shoot-tag { margin-top: 3px; font-size: 10.5px; padding: 2px 6px; }
 .pc-edit { border: 0; background: none; padding: 0; min-height: 44px; text-align: left; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .shoot-log > .notice { margin-bottom: 12px; }
-.pc-table { table-layout: fixed; }
-.pc-w-date { width: 17%; } .pc-w-venue { width: 27%; } .pc-w-event { width: 28%; } .pc-w-kind { width: 16%; } .pc-w-class { width: 12%; }
-.pc-table td { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
 
 /* v3.1.0 "I'm in" for competitions: under a competition in Events, and the club team's entry lists */
 .entry { margin-top: 10px; }
@@ -1015,3 +1003,80 @@ a.ev-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
 .ev-photo-pick { border-radius: 14px; max-width: 480px; }
 .ev-pick .btn-row { flex-wrap: wrap; }
 .ev-pick-admin { margin-top: 4px; }
+
+/* Participation Card (v3.7.0): like the club's paper card. The table scrolls sideways on a phone, with Date kept in view. */
+.pcard-head { padding: 0; overflow: hidden; }
+.pcard-band { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--maroon); color: #fff; }
+.pcard-band img { width: 56px; height: 56px; border-radius: 50%; flex: 0 0 auto; }
+.pcard-title { font: 800 17px/1.2 Montserrat, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--gold); }
+.pcard-branch { font: 500 14px Poppins, sans-serif; margin-top: 2px; }
+.pcard-who { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.pcard-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 15.5px; }
+.pcard-line > span:first-child { color: var(--text-2); }
+.pcard-classes { display: inline-flex; gap: 6px; }
+.pc-class { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 8px; background: var(--gold-soft); color: var(--gold-text); font: 800 15px Montserrat, sans-serif; }
+.pc-year { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 4px; }
+.pc-year-label { font: 800 20px Montserrat, sans-serif; color: var(--heading); min-width: 96px; text-align: center; }
+.pc-year-btn { font-size: 28px; line-height: 1; background: var(--tint); color: var(--accent); }
+.pc-year-btn:disabled { opacity: .35; cursor: default; }
+.pc-bar { height: 12px; border-radius: 6px; background: var(--tint); overflow: hidden; }
+.pc-bar span { display: block; height: 100%; border-radius: 6px; background: var(--crimson); }
+.pc-met .pc-bar span { background: var(--green); }
+.pc-progress-text { margin: 6px 0 0; font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.pc-met .pc-progress-text { color: var(--ok-text); }
+.pc-progress-text svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.pcard-scroll { margin-top: 12px; overflow-x: auto; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); -webkit-overflow-scrolling: touch; }
+.pcard-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.pcard-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 640px; font-size: 14.5px; }
+.pcard-table th, .pcard-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+.pcard-table thead th { font: 700 12.5px Poppins, sans-serif; color: var(--heading); background: var(--tint); border-bottom: 2px solid var(--maroon); }
+.pcard-table tbody tr:last-child > * { border-bottom: 0; }
+.pcard-table tbody th { font-weight: 600; }
+.pcard-table .pc-c { text-align: center; font-weight: 700; }
+.pcard-table td:nth-child(5) { white-space: normal; min-width: 150px; }
+.pcard-table td:last-child { min-width: 140px; border-left: 1px dashed var(--line); }
+.pc-stick { position: sticky; left: 0; z-index: 1; background: var(--card); box-shadow: 1px 0 0 var(--line); }
+.pcard-table thead .pc-stick { background: var(--tint); z-index: 2; }
+.pc-key { font-size: 13.5px; margin: 10px 2px 0; }
+.pc-actions { margin-top: 12px; align-items: center; justify-content: space-between; }
+.pc-view-link { display: inline-flex; align-items: center; gap: 2px; min-height: 44px; color: var(--accent); font-weight: 600; text-decoration: none; }
+.pc-view-link .chev { width: 16px; height: 16px; }
+.pc-note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 2px 0; font-size: 13.5px; color: var(--text-2); line-height: 1.45; }
+.pc-note svg { width: 18px; height: 18px; flex: 0 0 auto; margin-top: 1px; color: var(--text-3); }
+.print-only { display: none; }
+
+/* Print or save as PDF: a landscape A4 page like the paper card (the Participation Card is the only screen with a print button) */
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  :root { color-scheme: light; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .topbar, .tabbar, .back-link, .no-print, .viewing-line, #confirmSheet, .sheet { display: none !important; }
+  .view, .section, .page-title { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .page-title h1 { font-size: 18pt; color: #5C0F1F; margin: 0 0 2mm; }
+  .page-title p { margin: 0 0 4mm; color: #333; }
+  .card, .pcard-scroll { box-shadow: none !important; border: 1px solid #999; background: #fff !important; }
+  .pcard-band { background: #5C0F1F !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pcard-title { color: #E9B44C !important; }
+  .pcard-branch { color: #fff !important; }
+  .pc-class, .pc-bar, .pc-bar span, .pcard-table thead th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pcard-who { flex-direction: row; flex-wrap: wrap; gap: 2mm 10mm; }
+  .pcard-scroll { overflow: visible; }
+  .pcard-table { min-width: 0; font-size: 10.5pt; }
+  .pcard-table th, .pcard-table td { color: #000 !important; padding: 2.2mm 3mm; border-bottom: 1px solid #bbb; }
+  .pcard-table tbody tr { break-inside: avoid; }
+  .pc-stick { position: static; box-shadow: none; }
+  .pc-edit { color: #000 !important; text-decoration: none; min-height: 0; }
+  .pc-key, .pc-note, .pc-printed { color: #333 !important; font-size: 9.5pt; }
+  .print-only { display: block; }
+  .page-title h1 { font-size: 16pt; }
+  .pcard-band { padding: 3mm 5mm; }
+  .pcard-band img { width: 12mm; height: 12mm; }
+  .pcard-who { padding: 3mm 5mm; }
+  .pcard-scroll { margin-top: 3mm; }
+  .pcard-table th, .pcard-table td { padding: 1.6mm 3mm; }
+  .pc-stick { background: #fff !important; }
+  .pcard-table thead .pc-stick { background: #F3E6E2 !important; }
+  .pc-key { margin-top: 2mm; }
+  .pc-note { margin-top: 2mm; }
+  .pc-printed { margin: 1mm 0 0; }
+}

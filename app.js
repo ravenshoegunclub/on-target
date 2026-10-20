@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.6.0';
+const APP_VERSION = '3.7.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -29,6 +29,7 @@ const REFRESH_AFTER_MS = 2 * 60 * 1000; // matches the feed's own 2-minute cache
 
 /* ---------- Icons ---------- */
 const ICON = {
+  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
   share: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>',
   trophy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>',
@@ -2004,7 +2005,7 @@ let currentPage = '', currentHash = location.hash;
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries'].includes(sub) ? '/' + sub : '')
-    + (name === 'me' && ['results', 'shoot', 'handgun', 'rclass', 'licence', 'licenceedit', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
+    + (name === 'me' && ['results', 'pcard', 'shoot', 'handgun', 'rclass', 'licence', 'licenceedit', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && (sub === 'post' || sub === 'posts') ? '/' + sub : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
@@ -2892,6 +2893,7 @@ function meView(sub) {
   else if (sub === 'shoot') return shootForm();
   else if (sub === 'handgun') { location.replace('#/me/licenceedit'); return ''; } // v3.2.0: the classes are part of My licence
   else if (sub === 'licence') return licenceView();
+  else if (sub === 'pcard') return participationView();
   else if (sub === 'licenceedit') return licenceForm();
   else if (sub === 'rclass') return resultClassView();
   else if (sub === 'details') return meDetails();
@@ -3348,7 +3350,7 @@ async function loadShooting() {
   SHOOT.state = 'loading';
   try { SHOOT.data = await memberApi('memberShooting'); SHOOT.state = ''; }
   catch (e) { if (e.signedOut) return; SHOOT.state = 'failed'; }
-  if (SHOOT.auth === meAuth() && /^me\/(results|shoot|rclass|licence|licenceedit)$/.test(currentPage)) render(true);
+  if (SHOOT.auth === meAuth() && /^me\/(results|pcard|shoot|rclass|licence|licenceedit)$/.test(currentPage)) render(true);
 }
 const shootData = () => (SHOOT.auth === meAuth() ? SHOOT.data : null);
 const fyStart = () => financialYear().from + '-07-01';
@@ -3683,7 +3685,7 @@ function meResults() {
   if (SHOOT.auth !== meAuth() || (!SHOOT.data && !SHOOT.state)) setTimeout(loadShooting, 0);
   const d = shootData(), lines = shootLines(), comps = d ? scoredComps(lines) : [];
   const note = (CLAIMS.note && CLAIMS.auth === meAuth() ? CLAIMS.note : '') || SHOOT.note;
-  const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/licence"><span class="tile-ico">${ICON.card}</span><span class="row-text">Pistol card<span class="muted">In ${other ? who + "'s" : 'My'} licence</span></span>${ICON.chev}</a>` : '';
+  const lic = d && d.canEdit ? `<a class="card menu-row shoot-lic" href="#/me/pcard"><span class="tile-ico">${ICON.card}</span><span class="row-text">Participation Card<span class="muted">Pistol shoots and competitions</span></span>${ICON.chev}</a>` : '';
   const body = SHOOT.state === 'failed' && !d ? `<section class="section">${loadFailed('your shooting log', 'data-shoot-reload')}</section>`
     : !d ? `<section class="section">${skeletonRows(3)}</section>`
     : `<section class="section shoot-over">${lic}${shootSummary(lines)}</section>${shootAnalysis(comps)}${shootBests(comps)}${shootBadges(lines, d)}${shootLog(lines, d)}`;
@@ -3692,35 +3694,94 @@ function meResults() {
     ${note ? `<section class="section"><p class="notice" role="status">${esc(note)}</p></section>` : ''}
     ${body}`;
 }
-/* Pistol attendance card (v3.0.1): laid out like the paper card, one financial year at a time, newest first.
-   RDSS results fill in by themselves; shoots elsewhere are the member's own entries. Only one shoot a day counts. */
-function pistolCard(lines, d) {
-  const other = viewingOther(), who = other ? esc(ME.viewing.first) : '', can = d && d.canEdit;
-  const fyOf = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
-  const pistol = lines.filter(l => l.pistol), years = [...new Set(pistol.map(l => fyOf(l.date)))].sort((a, b) => b - a);
-  const banner = `<p class="notice">This does not replace your paper pistol attendance card or book.</p>`;
-  const add = can ? `<a class="shoot-add" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : '';
-  if (!pistol.length) return `<section class="section shoot-log">${banner}${add}<div class="card empty"><div class="empty-title">No pistol shoots yet</div>
-    <p class="muted">Pistol results at RDSS show here by themselves.${can ? ' Pistol shoots elsewhere show once added.' : ''}</p></div></section>`;
-  const table = y => {
-    const rows = pistol.filter(l => fyOf(l.date) === y);
-    return `<h2 class="sp-head">${y}–${String(y + 1).slice(2)} <span class="pc-count">${new Set(rows.map(l => l.date)).size} day${new Set(rows.map(l => l.date)).size === 1 ? '' : 's'}</span></h2>
-    <div class="card pc-card"><table class="pc-table">
-      <caption class="sr-only">Pistol attendance, 1 July ${y} to 30 June ${y + 1}</caption>
-      <colgroup><col class="pc-w-date"><col class="pc-w-venue"><col class="pc-w-event"><col class="pc-w-kind"><col class="pc-w-class"></colgroup>
-      <thead><tr><th scope="col">Date</th><th scope="col">Venue</th><th scope="col">Event</th><th scope="col">Comp or prac&shy;tice</th><th scope="col">Class</th></tr></thead>
-      <tbody>${rows.map(l => `<tr>
-        <td>${esc(shortDate(l.date).replace(/^\w+ /, ''))}</td>
-        <td>${esc(l.where)}<br>${l.rdss ? `<span class="mbadge mbadge-ok shoot-tag">${ICON.check}RDSS</span>` : `<span class="mbadge shoot-tag shoot-tag-own">Added by ${other ? who : 'you'}</span>`}</td>
-        <td>${!l.rdss && can ? `<button type="button" class="pc-edit" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${esc(l.name)}</button>`
-          : l.rdss && can && l.key ? `<button type="button" class="pc-edit" data-rclass="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: set the class of pistol">${esc(l.name)}</button>` : esc(l.name)}${l.accredited ? '<br><span class="muted">Accredited</span>' : ''}</td>
-        <td>${l.comp ? 'Comp' : 'Practice'}</td>
-        <td>${l.pc ? esc(l.pc) : '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table></div>`;
-  };
-  const noClass = pistol.some(l => !l.pc) ? `<p class="muted">A dash under Class: the class hasn't been set.${can ? ' Tap the event to set it.' : ''}</p>` : '';
-  return `<section class="section shoot-log">${banner}${add}${years.map(table).join('')}${noClass}
-    ${can ? '<p class="muted">Tap an event to set its class, or to change or remove one of your own entries.</p>' : ''}</section>`;
+/* Participation Card (v3.7.0, #/me/pcard): the digital version of the club's paper "Pistol Shooters Participation Card",
+   one licence year (1 July to 30 June) at a time, newest first. RDSS pistol results fill in by themselves; pistol shoots
+   elsewhere are the member's own entries. The count is the handgun card's rule (one shoot a day, against shootsNeeded for
+   the classes held that year, as the badges work it out). Never a licence number, the member's or a range officer's:
+   On Target has no Range Officer names yet, so that column stays blank for the paper card to be signed. */
+let PCARD_FY = 0;
+const fyOfDate = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
+const PC_CLASS_KEY = 'Class A: Air Pistol · Class B: Centre Fire up to .38 · Class C: Centre Fire over .38 to .45 · Class D: Rim Fire';
+/* {text, part (0 to 1), met} for the progress bar, or a line with no bar, or null */
+function pcardProgress(lines, d, fy) {
+  const hg = d.handgun, pistol = lines.filter(l => l.pistol && fyOfDate(l.date) === fy), label = fyLabel(fy);
+  const days = new Map();
+  pistol.forEach(l => days.set(l.date, days.get(l.date) || l.comp));
+  const done = days.size, comps = [...days.values()].filter(Boolean).length;
+  if (licHasH(hg) && hg.classes.length) {
+    if (hg.noAttend) return { text: `${done} pistol shoot day${done === 1 ? '' : 's'} in ${label}. No attendance requirement (as confirmed by you).` };
+    const held = hg.classes.map(c => ({ key: c.key, months: classMonths(c, fy) })).filter(c => c.months > 0), need = shootsNeeded(held);
+    if (!held.length || !need.total) return null;
+    const met = done >= need.total && comps >= need.competitions;
+    return { part: Math.min(1, done / need.total), met, label,
+      text: met ? `Requirement met for ${label}` : `${Math.min(done, need.total)} of ${need.total} shoots this year${held.length > 1 ? ` · ${Math.min(comps, need.competitions)} of ${need.competitions} competitions` : ''}` };
+  }
+  if (d.handgun.towards === 'Yes') { // first-time applicants: 3 pistol competitions in all, as on My licence
+    const n = new Set(lines.filter(l => l.pistol && l.comp).map(l => l.date)).size;
+    return { part: Math.min(1, n / 3), met: n >= 3, text: n >= 3 ? '3 of 3 pistol competitions done' : `${n} of 3 pistol competitions (first-time applicants)` };
+  }
+  return null;
 }
+function participationView() {
+  const d = shootData(), other = viewingOther(), who = other ? esc(ME.viewing.first) : '';
+  if (SHOOT.auth !== meAuth() || (!d && !SHOOT.state)) setTimeout(loadShooting, 0);
+  const head = `<div class="page-title"><a class="back-link" href="#/me/results">${ICON.chev}${other ? who + "'s" : 'My'} shooting</a><h1>Participation Card</h1>
+    <p class="muted">${other ? `${who}'s` : 'Your'} digital record of pistol shoots and competitions.</p>${viewingLine()}</div>`;
+  if (!d) return head + `<section class="section">${SHOOT.state === 'failed' ? loadFailed('the Participation Card', 'data-shoot-reload') : skeletonRows(3)}</section>`;
+  if (!d.canEdit) return head + `<section class="section">${empty(`Private to ${who}`, `${who}'s licence details are theirs alone.`)}</section>`;
+  const lines = shootLines(), pistol = lines.filter(l => l.pistol), cur = financialYear().from, can = d.canEdit;
+  const years = [...new Set(pistol.map(l => fyOfDate(l.date)).concat(cur))].filter(y => y <= cur).sort((a, b) => a - b);
+  if (!years.includes(PCARD_FY)) PCARD_FY = cur;
+  const fy = PCARD_FY, i = years.indexOf(fy), rows = pistol.filter(l => fyOfDate(l.date) === fy);
+  const classes = d.handgun.classes.filter(c => classMonths(c, fy) > 0).map(c => c.key).sort();
+  const pr = pcardProgress(lines, d, fy);
+  const ssaa = ME.ssaa ? `<b>${esc(ME.ssaa)}</b>` : `<span class="muted">not recorded. Ask the club team to add it.</span>`;
+  const step = (to, dir, label) => `<button type="button" class="icon-btn pc-year-btn no-print" data-pc-year="${to || ''}"${to ? '' : ' disabled'} aria-label="${to ? label + ': ' + fyLabel(to) : 'No ' + label.toLowerCase()}">${dir}</button>`;
+  const bar = !pr ? '' : pr.part === undefined ? `<p class="muted pc-progress-text">${esc(pr.text)}</p>`
+    : `<div class="pc-progress${pr.met ? ' pc-met' : ''}"><div class="pc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pr.part * 100)}" aria-label="${esc(pr.text)}"><span style="width:${Math.round(pr.part * 100)}%"></span></div>
+      <p class="pc-progress-text">${pr.met ? ICON.check : ''}${esc(pr.text)}</p></div>`;
+  const match = l => {
+    const name = l.comp ? esc(l.name) : 'Practice';
+    if (!can) return name;
+    if (!l.rdss) return `<button type="button" class="pc-edit" data-shoot-edit="${esc(l.id)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: change or remove">${name}</button>`;
+    return l.key ? `<button type="button" class="pc-edit" data-rclass="${esc(l.key)}" aria-label="${esc(l.name)}, ${esc(shortDate(l.date))}: set the class of pistol">${name}</button>` : name;
+  };
+  const table = rows.length ? `<div class="pcard-scroll" role="region" aria-label="Participation table, ${esc(fyLabel(fy))}" tabindex="0"><table class="pcard-table">
+      <caption class="sr-only">Pistol shoots, 1 July ${fy} to 30 June ${fy + 1}, newest first</caption>
+      <thead><tr><th scope="col" class="pc-stick">Date</th><th scope="col">Range Location</th><th scope="col">Category</th><th scope="col">Class</th><th scope="col">Match</th><th scope="col">Range Officer</th></tr></thead>
+      <tbody>${rows.map(l => `<tr><th scope="row" class="pc-stick">${esc(dmy(l.date))}</th><td>${l.rdss ? 'Ravenshoe' : esc(l.where)}</td><td class="pc-c">H</td>
+        <td class="pc-c">${l.pc ? esc(l.pc) : '<span class="muted" aria-label="not set">–</span>'}</td><td>${match(l)}${l.accredited ? ' <span class="muted">(accredited)</span>' : ''}</td><td></td></tr>`).join('')}</tbody></table></div>`
+    : `<div class="card empty"><p class="muted">No pistol shoots recorded for ${esc(fyLabel(fy))} yet.</p></div>`;
+  return `${head}
+    <section class="section pcard">
+      <div class="card pcard-head">
+        <div class="pcard-band"><img src="icons/icon-192.png?v=${APP_VERSION}" alt="" width="56" height="56">
+          <div><div class="pcard-title">Pistol Shooters Participation Card</div><div class="pcard-branch">Ravenshoe Branch Inc Q48</div></div></div>
+        <div class="pcard-who">
+          <div class="pcard-line"><span>Licence holder:</span><b>${esc((ME.viewing && ME.viewing.name) || ME.name)}</b></div>
+          <div class="pcard-line"><span>SSAA Qld membership no.</span>${ssaa}</div>
+          ${classes.length ? `<div class="pcard-line"><span>Classes</span><span class="pcard-classes">${classes.map(k => `<span class="pc-class">${esc(k)}</span>`).join('')}</span></div>` : ''}
+          <div class="pc-year">${step(years[i - 1], '&lsaquo;', 'Earlier year')}<b class="pc-year-label">${esc(fyLabel(fy))}</b>${step(years[i + 1], '&rsaquo;', 'Later year')}</div>
+          ${bar}
+        </div>
+      </div>
+      ${table}
+      <p class="muted pc-key">${PC_CLASS_KEY}</p>
+      ${rows.some(l => !l.pc) && can ? '<p class="muted no-print">A dash under Class: the class hasn’t been set. Tap the Match to set it.</p>' : ''}
+      <div class="btn-row pc-actions no-print">
+        <button type="button" class="btn btn-outline" data-pc-print>${ICON.doc}Print or save as PDF</button>
+        <a class="pc-view-link" href="#/me/licence">Licence details ${ICON.chev}</a>
+      </div>
+      ${can ? `<a class="shoot-add no-print" href="#/me/shoot">${ICON.plus}Add a shoot elsewhere</a>` : ''}
+      <p class="pc-note">${ICON.info}<span>This does not replace your paper Pistol Shooters Participation Card, which must still be signed by a Range Officer.</span></p>
+      <p class="print-only pc-printed">Printed on ${esc(longDate(todayIso()))}</p>
+    </section>`;
+}
+view.addEventListener('click', e => {
+  const y = e.target.closest('[data-pc-year]');
+  if (y && !y.disabled && y.dataset.pcYear) { PCARD_FY = Number(y.dataset.pcYear); render(true); const b = view.querySelector('.pc-year-label'); if (b) b.focus(); }
+  if (e.target.closest('[data-pc-print]')) window.print();
+});
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
 function shootForm() {
@@ -3871,14 +3932,15 @@ function licenceView() {
       <p class="muted">Keep a club summary of ${them} licence categories and expiry date here, so On Target can work out what a handgun licence needs each year. Never the licence number.</p>
       <a class="btn btn-primary btn-big" href="#/me/licenceedit">Add ${them} licence</a></div></section>`;
   let pistol;
+  const pcardLink = `<a class="pc-view-link" href="#/me/pcard">View ${other ? who + "'s" : 'my'} Participation Card ${ICON.chev}</a>`; // v3.7.0: the card has its own screen
   if (licHasH(hg)) {
-    pistol = hg.classes.length ? `<section class="section"><h2 class="sp-head">Handgun (category H)</h2>${handgunCard(lines, d)}</section>${pistolCard(lines, d)}`
+    pistol = hg.classes.length ? `<section class="section"><h2 class="sp-head">Handgun (category H)</h2>${handgunCard(lines, d)}${pcardLink}</section>`
       : `<section class="section"><h2 class="sp-head">Handgun (category H)</h2><div class="card empty"><div class="empty-title">Which pistol classes?</div>
         <p class="muted">Add the classes ${other ? who + ' holds' : 'you hold'} and the date each was obtained, and On Target works out this year's requirements.</p>
         <a class="btn btn-primary" href="#/me/licenceedit">Add pistol classes</a></div></section>`;
   } else if (hg.towards === 'Yes') {
     pistol = `<section class="section"><h2 class="sp-head">Pistol licence</h2>${towardsCard(lines)}
-      <button type="button" class="link-btn lic-link" data-lic-towards="no">Not working towards one any more</button></section>${pistolCard(lines, d)}`;
+      ${pcardLink}<button type="button" class="link-btn lic-link" data-lic-towards="no">Not working towards one any more</button></section>`;
   } else if (hg.towards !== 'No') {
     pistol = `<section class="section"><div class="card lic-ask"><div class="list-title">Working towards a pistol licence?</div>
       <p class="muted">On Target can keep ${them} pistol attendance card and count the competitions.</p>
