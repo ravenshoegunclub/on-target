@@ -1110,6 +1110,33 @@ a.ev-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
 .faq-item summary .chev { flex: 0 0 20px; width: 20px; height: 20px; color: var(--accent); transform: rotate(90deg); transition: transform .2s; }
 .faq-item[open] summary .chev { transform: rotate(-90deg); }
 .faq-a { margin: 0 0 14px; color: var(--text-2); font-size: 15.5px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+/* Range rules & safety (v3.13.0): golden-rule tiles and "More detail" cards */
+.rr-intro { color: var(--text); font-size: 16px; line-height: 1.5; }
+.rr-ico { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 12px; background: var(--gold-soft); color: var(--maroon); display: flex; align-items: center; justify-content: center; }
+.rr-ico svg { width: 24px; height: 24px; }
+.rr-ico.rr-red { background: #FBE1E1; color: var(--red); }
+.rr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rr-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px; min-width: 0; }
+.rr-tile .rr-ico { margin-bottom: 8px; }
+.rr-head { font: 700 15.5px/1.3 Poppins, sans-serif; color: var(--text); overflow-wrap: anywhere; }
+.rr-line { font-size: 14.5px; line-height: 1.45; color: var(--text-2); }
+.rr-more-head { margin-top: 14px; }
+.rr-card summary { list-style: none; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 16px; cursor: pointer; }
+.rr-card summary::-webkit-details-marker { display: none; }
+.rr-title { flex: 1 1 auto; font: 700 16px/1.35 Poppins, sans-serif; color: var(--text); }
+.rr-card summary .chev { flex: 0 0 20px; width: 20px; height: 20px; color: var(--accent); transition: transform .2s; }
+.rr-card[open] summary .chev { transform: rotate(90deg); }
+.rr-body { padding: 0 16px 16px 74px; font-size: 15.5px; line-height: 1.55; color: var(--text); }
+.rr-body ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.rr-body p { margin: 0 0 6px; }
+.rr-000 { display: inline-flex; width: auto; padding: 0 22px; min-height: 52px; font-size: 17px; gap: 10px; margin: 0 0 12px; }
+.rr-tel { font-weight: 700; color: var(--accent); white-space: nowrap; text-decoration: none; }
+.rr-copy { background: none; border: 0; padding: 0; min-height: 44px; font: 700 15.5px Poppins, sans-serif; color: var(--accent); cursor: pointer; text-align: left; }
+.rr-link { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; margin-top: 8px; font-weight: 700; text-decoration: none; color: var(--accent); }
+.rr-link .chev { width: 18px; height: 18px; }
+.rr-foot { margin: 8px 0 0; text-align: center; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+@media (max-width: 380px) { .rr-body { padding-left: 16px; } .rr-tile { padding: 12px; } }
+@media (prefers-color-scheme: dark) { .rr-ico { color: var(--gold-text); } .rr-ico.rr-red { background: #4A1F1F; color: #FF8A80; } }
 .faq-none { margin: 12px 0 0; }
 .faq-more { margin-top: 24px; padding: 18px 16px; border-radius: 14px; background: var(--tint); text-align: center; display: flex; flex-direction: column; gap: 12px; }
 .faq-more h2 { font-size: 17px; color: var(--heading); }

@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.12.1';
+const APP_VERSION = '3.13.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -506,10 +506,8 @@ const VIEWS = {
         </div>` : `<div class="sp-next"><p class="muted">No events posted yet. Check back soon.</p></div>`)
       : `<div class="sp-next">${FAILED.events ? `<p class="muted">Can't load events right now.</p>` : `<span class="skel skel-line"></span>`}</div>`;
     // v3.2.0: the member's four shortcuts
-    if (mine && !DOCS && !docsState) setTimeout(loadDocs, 0);
-    const rules = rangeRulesDoc();
     const sc = mine
-      ? spShortcut(ICON.trophy, 'Enter a comp', '#/comps') + spShortcut(ICON.alert, 'Range rules &amp; safety', rules ? rules.url : '#/rules')
+      ? spShortcut(ICON.trophy, 'Enter a comp', '#/comps') + spShortcut(ICON.alert, 'Range rules &amp; safety', '#/rules')
         + spShortcut(ICON.firstaid, 'Emergency contacts', '#/emergency') + spShortcut(ICON.mail, 'Contact the club', '#/contact')
       : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', '#/faq');
     // Coming up: the next two competitions, with "You're in" and how many are going (v3.1.0)
@@ -3549,10 +3547,8 @@ async function loadDocs() {
     if (/signed out/i.test(e.message)) return forgetMember();
     docsState = /for members/i.test(e.message) ? 'members' : 'failed';
   }
-  if (['me/documents', 'home', 'rules'].includes(currentPage)) render(true);
+  if (['me/documents', 'home'].includes(currentPage)) render(true);
 }
-/* The club document called "Range rules" (v3.2.0), once one has been added in Manage club documents */
-const rangeRulesDoc = () => (DOCS || []).find(d => /range rules/i.test(d.name)) || null;
 /* Grouped by type, in this order; a group with nothing in it isn't shown */
 const DOC_GROUPS = [['Form', 'Forms'], ['Policy', 'Policies'], ['Minutes', 'Minutes'], ['Other', 'Other']];
 function documentsView() {
@@ -5389,15 +5385,119 @@ function compsView() {
       <p class="muted">${signedIn ? "Tap I'm in to let the club know you're coming. It isn't binding, and there's nothing to pay here." : "Sign in on Me to say you're coming."}</p></div>
     <section class="section">${state('events', 3, () => list.length ? `<div class="ev-grid">${list.map(ev => eventCard(ev, { cal: events().indexOf(ev), entry: true })).join('')}</div>` : empty('No competitions coming up', 'New competitions appear here as soon as the club team posts them.'))}</section>`;
 }
-/* Range rules & safety: opens the club document "Range rules"; until there is one, says it's coming */
+/* Range rules & safety (v3.13.0): the short version of the Range Standing Orders. Ten golden rules, always shown,
+   then "More detail" cards that open and close. The wording is the club's; "For Range Officers" is for the club team only. */
+const RULE_ICON = {
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  id: '<rect x="3" y="6" width="18" height="12" rx="2"/><rect x="6" y="10" width="4" height="4" rx="1"/><path d="M13 11h5M13 14h3"/>',
+  eyes: '<circle cx="7" cy="14" r="3.5"/><circle cx="17" cy="14" r="3.5"/><path d="M10.5 14h3M3.5 13.5L5 8M20.5 13.5L19 8"/>',
+  boot: '<path d="M7 3h4v9l6 2a3 3 0 0 1 2 2.8V20H7z"/><path d="M7 17h12"/>',
+  arrow: '<path d="M4 12h16M14 6l6 6-6 6"/>',
+  case: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  hand: '<path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V5.5a1.5 1.5 0 0 1 3 0V12M17 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7l-2.4-3.8a1.5 1.5 0 0 1 2.5-1.6L8 14.5V12"/>',
+  wave: '<path d="M7 12V6.5a1.5 1.5 0 0 1 3 0V11M10 10.5V5a1.5 1.5 0 0 1 3 0v5.5M13 10.5V6.5a1.5 1.5 0 0 1 3 0V12M16 10a1.5 1.5 0 0 1 3 0v4a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7l-2.4-3.8a1.5 1.5 0 0 1 2.5-1.6L7 14.5V12"/><path d="M18.5 3c1.2.6 2 1.5 2.4 2.8M3.5 6.5c.3-1.3 1-2.3 2.2-3"/>',
+  nodrink: '<path d="M8 3h8l-.5 5a3.5 3.5 0 0 1-7 0zM12 11.5V20M8.5 20h7M4 4l16 16"/>',
+  call: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 2.5h6v3H9zM8.5 10h7M8.5 14h7M8.5 18h4"/>',
+  pcard: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h2.5M13 16.5l1.5 1.5 3-3"/>',
+  flag: '<path d="M5 21V4h11l-2 4 2 4H5"/>',
+  nosmoke: '<path d="M2 13h13v4H2zM18 13v4M21 13v4M18 9.5c0-1.5 1.5-1.5 1.5-3M3 3l18 18"/>',
+  firstaid: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M12 10.5v6M9 13.5h6"/>',
+  whistle: '<circle cx="9" cy="14" r="6"/><path d="M9 8h12v4h-5.5"/><circle cx="9" cy="14" r="1.5"/>'
+};
+const ruleIco = (k, red) => `<span class="rr-ico${red ? ' rr-red' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true">${RULE_ICON[k]}</svg></span>`;
+const RANGE_ADDRESS = '311 Cemetery Road, Ravenshoe QLD 4888';
+const GOLDEN_RULES = [
+  ['shield', 'Range Officer is in charge', 'Follow their directions, always.'],
+  ['id', 'Show your licence', 'No licence? Ask about a supervised have-a-go.'],
+  ['eyes', 'Eyes and ears on', 'For everyone near the firing line.'],
+  ['boot', 'Closed-toe shoes', 'No thongs or sandals.'],
+  ['arrow', 'Muzzle downrange', 'Always. Never leave a firearm unattended.'],
+  ['case', 'Handguns cased or holstered', 'Action open, mag out, except on the line.'],
+  ['target', 'Shoot only when told', "Loaded only under the Range Officer's direction."],
+  ['hand', 'Anyone can call CEASEFIRE', 'See a risk? Call it.'],
+  ['nodrink', 'No alcohol or drugs', 'Not while the range is open.'],
+  ['call', 'Emergency? Call 000', 'First aid & AED kits are in the kitchen.']
+];
+const RULE_CARDS = [
+  { id: 'new', icon: 'wave', title: 'New here or no licence?', lines: [
+    'Welcome! You can try shooting without a licence. Fill in a Form 33 and a licensed Club Member will shoot one-on-one with you.',
+    "Keep ammunition until you're at the firing position.",
+    'Came on your own? Say hello to the Range Officer when you arrive.',
+    "Bringing guests? They're your responsibility, kids included.",
+    'Just watching? Stay behind the red line and wear eye and ear protection.'] },
+  { id: 'before', icon: 'clipboard', title: 'Before you shoot', lines: [
+    'Bring your licence. The Range Officer needs to see it.',
+    'Sign the Range Use Register.',
+    'Read and sign the Standing Orders once a year.'] },
+  { id: 'line', icon: 'target', title: 'On the firing line', lines: [
+    'Shoot parallel to the centre line.',
+    'Approved targets only: no cans or bottles.',
+    'No tracer or explosive ammo.',
+    'Stepping away from your bench? Leave your firearm unloaded, action open, on the bench or a rack. Leaving the range? Take it with you.',
+    'Class C pistols only in approved matches or practice.'] },
+  { id: 'pistol', icon: 'pcard', title: 'Pistol members', lines: [
+    'Each July to June, shoot 6 times with one pistol class, or 4 times per class (on separate days) with two or more.',
+    'Get each shoot signed by the Range Officer on your paper Participation Card.',
+    'Each July, tell the Club Secretary which classes you hold.',
+    'Struggling to fit shoots in? Talk to a Club Official early.',
+    'Classes: A air pistol · B centre fire up to .38 or black powder · C over .38 to .45 · D rimfire.',
+    "Joining for pistol? You'll need Form QP 0515 from the police station and a rifle licence held for over a year."],
+    more: () => `<a class="rr-link" href="#/me/pcard">View my Participation Card ${ICON.chev}</a>` },
+  { id: 'flags', icon: 'flag', title: 'Flags and closures', lines: [
+    'Red flag up means the range is live.',
+    'The danger areas beyond the range are out of bounds.',
+    'We can close at short notice for fire danger, or if no Range Officer is free. Check On Target before you head out.'] },
+  { id: 'smoke', icon: 'nosmoke', title: 'Smoking', lines: [
+    'Fire risk is high here. No smoking on firing points or within 10 m of black powder.',
+    'Designated areas only, and butts in the bins.'] },
+  { id: 'emergency', icon: 'firstaid', red: true, title: 'Emergencies', body: () => `
+    <a class="btn btn-emergency rr-000" href="tel:000">${ICON.call}Call <b>000</b></a>
+    <p>First aid and AED kits: <b>kitchen area</b></p>
+    <p>Doctor (non-emergency): <a class="rr-tel" href="tel:0740976269">(07) 4097 6269</a></p>
+    <p>${esc(RANGE_ADDRESS)}<br><button type="button" class="rr-copy" data-copy-address>Copy</button></p>` },
+  { id: 'ro', icon: 'whistle', team: true, title: 'For Range Officers', lines: [
+    'Display your name at the range, check every licence, and keep the Range Use Register secure.',
+    'Countersign Participation Cards after each qualifying shoot.',
+    'Packing up: target frames and silhouettes away, brass cleared, firearms and ammo off the range, flags down, buildings and gate locked.'] }
+];
+const RULES_OPEN = new Set(); // which cards are open, so a refresh doesn't close them
 function rulesView() {
-  if (!DOCS && !docsState) setTimeout(loadDocs, 0);
-  const doc = rangeRulesDoc(), head = `<div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Range rules &amp; safety</h1></div>`;
-  if (!DOCS && docsState !== 'failed' && docsState !== 'members') return head + `<section class="section">${skeletonRows(1)}</section>`;
-  return head + `<section class="section">${doc ? `<div class="card list"><a class="menu-row doc-row" href="${esc(doc.url)}" target="_blank" rel="noopener"><span class="tile-ico">${ICON.doc}</span>
-      <span class="list-main"><b class="doc-name">${esc(doc.name)}</b>${doc.what ? `<span class="doc-what">${esc(doc.what)}</span>` : ''}</span>${ICON.chev}</a></div>`
-    : empty('Range rules coming soon', 'The club is putting them in On Target. Until then, please follow the range officer on duty.')}</section>`;
+  const cards = RULE_CARDS.filter(c => !c.team || session);
+  return `
+    <div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Range rules &amp; safety</h1>
+      <p class="rr-intro">We want everyone to enjoy a safe day at the range. Here's the short version of our Range Standing Orders.</p></div>
+    <section class="section">
+      <h2 class="sp-head">The golden rules</h2>
+      <div class="rr-grid">${GOLDEN_RULES.map(([k, h, l]) => `<div class="card rr-tile">${ruleIco(k)}<b class="rr-head">${esc(h)}</b><span class="rr-line">${esc(l)}</span></div>`).join('')}</div>
+      <h2 class="sp-head rr-more-head">More detail</h2>
+      ${cards.map(c => `<details class="card rr-card" data-rule="${c.id}"${RULES_OPEN.has(c.id) ? ' open' : ''}>
+        <summary>${ruleIco(c.icon, c.red)}<span class="rr-title">${esc(c.title)}</span>${ICON.chev}</summary>
+        <div class="rr-body">${c.body ? c.body() : `<ul>${c.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`}${c.more ? c.more() : ''}</div>
+      </details>`).join('')}
+      <p class="rr-foot">The full signed Standing Orders are on the club's notice board.<br>On the day, the Range Officer's word is final.</p>
+    </section>`;
 }
+view.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.classList && d.classList.contains('rr-card')) { if (d.open) RULES_OPEN.add(d.dataset.rule); else RULES_OPEN.delete(d.dataset.rule); }
+}, true);
+view.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy-address]');
+  if (!b) return;
+  let ok = false;
+  try { await navigator.clipboard.writeText(RANGE_ADDRESS); ok = true; }
+  catch (err) { // older phones: copy from a hidden box, as copyCaption does
+    const box = Object.assign(document.createElement('textarea'), { value: RANGE_ADDRESS, readOnly: true });
+    box.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+    document.body.appendChild(box); box.select(); box.setSelectionRange(0, box.value.length);
+    try { ok = document.execCommand('copy'); } catch (e2) {}
+    box.remove();
+  }
+  b.textContent = ok ? 'Copied' : 'Press and hold the address to copy it';
+  setTimeout(() => { if (b.isConnected) b.textContent = 'Copy'; }, 2500);
+});
 /* Ravenshoe's police, medical centre and fire station (from the club) */
 const EMERGENCY_PLACES = [
   { name: 'Ravenshoe Police Station', address: '1 Carrick Street, Ravenshoe', hours: 'Open Monday to Thursday, 8am–1pm',
