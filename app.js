@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.10.1';
+const APP_VERSION = '3.11.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -117,16 +117,25 @@ function dateBlock(iso) {
   return `<div class="date-block"><div class="m">${MONTHS[d.getMonth()]}</div><div class="d">${d.getDate()}</div></div>`;
 }
 
-/* Range days: Wednesday 8:30–11:30am and Saturday 8:30am–12:00pm */
+/* Range days: Wednesday 8:30–11:30am and Saturday 8:30am–12:00pm, set only here (Home's range status and the printed events calendar) */
+const RANGE_DAYS = [{ day: 3, open: '08:30', close: '11:30', what: 'Practice' }, { day: 6, open: '08:30', close: '12:00', what: 'Competitions' }];
+const minsOf = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+/* "Wednesdays 8:30–11:30am", "Saturdays 8:30am–12pm" */
+function rangeDayText(r) {
+  const t = v => { const h = Number(v.slice(0, 2)); return { n: `${h % 12 || 12}${v.slice(3) === '00' ? '' : ':' + v.slice(3)}`, ap: h < 12 ? 'am' : 'pm' }; };
+  const a = t(r.open), b = t(r.close);
+  return `${DAYS_LONG[r.day]}s ${a.n}${a.ap === b.ap ? '' : a.ap}–${b.n}${b.ap}`;
+}
 function rangeStatus() {
   const now = new Date(), day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes();
-  const close = { 3: 11 * 60 + 30, 6: 12 * 60 };
+  const at = d => RANGE_DAYS.find(r => r.day === d);
   const iso = i => isoOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i));
-  if (close[day] && !closedOn(iso(0)) && mins >= 8 * 60 + 30 && mins < close[day]) return { open: true, text: 'Range open now' };
-  if (close[day] && !closedOn(iso(0)) && mins < 8 * 60 + 30) return { open: false, text: 'Range opens today 8:30am' };
+  const today = at(day);
+  if (today && !closedOn(iso(0)) && mins >= minsOf(today.open) && mins < minsOf(today.close)) return { open: true, text: 'Range open now' };
+  if (today && !closedOn(iso(0)) && mins < minsOf(today.open)) return { open: false, text: `Range opens today ${niceTime(today.open)}` };
   for (let i = 1; i <= 21; i++) { // closed days are skipped (v2.7.0)
     const d = (day + i) % 7;
-    if (close[d] && !closedOn(iso(i))) return { open: false, text: `Next range day ${i === 1 ? 'tomorrow' : i < 7 ? DAYS_LONG[d] : shortDate(iso(i))} 8:30am` };
+    if (at(d) && !closedOn(iso(i))) return { open: false, text: `Next range day ${i === 1 ? 'tomorrow' : i < 7 ? DAYS_LONG[d] : shortDate(iso(i))} ${niceTime(at(d).open)}` };
   }
   return { open: false, text: '' };
 }
@@ -179,7 +188,7 @@ const RES = (() => {
   return { mode: RES_MODES.some(m => m[0] === saved.mode) ? saved.mode : 'date', type: saved.type || '', day: '', picking: false };
 })();
 /* Re-draws Results for a new view or day: the cards start as that view opens them, not as the last one left them */
-function resRender() { resultsPrintClear(); view.querySelectorAll('details.comp').forEach(d => d.remove()); render(true); }
+function resRender() { printClear(); view.querySelectorAll('details.comp').forEach(d => d.remove()); render(true); }
 function saveResView() { try { localStorage.setItem('ot:resultsView', JSON.stringify({ mode: RES.mode, type: RES.type })); } catch (e) { /* storage blocked */ } }
 const compWord = n => n + (n === 1 ? ' competition' : ' competitions');
 /* A competition's types: its discipline (Pistol, Rifle or Clay) and, when it is one, Black powder as well.
@@ -250,80 +259,78 @@ function resultsByDate() {
       <div class="rv-print"><button type="button" class="btn btn-outline" data-rv-print="${d.date}">${ICON.doc}Print or save as PDF</button></div></section>
     <section class="section">${d.competitions.map(c => compCard(c, true)).join('')}</section>`;
 }
-/* Print or save as PDF (v3.10.0): one competition day as club-branded A4 pages, built off screen and printed on their own.
- * The pages are laid out here, not by the browser, so the footer can say "Page X of Y" on every phone:
- * each competition is measured, kept on one page when it fits, and split with its heading row repeated when it doesn't.
- * Names are exactly as the Results screen shows them. The pages stay (hidden) until another screen, day or print. */
-const RP_SITE = 'ravenshoegunclub.com.au', RP_APP = 'ontarget.ravenshoegunclub.com.au';
+/* Print or save as PDF (v3.10.0 results, v3.11.0 events calendar): club-branded A4 pages, built off screen and printed on their own.
+ * The pages are laid out here, not by the browser, so the footer can say "Page X of Y" on every phone.
+ * Each section (a competition, a month) is measured row by row: kept whole on one page when o.keep and it fits,
+ * otherwise split with its heading repeated and "(continued)", never leaving the heading with fewer than o.min rows.
+ * The pages stay (hidden) until another screen, day or print (printClear). */
+const PRINT_SITE = 'ravenshoegunclub.com.au', PRINT_APP = 'ontarget.ravenshoegunclub.com.au';
 const fullDate = iso => { const d = parseDate(iso); return `${DAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`; }; // "Saturday 17 October 2026"
-function resultsPrintClear() {
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function printClear() {
   document.documentElement.classList.remove('rp-printing');
-  ['resultsPrint', 'rpPage'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+  ['printPages', 'rpPage'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
 }
-function resultsPrint(date) {
-  const d = days().find(x => x.date === date);
-  if (!d) return;
-  resultsPrintClear();
-  const names = new Set();
-  d.competitions.forEach(c => c.rows.forEach(r => { const n = String(r.shooter || '').trim().toLowerCase(); if (n) names.add(n); }));
-  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+/* o: {title, cont (beside the title on later pages), strip (first page only), mid (the footer's middle item),
+ *     sections: [{rows: [html, each with class rp-row], part: (rows, cont) => html with class rp-sec}], keep, min, squeeze, tail (html with class rp-tail)} */
+function printPages(o) {
+  printClear();
   const band = first => `<div class="rp-band${first ? '' : ' rp-band-small'}"><img src="icons/icon-192.png?v=${APP_VERSION}" alt="" class="rp-logo">
-      <div><div class="rp-title">Competition results${first ? '' : `<span> · ${esc(fullDate(d.date))}</span>`}</div>
+      <div><div class="rp-title">${esc(o.title)}${first ? '' : `<span> · ${esc(o.cont)}</span>`}</div>
       <div class="rp-club">Ravenshoe &amp; District Sporting Shooters · SSAA Qld Branch Q48</div></div></div>`;
-  const strip = `<div class="rp-strip"><div><div class="rp-date">${esc(fullDate(d.date))}</div><div class="rp-where">Competition day · Ravenshoe range, 311 Cemetery Road</div></div>
-      <div class="rp-totals"><div><b>${d.competitions.length}</b>${d.competitions.length === 1 ? 'competition' : 'competitions'}</div><div><b>${names.size}</b>${names.size === 1 ? 'shooter' : 'shooters'}</div></div></div>`;
-  const page = (first, inner, foot) => `<section class="rp-page">${band(first)}${first ? strip : ''}<div class="rp-body">${inner}</div>
-      <div class="rp-foot"><span>${RP_SITE}</span><span>${RP_APP}</span><span>${foot || ''}</span></div></section>`;
-  // One competition, or part of one: rows are [index, row] so the shading and medals follow the whole list
-  const block = (c, rows, cont) => `<div class="rp-comp"><div class="rp-comp-head">
-      <span class="rp-tags">${compTypes(c).map(t => `<span class="rp-tag">${esc(t)}</span>`).join('')}</span>
-      <span class="rp-comp-name">${esc(c.competition)}${cont ? ' <span class="rp-cont">(continued)</span>' : ''}</span>
-      <span class="rp-comp-n">${plural(c.rows.length, 'shooter')}</span></div>
-    <table class="rp-table"><colgroup><col class="rp-c-place"><col class="rp-c-shooter"><col class="rp-c-class"><col class="rp-c-score"></colgroup>
-      <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="rp-num">Score</th></tr></thead>
-      <tbody>${rows.map(([i, r]) => { const p = Number(r.place), top = p >= 1 && p <= 3 ? p : 0;
-        return `<tr class="${i % 2 ? 'rp-alt' : ''}${top ? ' rp-top' : ''}"><td>${top ? `<span class="rp-dot rp-p${top}"></span>` : ''}<span class="rp-place">${esc(r.place)}</span></td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="rp-num">${esc(r.score)}</td></tr>`; }).join('')}</tbody></table></div>`;
-  const key = `<div class="rp-key"><span><span class="rp-dot rp-p1"></span>1st</span><span><span class="rp-dot rp-p2"></span>2nd</span><span><span class="rp-dot rp-p3"></span>3rd</span>
-      <span class="rp-key-note">Results are as recorded by the club on the day.</span></div>`;
+  const page = (first, inner, foot) => `<section class="rp-page">${band(first)}${first ? o.strip : ''}<div class="rp-body">${inner}</div>
+      <div class="rp-foot"><span>${PRINT_SITE}</span><span>${esc(o.mid)}</span><span>${foot || ''}</span></div></section>`;
+  const secs = o.sections;
 
-  // Measure: the room on a first and a later page, each competition whole, and each of its rows
   const root = document.createElement('div');
-  root.id = 'resultsPrint'; root.setAttribute('aria-hidden', 'true');
-  root.innerHTML = page(true, '') + page(false, '') + page(false, d.competitions.map(c => block(c, c.rows.map((r, i) => [i, r]))).join('') + key);
+  root.id = 'printPages'; root.setAttribute('aria-hidden', 'true');
   document.body.appendChild(root);
-  const bodies = root.querySelectorAll('.rp-body'), hFirst = bodies[0].clientHeight - 4, hLater = bodies[1].clientHeight - 4;
-  const gap = parseFloat(getComputedStyle(root.querySelector('.rp-comp')).marginBottom) || 0;
-  const sizes = [...bodies[2].querySelectorAll('.rp-comp')].map(el => {
-    const rows = [...el.querySelectorAll('tbody tr')].map(tr => tr.getBoundingClientRect().height);
-    const whole = el.getBoundingClientRect().height;
-    return { whole, top: whole - rows.reduce((a, h) => a + h, 0), rows };
-  });
-  const keyH = bodies[2].querySelector('.rp-key').getBoundingClientRect().height;
-
-  // Fill the pages
-  const pages = [[]];
-  let left = hFirst;
-  const newPage = () => { pages.push([]); left = hLater; };
-  const fits = h => h <= left;
-  d.competitions.forEach((c, ci) => {
-    const s = sizes[ci];
-    if (fits(s.whole)) { pages[pages.length - 1].push(block(c, c.rows.map((r, i) => [i, r]))); left -= s.whole + gap; return; }
-    if (s.whole <= hLater) { newPage(); pages[pages.length - 1].push(block(c, c.rows.map((r, i) => [i, r]))); left -= s.whole + gap; return; }
-    // Longer than a page: start it where at least three rows fit, then carry on page by page with the heading row again
-    if (!fits(s.top + s.rows.slice(0, 3).reduce((a, h) => a + h, 0))) newPage();
-    let i = 0;
-    while (i < c.rows.length) {
-      let h = s.top, j = i;
-      while (j < c.rows.length && fits(h + s.rows[j])) h += s.rows[j++];
-      if (j === i) j = i + 1; // never stall on one very tall row
-      pages[pages.length - 1].push(block(c, c.rows.slice(i, j).map((r, k) => [i + k, r]), i > 0));
-      left -= h + gap;
-      i = j;
-      if (i < c.rows.length) newPage();
-    }
-  });
-  if (!fits(keyH)) newPage();
-  pages[pages.length - 1].push(key);
+  // Measure (the room on a first and a later page, each section whole, each of its rows, and the tail), then fill the pages
+  const lay = () => {
+    root.innerHTML = page(true, '') + page(false, '') + page(false, secs.map(s => s.part(s.rows, false)).join('') + o.tail);
+    const bodies = root.querySelectorAll('.rp-body'), pad = getComputedStyle(bodies[0]);
+    const room = b => b.clientHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom) - 4; // the body's padding isn't room for rows
+    const hFirst = room(bodies[0]), hLater = room(bodies[1]);
+    const first = root.querySelector('.rp-sec'), gap = first ? parseFloat(getComputedStyle(first).marginBottom) || 0 : 0;
+    const sizes = [...bodies[2].querySelectorAll('.rp-sec')].map(el => {
+      const rows = [...el.querySelectorAll('.rp-row')].map(r => r.getBoundingClientRect().height);
+      const whole = el.getBoundingClientRect().height;
+      return { whole, top: whole - rows.reduce((a, h) => a + h, 0), rows };
+    });
+    const tailH = bodies[2].querySelector('.rp-tail').getBoundingClientRect().height;
+    const pages = [[]];
+    let left = hFirst;
+    const here = () => pages[pages.length - 1];
+    const newPage = () => { if (here().length) { pages.push([]); left = hLater; } };
+    const fits = h => h <= left;
+    secs.forEach((s, si) => {
+      const z = sizes[si];
+      if (fits(z.whole)) { here().push(s.part(s.rows, false)); left -= z.whole + gap; return; }
+      if (o.keep && z.whole <= hLater) { newPage(); here().push(s.part(s.rows, false)); left -= z.whole + gap; return; }
+      // Split: start where the heading and its first rows fit, then carry on page by page with the heading again
+      if (!fits(z.top + z.rows.slice(0, o.min).reduce((a, h) => a + h, 0))) newPage();
+      let i = 0;
+      while (i < s.rows.length) {
+        let h = z.top, j = i;
+        while (j < s.rows.length && fits(h + z.rows[j])) h += z.rows[j++];
+        if (j === i) j = i + 1; // never stall on one very tall row
+        here().push(s.part(s.rows.slice(i, j), i > 0));
+        left -= h + gap;
+        i = j;
+        if (i < s.rows.length) { pages.push([]); left = hLater; }
+      }
+    });
+    if (!fits(tailH)) newPage();
+    here().push(o.tail);
+    return pages;
+  };
+  let pages = lay();
+  // o.squeeze: two pages that would fit on one with the rows a little closer (the rp-tight styles) become one
+  if (o.squeeze && pages.length === 2) {
+    root.classList.add('rp-tight');
+    const tight = lay();
+    if (tight.length === 1) pages = tight; else root.classList.remove('rp-tight');
+  }
   const printed = `Printed ${esc(longDate(todayIso()).replace(/^\S+ /, ''))}`; // "20 Oct 2026"
   root.innerHTML = pages.map((p, i) => page(i === 0, p.join(''), `${printed} · Page ${i + 1} of ${pages.length}`)).join('');
 
@@ -333,6 +340,32 @@ function resultsPrint(date) {
   document.head.appendChild(st);
   document.documentElement.classList.add('rp-printing');
   window.print();
+}
+/* One competition day. Names are exactly as the Results screen shows them. */
+function resultsPrint(date) {
+  const d = days().find(x => x.date === date);
+  if (!d) return;
+  const names = new Set();
+  d.competitions.forEach(c => c.rows.forEach(r => { const n = String(r.shooter || '').trim().toLowerCase(); if (n) names.add(n); }));
+  printPages({
+    title: 'Competition results', cont: fullDate(d.date), mid: PRINT_APP, keep: true, min: 3,
+    strip: `<div class="rp-strip"><div><div class="rp-date">${esc(fullDate(d.date))}</div><div class="rp-where">Competition day · Ravenshoe range, 311 Cemetery Road</div></div>
+      <div class="rp-totals"><div><b>${d.competitions.length}</b>${d.competitions.length === 1 ? 'competition' : 'competitions'}</div><div><b>${names.size}</b>${names.size === 1 ? 'shooter' : 'shooters'}</div></div></div>`,
+    // Shading and medals follow the whole list, so a competition carried onto the next page carries on where it left off
+    sections: d.competitions.map(c => ({
+      rows: c.rows.map((r, i) => { const p = Number(r.place), top = p >= 1 && p <= 3 ? p : 0;
+        return `<tr class="rp-row${i % 2 ? ' rp-alt' : ''}${top ? ' rp-top' : ''}"><td>${top ? `<span class="rp-dot rp-p${top}"></span>` : ''}<span class="rp-place">${esc(r.place)}</span></td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="rp-num">${esc(r.score)}</td></tr>`; }),
+      part: (rows, cont) => `<div class="rp-comp rp-sec"><div class="rp-comp-head">
+          <span class="rp-tags">${compTypes(c).map(t => `<span class="rp-tag">${esc(t)}</span>`).join('')}</span>
+          <span class="rp-comp-name">${esc(c.competition)}${cont ? ' <span class="rp-cont">(continued)</span>' : ''}</span>
+          <span class="rp-comp-n">${plural(c.rows.length, 'shooter')}</span></div>
+        <table class="rp-table"><colgroup><col class="rp-c-place"><col class="rp-c-shooter"><col class="rp-c-class"><col class="rp-c-score"></colgroup>
+          <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="rp-num">Score</th></tr></thead>
+          <tbody>${rows.join('')}</tbody></table></div>`
+    })),
+    tail: `<div class="rp-key rp-tail"><span><span class="rp-dot rp-p1"></span>1st</span><span><span class="rp-dot rp-p2"></span>2nd</span><span><span class="rp-dot rp-p3"></span>3rd</span>
+      <span class="rp-key-note">Results are as recorded by the club on the day.</span></div>`
+  });
 }
 /* By type: chips for each type, then that type's competitions, newest first, under date headings. */
 function resultsByType() {
@@ -508,7 +541,8 @@ const VIEWS = {
       <button type="button" data-ev-mode="${m[0]}" aria-pressed="${mode === m[0]}">${m[1]}</button>`).join('')}</div>`;
     return `
       <div class="page-title"><h1>Events</h1><p class="muted">Competition days, training and club events</p></div>
-      <section class="section">${seg}</section>
+      <section class="section">${seg}
+        <div class="rv-print"><button type="button" class="btn btn-outline" data-ev-print>${ICON.doc}Print or save as PDF</button></div></section>
       ${state('events', 4, () => !list.length ? `<section class="section">${empty('No upcoming events', 'New events appear here as soon as the club team posts them.')}</section>`
         : mode === 'type' ? eventsByType(list) : mode === 'date' ? eventsByDate(list) : `<section class="section">${eventRows(list, list)}</section>`)}`;
   },
@@ -927,6 +961,89 @@ function eventsByType(list) {
       <button type="button" class="chip-btn" data-ev-type="${esc(t.type)}" aria-pressed="${t.type === EVV.type}">${esc(t.type)}</button>`).join('')}</div>
       <p class="muted rv-count">${eventWord(shown.length)}</p></section>
     <section class="section">${eventRows(shown, list)}</section>`;
+}
+
+/* ----- Print or save as PDF: the events calendar for a calendar quarter (v3.11.0), on the printPages engine above -----
+ * Everyone events, and "Members only" ones (with a gold label) when a member or the club team is signed in.
+ * Club team only and hidden events are never on it, whoever prints it. Range closures are rows of their own, in red;
+ * the regular range days are in the box at the top (RANGE_DAYS), never listed one by one.
+ * The Events feed sends 30 events; when it may have stopped short, every upcoming event is fetched as the choice opens. */
+const CAL = { list: null, state: '' };
+const calShort = () => !DATA.events || events().length >= 30;
+/* n = 0 this quarter, 1 next: Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec */
+function quarterOf(n) {
+  const t = new Date(), s = new Date(t.getFullYear(), Math.floor(t.getMonth() / 3) * 3 + 3 * n, 1), e = new Date(s.getFullYear(), s.getMonth() + 3, 0);
+  return { from: isoOf(s), to: isoOf(e), label: `${MONTHS_LONG[s.getMonth()]} – ${MONTHS_LONG[e.getMonth()]} ${e.getFullYear()}` };
+}
+function calChoose() {
+  if (calShort()) { CAL.list = null; loadCal(); }
+  document.getElementById('pickTitle').textContent = 'Print which quarter?';
+  calSheetFill();
+  openSheet(pickSheet, pickSheet.querySelector('.pick-all:not(:disabled)') || document.getElementById('pickCancel'));
+}
+function calSheetFill() {
+  const wait = CAL.state === 'loading';
+  document.getElementById('pickDate').textContent = wait ? 'Getting the events…' : 'An events calendar to print or save as PDF, for the fridge or noticeboard.';
+  document.getElementById('pickList').innerHTML = [0, 1].map(n => `
+    <button type="button" class="btn ${n ? 'btn-outline' : 'btn-primary pick-all'} btn-big" data-cal-q="${n}"${wait ? ' disabled' : ''}>${n ? 'Next quarter' : 'This quarter'}<small>${esc(quarterOf(n).label)}</small></button>`).join('');
+}
+async function loadCal() {
+  if (CAL.state === 'loading') return;
+  CAL.state = 'loading';
+  try {
+    const res = await fetch(`${FEED_URL}?feed=events&all=1&n=300&v=${APP_VERSION}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+    CAL.list = data.events || [];
+  } catch (e) { console.warn('Could not load every event', e); } // the Events tab's own list is used instead
+  CAL.state = '';
+  if (!pickSheet.hidden && document.querySelector('[data-cal-q]')) { calSheetFill(); pickSheet.querySelector('.pick-all').focus(); }
+}
+/* The QR code, drawn as an SVG with the bundled library (lib/qrcode.js); a 4-module white margin so phones read it */
+function qrSvg(text) {
+  if (typeof qrcode !== 'function') return '';
+  const q = qrcode(0, 'M');
+  q.addData(text); q.make();
+  const n = q.getModuleCount();
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
+  return `<svg viewBox="-4 -4 ${n + 8} ${n + 8}" shape-rendering="crispEdges" aria-hidden="true"><rect x="-4" y="-4" width="${n + 8}" height="${n + 8}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+function calPrint(n) {
+  const q = quarterOf(n), today = todayIso(), from = q.from > today ? q.from : today, inQ = x => x >= from && x <= q.to;
+  const dayMonth = iso => { const d = parseDate(iso); return `${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`; };
+  const pub = (CAL.list || events()).filter(e => !e.audience || e.audience === 'Everyone');
+  const mem = PRIVATE && PRIVATE_FOR && PRIVATE_FOR === privateFor() ? PRIVATE.filter(e => e.audience === 'Members') : [];
+  // A practice on a regular range day is the range day itself: it is in the box, not listed
+  const regular = e => /practi[cs]e/i.test(`${e.title} ${e.discipline || ''}`) && RANGE_DAYS.some(r => r.day === parseDate(e.date).getDay());
+  const items = [...pub, ...mem].filter(e => e.title && inQ(e.date) && !regular(e)).map(e => {
+    const desc = String(e.description || '').split('\n')[0].trim(), type = String(e.discipline || '').trim(), tag = kindName(photoKind(e));
+    return { date: e.date, time: niceTime(e.start), title: e.title, members: e.audience === 'Members', tag,
+      note: desc || (type.toLowerCase() !== tag.toLowerCase() ? type : '') };
+  });
+  ((DATA.range && DATA.range.closed) || []).filter(c => c.until >= from && c.from <= q.to).forEach(c => {
+    const date = c.from > from ? c.from : from;
+    items.push({ date, closed: true, tag: 'Closed', title: c.until > date ? `Range closed until ${dayMonth(c.until)}` : 'Range closed', note: [c.reason, c.note].filter(Boolean).join(' · ') });
+  });
+  items.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (b.closed ? 1 : 0) - (a.closed ? 1 : 0));
+  const months = [];
+  items.forEach(x => { const k = x.date.slice(0, 7); let g = months.find(m => m.k === k); if (!g) { g = { k, items: [] }; months.push(g); } g.items.push(x); });
+  const row = x => { const d = parseDate(x.date);
+    return `<div class="rp-row rc-row${x.closed ? ' rc-closed' : ''}"><div class="rc-date"><b>${d.getDate()}</b><span>${DAYS[d.getDay()]}</span></div>
+      <div class="rc-time">${x.time ? esc(x.time) : '—'}</div>
+      <div class="rc-main"><div class="rc-title"><span>${esc(x.title)}</span>${x.members ? '<span class="rc-members">Members only</span>' : ''}</div>${x.note ? `<div class="rc-note">${esc(x.note)}</div>` : ''}</div>
+      <span class="rc-tag${x.closed ? ' rc-tag-closed' : ''}">${esc(x.tag)}</span></div>`; };
+  printPages({
+    title: 'Events calendar', cont: q.label, mid: CLUB_FROM, keep: false, min: 2, squeeze: true,
+    strip: `<div class="rp-strip"><div><div class="rp-date">${esc(q.label)}${from > q.from ? `<span class="rc-from">from ${esc(dayMonth(from))}</span>` : ''}</div>
+      <div class="rp-where">311 Cemetery Road, Ravenshoe · Visitors welcome</div></div>
+      <div class="rc-days"><div class="rc-days-head">Regular range days</div>${RANGE_DAYS.map(r => `<div>${esc(rangeDayText(r) + ' · ' + r.what)}</div>`).join('')}</div></div>`,
+    sections: months.map(g => { const d = parseDate(g.k + '-01');
+      return { rows: g.items.map(row), part: (rows, cont) => `<div class="rc-month rp-sec"><h2 class="rc-month-head">${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}${cont ? ' <span class="rp-cont">(continued)</span>' : ''}</h2>${rows.join('')}</div>` }; }),
+    tail: `<div class="rp-tail">${items.length ? '' : '<p class="rc-empty">No events posted yet for this quarter. Check On Target for updates.</p>'}
+      <div class="rc-panel"><div class="rc-qr">${qrSvg(`https://${PRINT_APP}/#/events`)}</div>
+      <p><b>Dates can change.</b> The range may close at short notice for fire danger or if no range officer is available. Check the latest in the On Target app before you travel: <b>${PRINT_APP}</b></p></div></div>`
+  });
 }
 
 /* ---------- Manage posts ---------- */
@@ -2166,7 +2283,7 @@ function render(quiet) {
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
   if (page !== currentPage) {
-    resultsPrintClear();
+    printClear();
     posted = false; sameDay = null; clearPicked(); ADDED = []; sharePick = null;
     if (page !== 'committee/edit') editing = null;
     if (page !== 'committee/manage') manageNote = '';
@@ -2251,6 +2368,7 @@ view.addEventListener('click', e => {
   }
   if (t.closest('[data-ev-mode]')) { EVV.mode = t.closest('[data-ev-mode]').dataset.evMode; EVV.picking = false; saveEvView(); render(true); view.querySelector(`[data-ev-mode="${EVV.mode}"]`).focus(); }
   if (t.closest('[data-ev-type]')) { EVV.type = t.closest('[data-ev-type]').dataset.evType; saveEvView(); render(true); view.querySelector(`[data-ev-type="${CSS.escape(EVV.type)}"]`).focus(); }
+  if (t.closest('[data-ev-print]')) calChoose();
   if (t.closest('[data-ev-pick]')) { EVV.picking = !EVV.picking; render(true); view.querySelector('[data-ev-pick]').focus(); }
   if (t.closest('[data-ev-day]')) {
     const b = t.closest('[data-ev-day]'), dir = b.dataset.evDir;
@@ -2886,6 +3004,7 @@ function sharePost(what) {
   // A competition day with more than one competition: the whole day, or just one of them
   const day = MANAGE.results.map((g, k) => ({ g, k })).filter(o => o.g.date === item.date);
   if (day.length < 2) return shareResults(item.date);
+  document.getElementById('pickTitle').textContent = 'Share which results?';
   document.getElementById('pickDate').textContent = longDate(item.date);
   document.getElementById('pickList').innerHTML = `
     <button type="button" class="btn btn-primary btn-big pick-all" data-share-day="${esc(item.date)}">All results for the day<small>${day.length} competitions</small></button>
@@ -2903,8 +3022,9 @@ function shareResults(date, one) {
     : { text: resultsCaption(date), picture: { make: () => resultsPicture(date), name: `rdss-results-${date}.jpg` } });
 }
 document.getElementById('pickList').addEventListener('click', e => {
-  const all = e.target.closest('[data-share-day]'), one = e.target.closest('[data-share-one]');
-  if (all) shareResults(all.dataset.shareDay);
+  const all = e.target.closest('[data-share-day]'), one = e.target.closest('[data-share-one]'), cal = e.target.closest('[data-cal-q]');
+  if (cal) { if (!cal.disabled) { closeSheets(); calPrint(Number(cal.dataset.calQ)); } }
+  else if (all) shareResults(all.dataset.shareDay);
   else if (one && MANAGE && MANAGE.results[Number(one.dataset.shareOne)]) shareResults('', MANAGE.results[Number(one.dataset.shareOne)]);
 });
 /* Manage posts, Photos: ticking photos to share */
@@ -3957,7 +4077,7 @@ function participationView() {
 view.addEventListener('click', e => {
   const y = e.target.closest('[data-pc-year]');
   if (y && !y.disabled && y.dataset.pcYear) { PCARD_FY = Number(y.dataset.pcYear); render(true); const b = view.querySelector('.pc-year-label'); if (b) b.focus(); }
-  if (e.target.closest('[data-pc-print]')) { resultsPrintClear(); window.print(); }
+  if (e.target.closest('[data-pc-print]')) { printClear(); window.print(); }
 });
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
