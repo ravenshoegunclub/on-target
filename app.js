@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.8.0';
+const APP_VERSION = '3.9.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -23,8 +23,12 @@ const FEEDS = {
   events:  'feed=events&n=30',
   results: 'feed=results&all=1&n=300',
   photos:  'feed=photos&n=60',
-  range:   'feed=range'
+  range:   'feed=range',
+  faqs:    'feed=faqs' // only fetched while FAQs are open (v3.9.0)
 };
+/* The website's FAQ page embeds #/faq-embed: just the FAQs, with no header, tab bar or sign-in (v3.9.0) */
+const EMBED = location.hash.indexOf('#/faq-embed') === 0;
+if (EMBED) document.documentElement.classList.add('embed');
 const REFRESH_AFTER_MS = 2 * 60 * 1000; // matches the feed's own 2-minute cache
 
 /* ---------- Icons ---------- */
@@ -37,6 +41,9 @@ const ICON = {
   join: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="8" r="4"/><path d="M3 21c1.3-4 4-6 7-6s5.7 2 7 6"/><path d="M19 8v6M16 11h6"/></svg>',
   pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   fees: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
+  search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+  up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
   help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg>',
   card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16c.6-1.5 1.7-2.2 3-2.2s2.4.7 3 2.2M14 10h4M14 14h4"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
@@ -157,7 +164,7 @@ async function refresh(kind, force) {
     loading[kind] = false;
   }
 }
-function refreshAll(force) { Object.keys(FEEDS).forEach(k => refresh(k, force)); }
+function refreshAll(force) { Object.keys(FEEDS).filter(k => EMBED ? k === 'faqs' : k !== 'faqs' || /^faq/.test(currentPage)).forEach(k => refresh(k, force)); }
 
 const events = () => (DATA.events && DATA.events.events) || [];
 const days = () => (DATA.results && DATA.results.days) || [];
@@ -286,7 +293,7 @@ function rangeBanners() {
 /* ---------- Shared bits ---------- */
 /* The club website's pages, each named once. Join and Fees are the same page. */
 const SITE_URL = 'https://ravenshoegunclub.com.au';
-const JOIN_URL = SITE_URL + '/become-a-member', VISIT_URL = SITE_URL + '/visit-the-range', FAQ_URL = SITE_URL + '/faq';
+const JOIN_URL = SITE_URL + '/become-a-member', VISIT_URL = SITE_URL + '/visit-the-range';
 function skeletonRows(n) {
   return `<div class="card list" aria-busy="true">${Array.from({ length: n }, () =>
     '<div class="list-row"><span class="skel skel-circle"></span><div class="list-main"><span class="skel skel-line"></span><span class="skel skel-line short"></span></div></div>').join('')}</div>`;
@@ -386,7 +393,7 @@ const VIEWS = {
     const sc = mine
       ? spShortcut(ICON.trophy, 'Enter a comp', '#/comps') + spShortcut(ICON.alert, 'Range rules &amp; safety', rules ? rules.url : '#/rules')
         + spShortcut(ICON.firstaid, 'Emergency contacts', '#/emergency') + spShortcut(ICON.mail, 'Contact the club', '#/contact')
-      : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', FAQ_URL);
+      : spShortcut(ICON.join, 'Join', JOIN_URL) + spShortcut(ICON.pin, 'Visit us', VISIT_URL) + spShortcut(ICON.fees, 'Fees', JOIN_URL) + spShortcut(ICON.help, 'FAQs', '#/faq');
     // Coming up: the next two competitions, with "You're in" and how many are going (v3.1.0)
     if (mine) entriesWanted();
     const comps = events().filter(e => e !== next && isCompetition(e)).slice(0, 2);
@@ -405,7 +412,7 @@ const VIEWS = {
       <section class="section" aria-label="Next at the range">${nextBox}</section>
       <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
       ${comps.length ? `<section class="section sp-group"><h2 class="sp-head">Coming up</h2><div class="ev-grid">${comps.map(e => eventCard(e, { link: mine ? '#/comps' : '#/events' })).join('')}</div></section>` : ''}
-      ${spGroup('Latest Club News', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
+      ${spGroup('Latest Club News', resultsRow + photosRow)}`;
   },
 
   events() {
@@ -457,6 +464,8 @@ const VIEWS = {
   rules() { return rulesView(); },
   emergency() { return emergencyInfoView(); },
   contact() { return contactView(); },
+  faq() { return faqView(false); },
+  'faq-embed'() { return faqView(true); },
   club() { return clubView(); },
   admin(sub) { return adminView(sub); },
 
@@ -480,6 +489,11 @@ const VIEWS = {
     if (sub === 'reserve') return reserveView();
     if (sub === 'requests') return benchRequestsView();
     if (sub === 'entries') return entriesAdminView();
+    if (sub === 'faqs') return faqAdminView();
+    if (sub === 'faq') {
+      if (!faqEdit) { location.replace('#/committee/faqs'); return ''; } // e.g. the page was reloaded
+      return faqForm(faqEdit);
+    }
     if (sub === 'document') {
       if (!docEdit) { location.replace('#/committee/documents'); return ''; } // e.g. the page was reloaded
       return docForm(docEdit);
@@ -2059,10 +2073,10 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries', 'faqs', 'faq'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'pcard', 'shoot', 'handgun', 'rclass', 'licence', 'licenceedit', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && (sub === 'post' || sub === 'posts') ? '/' + sub : '');
-  document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin'].includes(page)); // white, list-style screens (v2.6.0)
+  document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin', 'faq'].includes(page)); // white, list-style screens (v2.6.0)
   // Fresh club data must not wipe a form someone is filling in
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
@@ -2091,6 +2105,10 @@ function render(quiet) {
     if (page !== 'committee/emergency') EMERG = blankEmerg();
     if (page !== 'committee/document') { docEdit = null; docFile = null; docBusy = false; }
     if (page !== 'committee/documents') DOCADMIN.note = '';
+    if (page === 'faq') FAQV = { q: '', open: new Set(), back: currentPage === 'home' ? 'home' : 'club' };
+    if (page !== 'committee/faqs') FAQADMIN.note = '';
+    if (page !== 'committee/faq') faqEdit = null;
+    if (page !== 'committee/faqs' && page !== 'committee/faq') FAQADMIN = blankFaqAdmin();
     if (page !== 'committee/documents' && page !== 'committee/document') { DOCADMIN.list = null; DOCADMIN.state = ''; }
     if (page.indexOf('me') !== 0) relinking = false;
     if (page !== 'me/documents') { DOCS = null; docsState = ''; }
@@ -2100,7 +2118,10 @@ function render(quiet) {
     else if (currentPage !== 'committee/edit' && Date.now() - manageAt > 30000) { MANAGE = null; manageState = ''; }
   }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
+  const typing = quiet && document.activeElement && document.activeElement.id === 'faqSearch' ? document.activeElement.selectionStart : null;
   view.innerHTML = VIEWS[page.split('/')[0]](sub, arg);
+  faqFilter(false);
+  if (typing !== null) { const box = document.getElementById('faqSearch'); box.focus(); box.setSelectionRange(typing, typing); } // fresh data while searching
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
   if (!quiet || page !== currentPage) {
     view.style.animation = 'none'; void view.offsetWidth; view.style.animation = '';
@@ -2115,7 +2136,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me', comps: 'events', rules: 'home', emergency: 'home', contact: 'home' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me', comps: 'events', rules: 'home', emergency: 'home', contact: 'home', faq: 'club' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -2252,6 +2273,7 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'emailForm') { e.preventDefault(); changeEmail(e.target); }
   if (e.target.id === 'emForm') { e.preventDefault(); findEmergency(e.target); }
   if (e.target.id === 'docForm') { e.preventDefault(); saveDoc(e.target); }
+  if (e.target.id === 'faqForm') { e.preventDefault(); saveFaq(e.target); }
 });
 view.addEventListener('change', e => {
   if (e.target.id !== 'dcFile') return;
@@ -2410,7 +2432,7 @@ async function committeeApi(fn, args) {
 function signOut() {
   session = null; sessionStore.set(null);
   if (!member) { ME = null; meState = ''; meNote = ''; } // the membership their PIN was showing
-  EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; docFile = null; DOCS = null; docsState = '';
+  EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; FAQADMIN = blankFaqAdmin(); faqEdit = null; docFile = null; DOCS = null; docsState = '';
   MEMBERS = null; membersFailed = false; BENCH = blankBench(); if (!member) VIEW_AS = '';
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = ''; sharePick = null; ADDED = [];
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
@@ -3107,7 +3129,7 @@ view.addEventListener('click', e => {
 /* Club (v2.6.1): the club's own things, the same for everyone. Room is kept at the top for the range status banner (v2.7). */
 function clubView() {
   const signedIn = !!(member || session), pics = photos().slice(0, 4);
-  const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', FAQ_URL)
+  const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', '#/faq')
     + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.web, 'Club website', SITE_URL);
   return `
     ${rangeBanners()}
@@ -3155,7 +3177,7 @@ function adminView(sub) {
       ${group('Range', row(ICON.alert, 'Range status', '#/committee/rangestatus', '', closures().length ? `Closed ${esc(closureDays(closures()[0]))}${closures().length > 1 ? ' and more' : ''}` : 'Open as normal')
         + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
         + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve') + row(ICON.people, 'Competition entries', '#/committee/entries', '', "Who's said I'm in"))}
-      ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
+      ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove') + row(ICON.help, 'FAQs', '#/committee/faqs', '', 'Add · edit · reorder'))}
       ${session.admin ? `${ADMIN.benchNote ? `<p class="notice" role="status">${esc(ADMIN.benchNote)}</p>` : ''}${group('Admin only', benchSwitchRow() + row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
         + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet')
@@ -5194,6 +5216,217 @@ function contactView() {
     </div></section>`;
 }
 
+/* ---------- FAQs (v3.9.0) ----------
+   On Target is the one place the club's FAQs are kept. Everyone reads them through the public feed (?feed=faqs), saved
+   on the phone like events. On Target shows the "On Target" and "Both" ones at #/faq; the website's FAQ page embeds
+   #/faq-embed, which shows the "Website" and "Both" ones with no header or tab bar. Any club team PIN can change them
+   in Club admin, FAQs. */
+const faqItems = () => (DATA.faqs && DATA.faqs.faqs) || [];
+let FAQV = { q: '', open: new Set(), back: 'club' };
+/* Web addresses (with or without https://) and email addresses in an answer become links. On the website they open a new tab. */
+function faqLinks(text, embed) {
+  const re = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?:https?:\/\/|www\.)[^\s<>"]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|gov|edu|au)\b(?:\/[^\s<>"]*)?/gi;
+  let out = '', at = 0, m;
+  while ((m = re.exec(text))) {
+    const tail = (/[.,;:!?)'"]+$/.exec(m[0]) || [''])[0], link = m[0].slice(0, m[0].length - tail.length);
+    const mail = link.includes('@') && !/^https?:/i.test(link), href = mail ? 'mailto:' + link : /^https?:/i.test(link) ? link : 'https://' + link;
+    out += esc(text.slice(at, m.index)) + `<a href="${esc(href)}"${embed || !mail ? ' target="_blank" rel="noopener"' : ''}>${esc(link)}</a>`;
+    at = m.index + link.length; re.lastIndex = at;
+  }
+  return out + esc(text.slice(at));
+}
+/* The FAQs grouped by topic, in order: [{topic, items}] */
+function faqTopics(list) {
+  const out = [];
+  list.forEach(f => { let g = out.find(x => x.topic === f.topic); if (!g) out.push(g = { topic: f.topic, items: [] }); g.items.push(f); });
+  return out;
+}
+function faqView(embed) {
+  const want = embed ? 'Website' : 'On Target';
+  if (!FAILED.faqs) setTimeout(() => refresh('faqs'), 0); // fetched only when FAQs are opened
+  const body = () => {
+    const groups = faqTopics(faqItems().filter(f => f.show === 'Both' || f.show === want));
+    if (!groups.length) return empty('No FAQs yet', 'Please contact the club with your question.');
+    return groups.map(g => `
+      <section class="faq-topic"><h2 class="sp-head">${esc(g.topic)}</h2>${g.items.map(f => `
+        <details class="faq-item" data-faq="${esc(f.id)}" data-text="${esc((f.q + ' ' + f.a).toLowerCase())}"${FAQV.open.has(f.id) ? ' open' : ''}>
+          <summary><span class="faq-q">${esc(f.q)}</span>${ICON.chev}</summary>
+          <div class="faq-a">${faqLinks(f.a, embed)}</div>
+        </details>`).join('')}
+      </section>`).join('') + `<p class="muted faq-none" id="faqNone" role="status" hidden>No FAQs match that. Try another word${embed ? '' : ', or contact the club'}.</p>`;
+  };
+  return `
+    ${embed ? '' : `<div class="page-title"><a class="back-link" href="#/${FAQV.back}">${ICON.chev}${FAQV.back === 'home' ? 'Home' : 'Club'}</a><h1>FAQs</h1><p class="muted">Answers to the questions we're asked most.</p></div>`}
+    <section class="section faq-page">
+      <div id="faqAsk"></div><!-- room for a future "Ask a question" -->
+      <div class="faq-search">${ICON.search}<label class="sr-only" for="faqSearch">Search the FAQs</label>
+        <input class="field" type="search" id="faqSearch" placeholder="Search the FAQs" autocomplete="off" value="${esc(FAQV.q)}"></div>
+      ${state('faqs', 5, body)}
+      ${embed ? '' : `<div class="faq-more"><h2>Still have a question?</h2><a class="btn btn-primary btn-big" href="#/contact">${ICON.mail}Contact the club</a></div>`}
+    </section>`;
+}
+/* Search: every word typed must be in the question or answer. While typing, the matching answers open. */
+function faqFilter(typing) {
+  if (!document.getElementById('faqSearch')) return;
+  const words = FAQV.q.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0;
+  if (typing) FAQV.open = new Set();
+  view.querySelectorAll('.faq-topic').forEach(sec => {
+    let n = 0;
+    sec.querySelectorAll('.faq-item').forEach(d => {
+      const hit = words.every(w => d.dataset.text.includes(w));
+      d.hidden = !hit;
+      if (hit) n++;
+      if (typing) { d.open = hit && words.length > 0; if (d.open) FAQV.open.add(d.dataset.faq); }
+    });
+    sec.hidden = !n; shown += n;
+  });
+  const none = document.getElementById('faqNone');
+  if (none) none.hidden = !!shown || !words.length;
+}
+view.addEventListener('input', e => { if (e.target.id === 'faqSearch') { FAQV.q = e.target.value; faqFilter(true); } });
+view.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.classList && d.classList.contains('faq-item')) { if (d.open) FAQV.open.add(d.dataset.faq); else FAQV.open.delete(d.dataset.faq); }
+}, true);
+
+/* Club admin, FAQs (any club team PIN): add, edit, reorder, delete and restore */
+const FAQ_SHOW = [['On Target', 'On Target only', ''], ['Website', 'Website only', ''], ['Both', 'Both', '']];
+const blankFaqAdmin = () => ({ list: null, deleted: [], state: '', note: '', busy: false });
+let FAQADMIN = blankFaqAdmin();
+let faqEdit = null; // the FAQ being edited ({} for a new one) while that screen is open
+const faqShowBadge = s => s === 'Website' ? `<span class="badge badge-web">${ICON.web}Website only</span>`
+  : s === 'On Target' ? '<span class="badge badge-members">On Target only</span>' : '<span class="badge badge-everyone">Both</span>';
+const faqEdited = f => f.by === 'Website FAQs' ? `Copied from the website FAQs, ${niceDate(f.on)}` : `Last edited by ${f.by}, ${niceDate(f.on)}`;
+/* What the server sends back after every change: the club team's list, and the public list everyone sees straight away */
+function faqTook(out) {
+  FAQADMIN.list = out.faqs || []; FAQADMIN.deleted = out.deleted || []; FAQADMIN.state = '';
+  DATA.faqs = { faqs: FAQADMIN.list.map(f => ({ id: f.id, topic: f.topic, q: f.q, a: f.a, show: f.show })) }; FAILED.faqs = false;
+  store.set('faqs', DATA.faqs);
+  if (out.message) FAQADMIN.note = out.message;
+}
+async function loadFaqAdmin() {
+  if (FAQADMIN.state === 'loading') return;
+  FAQADMIN.state = 'loading';
+  try { faqTook(await committeeApi('faqList')); }
+  catch (e) { if (e.signedOut) { FAQADMIN.state = ''; return; } FAQADMIN.state = 'failed'; }
+  if (currentPage === 'committee/faqs' || currentPage === 'committee/faq') render(true);
+}
+const faqMoveBtn = (kind, key, dir, off, label) => `<button type="button" class="icon-btn faq-move" data-fq-move="${kind}" data-fq-key="${esc(key)}" data-fq-dir="${dir}" aria-label="${esc(label)}"${off || FAQADMIN.busy ? ' disabled' : ''}>${dir < 0 ? ICON.up : ICON.down}</button>`;
+function faqAdminView() {
+  if (!FAQADMIN.list && FAQADMIN.state !== 'failed') setTimeout(loadFaqAdmin, 0);
+  const groups = FAQADMIN.list ? faqTopics(FAQADMIN.list) : [], del = FAQADMIN.deleted;
+  return `
+    <div class="page-title">${adminBack}<h1>FAQs</h1><p class="muted">They show in On Target (Club, FAQs) and on the club website's FAQ page. Changes show straight away.</p></div>
+    <section class="section">
+      ${FAQADMIN.note ? `<p class="notice" role="status">${esc(FAQADMIN.note)}</p>` : ''}
+      <p class="muted" role="status">${FAQADMIN.busy ? 'Saving the new order…' : ''}</p>
+      <button type="button" class="btn btn-primary btn-big" data-fq="new">${ICON.plus}Add an FAQ</button>
+    </section>
+    ${FAQADMIN.list ? (groups.length ? groups.map((g, gi) => `
+      <section class="section">
+        <div class="faq-adm-head"><h2 class="day-head">${esc(g.topic)}</h2><span class="faq-moves">
+          ${faqMoveBtn('topic', g.topic, -1, gi === 0, 'Move topic up: ' + g.topic)}${faqMoveBtn('topic', g.topic, 1, gi === groups.length - 1, 'Move topic down: ' + g.topic)}</span></div>
+        <div class="card list">${g.items.map((f, i) => `
+          <div class="faq-adm-row">
+            <button type="button" class="faq-adm-main" data-fq="${esc(f.id)}"><span class="list-title">${esc(f.q)}</span>
+              <span class="badge-row">${faqShowBadge(f.show)}</span><span class="muted">${esc(faqEdited(f))}</span></button>
+            <span class="faq-moves">${faqMoveBtn('faq', f.id, -1, i === 0, 'Move up: ' + f.q)}${faqMoveBtn('faq', f.id, 1, i === g.items.length - 1, 'Move down: ' + f.q)}</span>
+          </div>`).join('')}</div>
+      </section>`).join('') : `<section class="section">${empty('No FAQs yet', 'Tap "Add an FAQ" to add the first one.')}</section>`)
+      : `<section class="section">${FAQADMIN.state === 'failed' ? loadFailed('the FAQs', 'data-fq-reload') : skeletonRows(4)}</section>`}
+    ${del.length ? `<section class="section"><details class="card faq-bin"><summary><span class="list-title">Recently deleted (${del.length})</span>${ICON.chev}</summary>
+      <p class="muted faq-bin-note">Deleted FAQs are kept here for 30 days, then removed for good.</p>
+      ${del.map(f => `<div class="faq-adm-row"><span class="faq-adm-main"><span class="list-title">${esc(f.q)}</span>
+          <span class="muted">${esc(`Deleted by ${f.deletedBy}, ${niceDate(f.deletedOn)} · removed for good after ${niceDate(f.until)}`)}</span></span>
+        <button type="button" class="btn btn-outline" data-fq-restore="${esc(f.id)}"${FAQADMIN.busy ? ' disabled' : ''}>Restore</button></div>`).join('')}
+    </details></section>` : ''}`;
+}
+function faqForm(f) {
+  const isNew = !f.id, topics = faqTopics(FAQADMIN.list || []).map(g => g.topic), newTopic = !topics.length;
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/faqs">${ICON.chev}FAQs</a><h1>${isNew ? 'Add an FAQ' : 'Edit FAQ'}</h1></div>
+    <section class="section"><form class="card form" id="faqForm" novalidate>
+      <label class="field-label" for="fqQ">Question</label>
+      <input class="field" id="fqQ" maxlength="300" autocomplete="off" value="${esc(f.q || '')}">
+      <label class="field-label" for="fqA">Answer</label>
+      <p class="muted" id="fqAHint">Plain words. Web addresses and email addresses become links by themselves.</p>
+      <textarea class="field" id="fqA" rows="7" maxlength="3000" aria-describedby="fqAHint">${esc(f.a || '')}</textarea>
+      <label class="field-label" for="fqTopic">Topic</label>
+      <select class="field" id="fqTopic"${newTopic ? ' hidden' : ''}>${isNew ? '<option value="">Choose a topic…</option>' : ''}${topics.map(t => `<option${t === f.topic ? ' selected' : ''}>${esc(t)}</option>`).join('')}<option value="__new">New topic…</option></select>
+      <input class="field" id="fqNewTopic" maxlength="60" autocomplete="off" placeholder="Name of the new topic" aria-label="Name of the new topic"${newTopic ? '' : ' hidden'}>
+      <fieldset class="choices choices-row"><legend class="field-label">Show on</legend>${radios('fqShow', FAQ_SHOW, f.show || 'Both')}</fieldset>
+      <p class="form-error" id="fqError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="fqSubmit">${isNew ? 'Add FAQ' : 'Save changes'}</button>
+      ${isNew ? '' : '<button type="button" class="btn btn-danger btn-big" data-fq-delete>Delete this FAQ</button>'}
+    </form></section>`;
+}
+function faqDone(out) {
+  faqTook(out);
+  const form = document.getElementById('faqForm');
+  if (form) form.remove();
+  go('#/committee/faqs');
+}
+async function saveFaq(form) {
+  const btn = form.querySelector('#fqSubmit'), error = form.querySelector('#fqError'), sel = form.querySelector('#fqTopic');
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const usingNew = sel.hidden || sel.value === '__new', newBox = form.querySelector('#fqNewTopic');
+  const d = { id: faqEdit.id || '', q: form.querySelector('#fqQ').value.replace(/\s+/g, ' ').trim(), a: form.querySelector('#fqA').value.trim(),
+    topic: (usingNew ? newBox.value : sel.value).replace(/\s+/g, ' ').trim(), show: (form.querySelector('input[name="fqShow"]:checked') || {}).value || 'Both' };
+  if (!d.q) return fail('Please type the question.', form.querySelector('#fqQ'));
+  if (!d.a) return fail('Please type the answer.', form.querySelector('#fqA'));
+  if (!d.topic) return fail(usingNew ? 'Please type a name for the new topic.' : 'Please choose a topic.', usingNew ? newBox : sel);
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+  try { faqDone(await committeeApi('faqSave', [d])); }
+  catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = d.id ? 'Save changes' : 'Add FAQ';
+    fail(e.message);
+  }
+}
+function askDeleteFaq() {
+  const f = faqEdit;
+  confirmAsk({
+    title: 'Delete this FAQ?', text: `"${f.q}" will no longer show in On Target or on the website. It stays in "Recently deleted" for 30 days, where anyone in the club team can bring it back.`,
+    yes: 'Yes, delete it', busy: 'Deleting…',
+    run: () => committeeApi('faqDelete', [f.id]), done: faqDone
+  });
+}
+/* Moves and restores: one at a time, the buttons wait until the server has the new order */
+async function faqChange(fn, args, refocus) {
+  if (FAQADMIN.busy) return;
+  FAQADMIN.busy = true; FAQADMIN.note = ''; render(true);
+  try { faqTook(await committeeApi(fn, args)); }
+  catch (e) { if (!e.signedOut) FAQADMIN.note = e.message; }
+  FAQADMIN.busy = false;
+  if (currentPage !== 'committee/faqs') return;
+  render(true);
+  const again = refocus && view.querySelector(refocus), other = again && again.disabled && view.querySelector(refocus.replace(/data-fq-dir="(-?1)"/, (m, d) => `data-fq-dir="${-d}"`));
+  if (again && !again.disabled) again.focus(); else if (other) other.focus(); // at the top or bottom now: the other arrow
+}
+view.addEventListener('change', e => {
+  if (e.target.id !== 'fqTopic') return;
+  const box = document.getElementById('fqNewTopic');
+  box.hidden = e.target.value !== '__new';
+  if (!box.hidden) box.focus();
+});
+view.addEventListener('click', e => {
+  const t = e.target, hit = a => { const x = t.closest(`[${a}]`); return x && !x.disabled ? x : null; };
+  let b;
+  if ((b = hit('data-fq')) && (FAQADMIN.list || b.dataset.fq === 'new')) {
+    faqEdit = b.dataset.fq === 'new' ? {} : FAQADMIN.list.find(f => f.id === b.dataset.fq);
+    if (faqEdit) location.hash = '#/committee/faq';
+  }
+  if (hit('data-fq-reload')) { FAQADMIN = blankFaqAdmin(); render(true); }
+  if (hit('data-fq-delete') && faqEdit) askDeleteFaq();
+  if ((b = hit('data-fq-move'))) {
+    const { fqMove: kind, fqKey: key, fqDir: dir } = b.dataset;
+    faqChange('faqMove', [kind, key, Number(dir)], `[data-fq-move="${kind}"][data-fq-key="${CSS.escape(key)}"][data-fq-dir="${dir}"]`);
+  }
+  if ((b = hit('data-fq-restore'))) faqChange('faqRestore', [b.dataset.fqRestore], '[data-fq="new"]');
+});
+
 /* Reserve for a competition: pick the event, then tap the benches it needs */
 async function loadBenchEvents() {
   if (BENCH.eventsState === 'loading') return;
@@ -6000,7 +6233,7 @@ render();
 refreshAll();
 
 /* Check a remembered PIN still works (it may have been changed or removed), and pick up name or admin changes. */
-if (session) {
+if (session && !EMBED) {
   loadUnread();
   committeeApi('signIn').then(me => {
     if (!session || (me.name === session.name && !!me.admin === session.admin)) return;
@@ -6016,7 +6249,7 @@ window.addEventListener('load', () => {
 });
 
 /* ---------- Offline support ---------- */
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && !EMBED) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js?v=' + APP_VERSION));
 }
 
