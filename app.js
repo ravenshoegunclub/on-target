@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.12.0';
+const APP_VERSION = '3.12.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -3994,7 +3994,7 @@ function meResults() {
    On Target has no Range Officer names yet, so that column stays blank for the paper card to be signed. */
 let PCARD_FY = 0;
 const fyOfDate = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
-const PC_CLASS_KEY = 'Class A: Air Pistol · Class B: Centre Fire up to .38 · Class C: Centre Fire over .38 to .45 · Class D: Rim Fire';
+const PC_CLASS_KEY = 'Class A: Air Pistol · Class B: Centre fire up to .38 calibre, or black powder · Class C: Centre Fire over .38 to .45 · Class D: Rim Fire';
 /* {text, part (0 to 1), met} for the progress bar, or a line with no bar, or null */
 /* The Participation Card's rule for one licence year, 1 July to 30 June (v3.12.0; Range Standing Orders 3.2). The numbers are
    shootsNeeded's, the police licence rule, pro-rated by the months each class was held. Shoots count one a day.
@@ -5845,7 +5845,7 @@ setInterval(() => { if (!document.hidden && currentPage === 'committee/range' &&
    - Two or more: floor(4 x m / 12) shoots for each class; of the total, the competitions needed are the smaller of
      the total and floor(6 x longest months / 12); Class C's own number must be accredited events. */
 const QPS_URL = 'https://www.police.qld.gov.au/weapon-licensing/concealable-firearms-class-and-participation-requirements';
-const HANDGUN_CLASSES = [['A', 'Air pistols', 'All air pistols'], ['B', 'Centre-fire up to .38 / 9mm', 'Includes black-powder pistols'],
+const HANDGUN_CLASSES = [['A', 'Air pistols', 'All air pistols'], ['B', 'Centre-fire up to .38 or black powder', 'e.g. 9mm or .38 Special'],
   ['C', 'Centre-fire over .38 up to .45', 'High-calibre class'], ['D', 'Rimfire pistols', 'e.g. .22']];
 /* held: [{key, months}] for the classes ticked */
 function shootsNeeded(held) {
