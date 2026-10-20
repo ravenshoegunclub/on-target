@@ -1,16 +1,16 @@
-/* On Target v3.5.0 — offline support
+/* On Target v3.6.0 — offline support
    Change CACHE when files change so phones pick up the new version. */
-const CACHE = 'on-target-v3.5.0';
+const CACHE = 'on-target-v3.6.0';
 const PHOTO_CACHE = 'on-target-photos';
 const SHELL = [
   './',
   'index.html',
-  'styles.css?v=3.5.0',
-  'app.js?v=3.5.0',
-  'manifest.webmanifest?v=3.5.0',
-  'icons/icon-192.png?v=3.5.0',
-  'icons/favicon-48.png?v=3.5.0',
-  'icons/apple-touch-icon.png?v=3.5.0'
+  'styles.css?v=3.6.0',
+  'app.js?v=3.6.0',
+  'manifest.webmanifest?v=3.6.0',
+  'icons/icon-192.png?v=3.6.0',
+  'icons/favicon-48.png?v=3.6.0',
+  'icons/apple-touch-icon.png?v=3.6.0'
 ];
 
 self.addEventListener('install', e => {
@@ -41,6 +41,17 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       caches.open(PHOTO_CACHE).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
         if (res.ok || res.type === 'opaque') c.put(req, res.clone());
+        return res;
+      })))
+    );
+    return;
+  }
+
+  // The default event photos (v3.6.0): kept like club photos, so they show at the range with no signal
+  if (url.origin === location.origin && url.pathname.includes('/images/events/')) {
+    e.respondWith(
+      caches.open(PHOTO_CACHE).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
+        if (res.ok) c.put(req, res.clone());
         return res;
       })))
     );

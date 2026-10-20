@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.5.0';
+const APP_VERSION = '3.6.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -403,12 +403,13 @@ const VIEWS = {
       <div class="page-title"><h1>${mine ? `G'day ${esc(mine.first)}` : 'Welcome to the club'}</h1></div>
       <section class="section" aria-label="Next at the range">${nextBox}</section>
       <nav class="shortcuts" aria-label="Shortcuts">${sc}</nav>
-      ${comps.length ? spGroup('Coming up', comps.map(e => spRow(ICON.calendar, e.title, mine ? '#/comps' : '#/events', joinDot(shortDate(e.date), closedOn(e.date) ? 'Range closed' : timeRange(e), entryLine(e)))).join('')) : ''}
-      ${spGroup('Latest News', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
+      ${comps.length ? `<section class="section sp-group"><h2 class="sp-head">Coming up</h2><div class="ev-grid">${comps.map(e => eventCard(e, { link: mine ? '#/comps' : '#/events' })).join('')}</div></section>` : ''}
+      ${spGroup('Latest Club News', resultsRow + photosRow + (mine ? spRow(ICON.help, 'FAQs', FAQ_URL) : ''))}`;
   },
 
   events() {
     if (session || (member && ME && ME.linked) ? !PRIVATE || PRIVATE_FOR !== privateFor() : false) loadPrivate();
+    entriesWanted(); // v3.6.0: "You're in · 8 going" on the competition cards
     const list = eventsShown(), mode = EVV.mode;
     const seg = `<div class="seg rv-seg" role="group" aria-label="How to show the events">${RES_MODES.map(m => `
       <button type="button" data-ev-mode="${m[0]}" aria-pressed="${mode === m[0]}">${m[1]}</button>`).join('')}</div>`;
@@ -503,7 +504,7 @@ const VIEWS = {
 };
 
 /* Suggestions for an event's "Type of event" (free text is still allowed). It is saved in the Events tab's Discipline column. */
-const EVENT_TYPES = ['Competition', 'Practice', 'Training', 'Safety course', 'Open day', 'Club meeting', 'Working bee', 'Social', 'Other'];
+const EVENT_TYPES = ['Competition', 'Black powder', 'Practice', 'Training', 'Safety course', 'Open day', 'Club meeting', 'Working bee', 'Social', 'Other'];
 let posted = false; // true while the "Event posted", "Results posted" or "Photos added" message is showing
 
 /* Who can see an event. "Hidden" only exists for older events with Show = No in the Sheet.
@@ -540,6 +541,7 @@ function eventForm(item) {
       <datalist id="evDiscList">${EVENT_TYPES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
       <label class="field-label" for="evDesc">Description <span class="field-hint">targets, distances, fees, what to bring</span></label>
       <textarea class="field" id="evDesc" maxlength="400">${v('description')}</textarea>
+      <div class="ev-pick" id="evPhotoBox">${evPhotoBox(ev)}</div>
       <fieldset class="choices">
         <legend class="field-label">Who can see this?</legend>
         ${AUDIENCES.filter(a => a[0] !== 'Hidden' || ev.audience === 'Hidden').map(a => `
@@ -550,6 +552,75 @@ function eventForm(item) {
       <button type="submit" class="btn btn-primary btn-big" id="evSubmit">${item ? 'Save changes' : 'Post event'}</button>
       ${item ? `<button type="button" class="btn btn-danger btn-big" data-delete>Delete event</button>` : ''}
     </form></section>`;
+}
+
+/* The event form's Photo section (v3.6.0): optional. It shows the photo the event will use. A photo for this event alone
+   is saved with the event; an admin's new default for a discipline is saved straight away. */
+let EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
+function evPhotoForm() {
+  const f = document.getElementById('eventForm'), val = id => (f && f.querySelector('#' + id) ? f.querySelector('#' + id).value.trim() : '');
+  return f ? { date: val('evDate'), title: val('evTitle'), discipline: val('evDisc') } : null;
+}
+function evPhotoBox(ev) {
+  const was = editing && editing.kind === 'event' ? editing.item : null, mine = was && !EVPHOTO.clear ? ownPhoto(was) : '';
+  const kind = photoKind(ev), src = EVPHOTO.preview || mine || kindPhoto(kind), comp = isCompetition(ev);
+  const note = EVPHOTO.preview ? 'Your photo for this event. It is saved when you ' + (was ? 'save the changes.' : 'post the event.')
+    : mine ? 'This event has its own photo.'
+    : comp ? `The usual photo for ${kindName(kind)} competitions. Nothing to do.`
+    : 'Only competitions show a photo, unless you choose one for this event.';
+  return `<span class="field-label">Photo <span class="field-hint">optional</span></span>
+    <div class="ev-photo ev-photo-pick"><img src="${esc(src)}" alt="The photo this event will show"><span class="ev-fade"></span>
+      <span class="ev-over"><span class="ev-kind">${esc(kindLabel(ev))}</span><span class="ev-name">${esc(ev.title || 'Event title')}</span></span></div>
+    <p class="muted" role="status">${esc(EVPHOTO.note || note)}</p>
+    <input type="file" accept="image/*" id="evPhotoFile" hidden>
+    <div class="btn-row">
+      <button type="button" class="btn btn-outline" data-evphoto="pick"${EVPHOTO.busy ? ' disabled' : ''}>${ICON.camera}${EVPHOTO.preview || mine ? 'Choose another photo' : 'Use a different photo for this event'}</button>
+      ${EVPHOTO.preview || mine ? `<button type="button" class="link-btn" data-evphoto="clear">Use the usual photo</button>` : ''}
+    </div>
+    ${session && session.admin ? `<div class="btn-row ev-pick-admin">
+      <button type="button" class="btn btn-outline" data-evphoto="default"${EVPHOTO.busy ? ' disabled' : ''}>Change the default ${esc(kindName(kind))} photo</button>
+      ${evPhotos().defaults[kind] ? `<button type="button" class="link-btn" data-evphoto="undefault">Back to the club's usual ${esc(kindName(kind))} photo</button>` : ''}
+    </div><p class="muted">Admins: the default is used for every ${esc(kindName(kind))} event without its own photo.</p>` : ''}`;
+}
+function drawEvPhoto() { const box = document.getElementById('evPhotoBox'), ev = evPhotoForm(); if (box && ev) box.innerHTML = evPhotoBox(ev); }
+async function evPhotoChosen(file, mode) {
+  EVPHOTO.busy = true; EVPHOTO.note = 'Getting the photo ready…'; drawEvPhoto();
+  let dataUrl = '';
+  try {
+    const made = await shrinkPhoto(file);
+    dataUrl = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(made.blob); });
+  } catch (e) { EVPHOTO.busy = false; EVPHOTO.note = "That doesn't look like a photo. Please choose another one."; return drawEvPhoto(); }
+  EVPHOTO.busy = false; EVPHOTO.note = '';
+  if (mode === 'event') { EVPHOTO.dataUrl = dataUrl; EVPHOTO.preview = dataUrl; EVPHOTO.clear = false; return drawEvPhoto(); }
+  const kind = photoKind(evPhotoForm()), name = kindName(kind);
+  drawEvPhoto();
+  confirmAsk({ title: `New default ${name} photo?`, text: `Every ${name} event without its own photo will show this one, in On Target for everyone.`,
+    yes: 'Yes, use it', busy: 'Saving…', no: 'No, keep the old one', run: () => committeeApi('eventPhotoSet', ['default', kind, dataUrl]),
+    done: out => { if (DATA.range) DATA.range.eventPhotos = out.photos; EVPHOTO.note = out.message; drawEvPhoto(); } });
+}
+function evPhotoTap(what) {
+  const input = document.getElementById('evPhotoFile');
+  if (what === 'pick' || what === 'default') { input.dataset.mode = what === 'pick' ? 'event' : 'default'; input.value = ''; input.click(); return; }
+  if (what === 'clear') { EVPHOTO = { dataUrl: '', preview: '', clear: true, busy: false, note: '' }; return drawEvPhoto(); }
+  if (what === 'undefault') {
+    const kind = photoKind(evPhotoForm()), name = kindName(kind);
+    confirmAsk({ title: `Back to the usual ${name} photo?`, text: `${name} events go back to the club's own photo.`, yes: 'Yes, go back', busy: 'Saving…', no: 'No, keep this one',
+      run: () => committeeApi('eventPhotoSet', ['default', kind, '']), done: out => { if (DATA.range) DATA.range.eventPhotos = out.photos; EVPHOTO.note = out.message; drawEvPhoto(); } });
+  }
+}
+/* After the event is saved: its own photo goes up, comes off, or moves with a new title or day. Gives back a warning, or ''. */
+async function evPhotoAfter(newKey, oldKey) {
+  try {
+    let out = null;
+    if (EVPHOTO.dataUrl) {
+      out = await committeeApi('eventPhotoSet', ['event', newKey, EVPHOTO.dataUrl]);
+      if (oldKey && oldKey !== newKey && evPhotos().events[oldKey]) out = await committeeApi('eventPhotoSet', ['event', oldKey, '']);
+    } else if (EVPHOTO.clear && evPhotos().events[oldKey || newKey]) out = await committeeApi('eventPhotoSet', ['event', oldKey || newKey, '']);
+    else if (oldKey && oldKey !== newKey && evPhotos().events[oldKey]) out = await committeeApi('eventPhotoMove', [oldKey, newKey]);
+    if (out && DATA.range) DATA.range.eventPhotos = out.photos;
+    EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
+    return '';
+  } catch (e) { if (e.signedOut) return ''; return "the photo couldn't be saved: " + e.message; }
 }
 
 function eventPosted() {
@@ -608,8 +679,50 @@ function eventTypes(list) {
   const rank = t => { const i = RES_TYPE_ORDER.indexOf(t); return i < 0 ? (t === 'Other' ? 100 : 99) : i; };
   return Object.keys(n).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1)).map(t => ({ type: t, count: n[t] }));
 }
-/* The event rows; `all` is the whole list, so the calendar button finds the right event */
+/* Photo cards (v3.6.0): competitions, and any event given its own photo, show as a card with the photo across the top.
+   The photo is the event's own, else its discipline's default: the club's own photo (images/events) unless an admin has
+   replaced it. The choices come with the range feed (eventPhotos). Photos load only as a card comes into view. */
+const EV_PHOTO_V = '1'; // change if a photo in images/events is replaced, so phones fetch it again
+const PHOTO_KINDS = [['pistol', 'Pistol'], ['rifle', 'Rifle'], ['clay', 'Clay'], ['black-powder', 'Black powder'], ['other', 'Other']];
+/* The discipline: "Type of event" first, then words in the title, else Other */
+function photoKind(ev) {
+  const d = String(ev.discipline || '').trim().toLowerCase(), t = String(ev.title || '').toLowerCase(), bp = /black\s*powder|muzzle\s*load/;
+  if (bp.test(d)) return 'black-powder';
+  if (['pistol', 'rifle', 'clay'].includes(d)) return d;
+  if (bp.test(t)) return 'black-powder';
+  if (/pistol|handgun/.test(t)) return 'pistol';
+  if (/rifle|benchrest|fullbore|smallbore/.test(t)) return 'rifle';
+  if (/clay|\btrap\b|skeet|sporting/.test(t)) return 'clay';
+  return 'other';
+}
+const kindName = k => (PHOTO_KINDS.find(x => x[0] === k) || PHOTO_KINDS[4])[1];
+const evPhotos = () => (DATA.range && DATA.range.eventPhotos) || { defaults: {}, events: {} };
+const ownPhoto = ev => evPhotos().events[entryKey(ev.date, ev.title)] || '';
+const kindPhoto = k => evPhotos().defaults[k] || `images/events/${k}.jpg?v=${EV_PHOTO_V}`;
+const eventPhoto = ev => ownPhoto(ev) || kindPhoto(photoKind(ev));
+const asCard = ev => isCompetition(ev) || !!ownPhoto(ev);
+const kindLabel = ev => { const k = photoKind(ev); return k !== 'other' ? kindName(k) : isCompetition(ev) ? 'Competition' : (String(ev.discipline || '').trim() || 'Event'); };
+/* o.cal: the event's place in the list the calendar button reads; o.link: the whole card opens it (Home); o.entry: the I'm in buttons (Enter a comp) */
+function eventCard(ev, o) {
+  const closed = closedOn(ev.date), status = o.entry ? '' : entryLine(ev);
+  const photo = `<div class="ev-photo"><img src="${esc(eventPhoto(ev))}" alt="" loading="lazy" decoding="async" width="1600" height="900"><span class="ev-fade"></span>
+      ${closed ? '<span class="badge badge-closed ev-closed">Range closed</span>' : ''}
+      <span class="ev-over"><span class="ev-kind">${esc(kindLabel(ev))}</span><span class="ev-name">${esc(ev.title)}</span></span></div>`;
+  const body = `<div class="ev-body"><div class="ev-when"><span class="ev-when-text"><b>${joinDot(shortDate(ev.date), timeRange(ev))}</b>${ev.audience ? ' ' + badge(ev.audience) : ''}</span>
+      ${o.cal >= 0 ? `<button type="button" class="icon-btn soft" data-cal="${o.cal}" aria-label="Add ${esc(ev.title)} to calendar">${ICON.calendar}</button>` : ''}</div>
+      ${status ? `<div class="ev-status">${/^You're in/.test(status) ? ICON.check : ICON.people}<span>${esc(status)}</span></div>` : ''}
+      ${o.entry ? entryBlock(ev) : ''}
+      ${ev.description && !o.link ? `<div class="muted desc ev-desc">${esc(ev.description)}</div>` : ''}</div>`;
+  return o.link ? `<a class="ev-card ev-link" href="${o.link}">${photo}${body}</a>` : `<article class="ev-card">${photo}${body}</article>`;
+}
+/* The event rows; `all` is the whole list, so the calendar button finds the right event.
+   v3.6.0: runs of photo cards and runs of plain rows, still in date order. */
 function eventRows(shown, all) {
+  const blocks = [];
+  shown.forEach(ev => { const card = asCard(ev), last = blocks[blocks.length - 1]; if (last && last.card === card) last.list.push(ev); else blocks.push({ card, list: [ev] }); });
+  return blocks.map(b => b.card ? `<div class="ev-grid">${b.list.map(ev => eventCard(ev, { cal: all.indexOf(ev) })).join('')}</div>` : plainEventRows(b.list, all)).join('');
+}
+function plainEventRows(shown, all) {
   return `<div class="card list">${shown.map(ev => `
     <div class="list-row">${dateBlock(ev.date)}
       <div class="list-main">
@@ -1912,6 +2025,7 @@ function render(quiet) {
     if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
     if (page !== 'committee/entries') ROSTER = { data: null, state: '' };
     if (page !== 'me/licence') LIC.note = '';
+    if (page !== 'committee/event' && page !== 'committee/edit') EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
     if (page !== 'me/licenceedit') LIC.second = false;
     if (page !== 'events') ENTRY.err = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
@@ -2089,6 +2203,10 @@ view.addEventListener('change', e => {
   e.target.value = ''; // so the same file can be chosen again
 });
 view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target.value !== '') useSaved(e.target.value); });
+// The event form's Photo section (v3.6.0)
+view.addEventListener('click', e => { const b = e.target.closest('[data-evphoto]'); if (b && !b.disabled) evPhotoTap(b.dataset.evphoto); });
+view.addEventListener('change', e => { if (e.target.id === 'evPhotoFile' && e.target.files[0]) evPhotoChosen(e.target.files[0], e.target.dataset.mode); });
+view.addEventListener('input', e => { if (['evTitle', 'evDisc', 'evDate'].includes(e.target.id) && !EVPHOTO.busy) drawEvPhoto(); });
 view.addEventListener('change', e => {
   if (e.target.name !== 'ppPin') return;
   const wrap = document.getElementById('ppPinWrap');
@@ -2646,21 +2764,27 @@ async function postEvent(form) {
   if (ev.end && ev.end <= ev.start) return fail('The end time must be after the start time.', 'evEnd');
   if (!ev.title) return fail('Please give the event a title.', 'evTitle');
 
+  const newKey = entryKey(ev.date, ev.title);
   if (editing) {
     const it = editing.item, from = { source: it.source, row: it.row, fp: it.fp }, isPrivate = audience === 'Members' || audience === 'Committee';
-    const call = it.source === 'public' && !isPrivate ? () => committeeApi('saveEvent', [it.row, it.fp, { ...ev, show: audience !== 'Hidden' }])   // stays in the Events tab
+    const save = it.source === 'public' && !isPrivate ? () => committeeApi('saveEvent', [it.row, it.fp, { ...ev, show: audience !== 'Hidden' }])   // stays in the Events tab
       : it.source === 'private' && isPrivate ? () => committeeApi('updatePrivateEvent', [it.row, it.fp, { ...ev, audience }])                        // stays private
       : () => committeeApi('setEventAudience', [from, audience, ev]);                                                                                   // moves between the two
-    return saveEdit(form, 'events', call, 'Event updated.');
+    let warn = '';
+    const call = async () => { const out = await save(); warn = await evPhotoAfter(newKey, entryKey(it.date, it.title)); return out; };
+    await saveEdit(form, 'events', call, 'Event updated.');
+    if (warn) { manageNote = 'Event updated, but ' + warn; render(true); }
+    return;
   }
 
   error.hidden = true;
   btn.disabled = true; btn.textContent = 'Posting…';
   try {
     await committeeApi('postEvent', [{ ...ev, audience }]);
-    postedText = audience === 'Members' ? "Posted for signed-in members and the club team. It won't appear on the website."
+    const warn = await evPhotoAfter(newKey, '');
+    postedText = (audience === 'Members' ? "Posted for signed-in members and the club team. It won't appear on the website."
       : audience === 'Committee' ? "Posted for the club team only. It won't appear on the website."
-      : 'Posted. It appears on the website and On Target within about 2 minutes.';
+      : 'Posted. It appears on the website and On Target within about 2 minutes.') + (warn ? ' But ' + warn : '');
     posted = true;
     changed('events');
     render();
@@ -4887,11 +5011,7 @@ function compsView() {
   return `
     <div class="page-title"><a class="back-link" href="#/home">${ICON.chev}Home</a><h1>Enter a comp</h1>
       <p class="muted">${signedIn ? "Tap I'm in to let the club know you're coming. It isn't binding, and there's nothing to pay here." : "Sign in on Me to say you're coming."}</p></div>
-    <section class="section">${state('events', 3, () => list.length ? `<div class="card list">${list.map(ev => `
-      <div class="list-row">${dateBlock(ev.date)}
-        <div class="list-main"><div class="list-title">${esc(ev.title)}${closedOn(ev.date) ? ' <span class="badge badge-closed">Range closed</span>' : ''}</div>
-          <div class="muted">${joinDot(DAYS[parseDate(ev.date).getDay()], timeRange(ev), ev.discipline)}</div>
-          ${entryBlock(ev)}</div></div>`).join('')}</div>` : empty('No competitions coming up', 'New competitions appear here as soon as the club team posts them.'))}</section>`;
+    <section class="section">${state('events', 3, () => list.length ? `<div class="ev-grid">${list.map(ev => eventCard(ev, { cal: events().indexOf(ev), entry: true })).join('')}</div>` : empty('No competitions coming up', 'New competitions appear here as soon as the club team posts them.'))}</section>`;
 }
 /* Range rules & safety: opens the club document "Range rules"; until there is one, says it's coming */
 function rulesView() {
