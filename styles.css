@@ -1080,3 +1080,12 @@ a.ev-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
   .pc-note { margin-top: 2mm; }
   .pc-printed { margin: 1mm 0 0; }
 }
+
+/* Post an event (v3.8.0): titles posted before, under the Title box; and "No photo" cards (a plain maroon band) */
+.ev-suggest { margin: -4px 0 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; box-shadow: var(--shadow); }
+.ev-suggest-head { margin: 0; padding: 8px 14px 4px; font: 700 12px Poppins, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.ev-suggest-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 56px; padding: 9px 14px; border: 0; border-top: 1px solid var(--line-soft); background: none; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.ev-suggest-item:hover, .ev-suggest-item:focus-visible { background: var(--tint); outline: none; }
+.ev-suggest-title { font: 600 16px Poppins, sans-serif; }
+.ev-suggest-item .muted { font-size: 13.5px; }
+.ev-photo.ev-nophoto { background: linear-gradient(160deg, var(--crimson) 0%, var(--maroon) 70%); }

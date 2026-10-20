@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.8.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -522,6 +522,7 @@ let postedText = '';
 /* `item` is the event being edited (from Manage posts), or nothing for a new one */
 function eventForm(item) {
   const ev = item || { audience: 'Everyone' };
+  if (!item && !MANAGE && manageState !== 'failed') setTimeout(loadManage, 0); // past events, for the title suggestions
   const v = k => esc(ev[k] || '');
   return `
     <div class="page-title">${item ? `<a class="back-link" href="#/committee/manage">${ICON.chev}Manage posts</a><h1>Edit event</h1>`
@@ -535,8 +536,9 @@ function eventForm(item) {
         <div><label class="field-label" for="evEnd">End time <span class="field-hint">optional</span></label>
           ${timeField('evEnd', ev.end)}</div>
       </div>
-      <label class="field-label" for="evTitle">Title</label>
-      <input class="field" id="evTitle" maxlength="80" autocomplete="off" value="${v('title')}" required>
+      <label class="field-label" for="evTitle">Title${item ? '' : ' <span class="field-hint">pick one posted before, or type a new one</span>'}</label>
+      <input class="field" id="evTitle" maxlength="80" autocomplete="off" value="${v('title')}" required${item ? '' : ' role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="evSuggest"'}>
+      ${item ? '' : '<div class="ev-suggest" id="evSuggest" hidden></div>'}
       <label class="field-label" for="evDisc">Type of event <span class="field-hint">choose one or type your own</span></label>
       <input class="field" id="evDisc" maxlength="40" list="evDiscList" autocomplete="off" value="${v('discipline')}">
       <datalist id="evDiscList">${EVENT_TYPES.map(d => `<option value="${d}"></option>`).join('')}</datalist>
@@ -555,29 +557,38 @@ function eventForm(item) {
     </form></section>`;
 }
 
-/* The event form's Photo section (v3.6.0): optional. It shows the photo the event will use. A photo for this event alone
-   is saved with the event; an admin's new default for a discipline is saved straight away. */
-let EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
+/* The event form's Photo section (v3.6.0; three choices from v3.8.0): the usual photo for its type, a photo chosen for
+   this event, or No photo. The choice is saved after the event (eventPhotoSave); an admin's new default for a discipline
+   is saved straight away. */
+const blankEvPhoto = () => ({ choice: '', dataUrl: '', preview: '', from: '', fromUrl: '', busy: false, note: '' });
+let EVPHOTO = blankEvPhoto();
 function evPhotoForm() {
   const f = document.getElementById('eventForm'), val = id => (f && f.querySelector('#' + id) ? f.querySelector('#' + id).value.trim() : '');
   return f ? { date: val('evDate'), title: val('evTitle'), discipline: val('evDisc') } : null;
 }
+/* The photo this form will use, or '' for No photo / none chosen yet */
+function evPhotoSrc(ev) {
+  const was = editing && editing.kind === 'event' ? editing.item : null;
+  if (EVPHOTO.choice === 'none') return '';
+  if (EVPHOTO.choice === 'own') return EVPHOTO.preview || EVPHOTO.fromUrl || (was ? ownPhoto(was) : '');
+  return kindPhoto(photoKind(ev));
+}
 function evPhotoBox(ev) {
-  const was = editing && editing.kind === 'event' ? editing.item : null, mine = was && !EVPHOTO.clear ? ownPhoto(was) : '';
-  const kind = photoKind(ev), src = EVPHOTO.preview || mine || kindPhoto(kind), comp = isCompetition(ev);
-  const note = EVPHOTO.preview ? 'Your photo for this event. It is saved when you ' + (was ? 'save the changes.' : 'post the event.')
-    : mine ? 'This event has its own photo.'
-    : comp ? `The usual photo for ${kindName(kind)} competitions. Nothing to do.`
-    : 'Only competitions show a photo, unless you choose one for this event.';
-  return `<span class="field-label">Photo <span class="field-hint">optional</span></span>
-    <div class="ev-photo ev-photo-pick"><img src="${esc(src)}" alt="The photo this event will show"><span class="ev-fade"></span>
+  const was = editing && editing.kind === 'event' ? editing.item : null;
+  if (!EVPHOTO.choice) EVPHOTO.choice = was && photoNone(was) ? 'none' : was && ownPhoto(was) ? 'own' : 'usual'; // editing: what was saved
+  const kind = photoKind(ev), c = EVPHOTO.choice, src = evPhotoSrc(ev), comp = isCompetition(ev);
+  const note = c === 'usual' ? (comp ? `The usual photo for ${kindName(kind)} competitions.` : 'Only competitions show a photo card, unless you choose a photo for this event.')
+    : c === 'none' ? (comp ? 'The card shows a plain maroon band with the type and title.' : 'Shown in the plain list of events.')
+    : EVPHOTO.preview ? 'Your photo. It is saved when you ' + (was ? 'save the changes.' : 'post the event.')
+    : src ? (EVPHOTO.fromUrl ? 'The photo from the last time this event was posted.' : 'This event has its own photo.') : 'Tap Choose a photo to pick one.';
+  const opt = (v, title) => `<label class="choice"><input type="radio" name="evPhotoChoice" value="${v}"${c === v ? ' checked' : ''}><span><span class="choice-title">${title}</span></span></label>`;
+  return `<fieldset class="choices"><legend class="field-label">Photo</legend>
+      ${opt('usual', 'Use the usual photo for this type')}${opt('own', 'Choose a photo')}${opt('none', 'No photo')}</fieldset>
+    <div class="ev-photo ev-photo-pick${src ? '' : ' ev-nophoto'}">${src ? `<img src="${esc(src)}" alt="The photo this event will show"><span class="ev-fade"></span>` : ''}
       <span class="ev-over"><span class="ev-kind">${esc(kindLabel(ev))}</span><span class="ev-name">${esc(ev.title || 'Event title')}</span></span></div>
     <p class="muted" role="status">${esc(EVPHOTO.note || note)}</p>
     <input type="file" accept="image/*" id="evPhotoFile" hidden>
-    <div class="btn-row">
-      <button type="button" class="btn btn-outline" data-evphoto="pick"${EVPHOTO.busy ? ' disabled' : ''}>${ICON.camera}${EVPHOTO.preview || mine ? 'Choose another photo' : 'Use a different photo for this event'}</button>
-      ${EVPHOTO.preview || mine ? `<button type="button" class="link-btn" data-evphoto="clear">Use the usual photo</button>` : ''}
-    </div>
+    ${c === 'own' ? `<div class="btn-row"><button type="button" class="btn btn-outline" data-evphoto="pick"${EVPHOTO.busy ? ' disabled' : ''}>${ICON.camera}${src ? 'Choose another photo' : 'Choose a photo'}</button></div>` : ''}
     ${session && session.admin ? `<div class="btn-row ev-pick-admin">
       <button type="button" class="btn btn-outline" data-evphoto="default"${EVPHOTO.busy ? ' disabled' : ''}>Change the default ${esc(kindName(kind))} photo</button>
       ${evPhotos().defaults[kind] ? `<button type="button" class="link-btn" data-evphoto="undefault">Back to the club's usual ${esc(kindName(kind))} photo</button>` : ''}
@@ -592,7 +603,7 @@ async function evPhotoChosen(file, mode) {
     dataUrl = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(made.blob); });
   } catch (e) { EVPHOTO.busy = false; EVPHOTO.note = "That doesn't look like a photo. Please choose another one."; return drawEvPhoto(); }
   EVPHOTO.busy = false; EVPHOTO.note = '';
-  if (mode === 'event') { EVPHOTO.dataUrl = dataUrl; EVPHOTO.preview = dataUrl; EVPHOTO.clear = false; return drawEvPhoto(); }
+  if (mode === 'event') { Object.assign(EVPHOTO, { choice: 'own', dataUrl, preview: dataUrl, from: '', fromUrl: '' }); return drawEvPhoto(); }
   const kind = photoKind(evPhotoForm()), name = kindName(kind);
   drawEvPhoto();
   confirmAsk({ title: `New default ${name} photo?`, text: `Every ${name} event without its own photo will show this one, in On Target for everyone.`,
@@ -602,26 +613,69 @@ async function evPhotoChosen(file, mode) {
 function evPhotoTap(what) {
   const input = document.getElementById('evPhotoFile');
   if (what === 'pick' || what === 'default') { input.dataset.mode = what === 'pick' ? 'event' : 'default'; input.value = ''; input.click(); return; }
-  if (what === 'clear') { EVPHOTO = { dataUrl: '', preview: '', clear: true, busy: false, note: '' }; return drawEvPhoto(); }
   if (what === 'undefault') {
     const kind = photoKind(evPhotoForm()), name = kindName(kind);
     confirmAsk({ title: `Back to the usual ${name} photo?`, text: `${name} events go back to the club's own photo.`, yes: 'Yes, go back', busy: 'Saving…', no: 'No, keep this one',
       run: () => committeeApi('eventPhotoSet', ['default', kind, '']), done: out => { if (DATA.range) DATA.range.eventPhotos = out.photos; EVPHOTO.note = out.message; drawEvPhoto(); } });
   }
 }
-/* After the event is saved: its own photo goes up, comes off, or moves with a new title or day. Gives back a warning, or ''. */
+/* "Choose a photo" with no photo to use yet: the event can't be saved like that */
+const evPhotoMissing = () => EVPHOTO.choice === 'own' && !evPhotoSrc(evPhotoForm() || {});
+/* After the event is saved: its photo choice. Gives back a warning, or ''. */
 async function evPhotoAfter(newKey, oldKey) {
+  const p = evPhotos(), had = k => !!(k && (p.events[k] || (p.none || []).includes(k)));
   try {
-    let out = null;
-    if (EVPHOTO.dataUrl) {
-      out = await committeeApi('eventPhotoSet', ['event', newKey, EVPHOTO.dataUrl]);
-      if (oldKey && oldKey !== newKey && evPhotos().events[oldKey]) out = await committeeApi('eventPhotoSet', ['event', oldKey, '']);
-    } else if (EVPHOTO.clear && evPhotos().events[oldKey || newKey]) out = await committeeApi('eventPhotoSet', ['event', oldKey || newKey, '']);
-    else if (oldKey && oldKey !== newKey && evPhotos().events[oldKey]) out = await committeeApi('eventPhotoMove', [oldKey, newKey]);
-    if (out && DATA.range) DATA.range.eventPhotos = out.photos;
-    EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
+    if (EVPHOTO.choice !== 'usual' || had(newKey) || had(oldKey)) {
+      const out = await committeeApi('eventPhotoSave', [{ key: newKey, oldKey, choice: EVPHOTO.choice || 'usual', dataUrl: EVPHOTO.dataUrl, from: EVPHOTO.from }]);
+      if (out && DATA.range) DATA.range.eventPhotos = out.photos;
+    }
+    EVPHOTO = blankEvPhoto();
     return '';
   } catch (e) { if (e.signedOut) return ''; return "the photo couldn't be saved: " + e.message; }
+}
+
+/* Post an event (v3.8.0): titles of events posted before, most recent first. Picking one fills the form from the most
+   recent event with that title (all but the date, which is always chosen afresh), its photo choice too. */
+let EVSUG = [];
+function pastEventTitles(q) {
+  if (!MANAGE) return [];
+  const seen = new Set(), out = [], want = String(q || '').trim().toLowerCase();
+  manageEvents().slice().sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0).forEach(e => {
+    const k = String(e.title || '').trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    if (!want || k.includes(want)) out.push(e);
+  });
+  return out.slice(0, 8);
+}
+function showEvSuggest() {
+  const box = document.getElementById('evSuggest'), input = document.getElementById('evTitle');
+  if (!box || !input || editing) return;
+  EVSUG = pastEventTitles(input.value);
+  const exact = EVSUG.length === 1 && EVSUG[0].title.trim().toLowerCase() === input.value.trim().toLowerCase();
+  if (!EVSUG.length || exact) return hideEvSuggest();
+  box.innerHTML = `<p class="ev-suggest-head">Posted before</p>${EVSUG.map((e, i) => `<button type="button" class="ev-suggest-item" data-ev-suggest="${i}">
+    <span class="ev-suggest-title">${esc(e.title)}</span><span class="muted">${joinDot(e.discipline, e.start && (niceTime(e.start) || e.start), 'last ' + shortDate(e.date))}</span></button>`).join('')}`;
+  box.hidden = false; input.setAttribute('aria-expanded', 'true');
+}
+function hideEvSuggest() {
+  const box = document.getElementById('evSuggest'), input = document.getElementById('evTitle');
+  if (box) box.hidden = true;
+  if (input) input.setAttribute('aria-expanded', 'false');
+}
+function useEvSuggest(i) {
+  const src = EVSUG[i], f = document.getElementById('eventForm');
+  if (!src || !f) return;
+  const put = (id, v) => { const el = f.querySelector('#' + id); el.value = v || ''; if (el.parentNode.classList.contains('date-wrap')) el.parentNode.classList.toggle('no-date', !el.value); };
+  put('evTitle', src.title); put('evDisc', src.discipline); put('evStart', time24(src.start)); put('evEnd', time24(src.end)); put('evDesc', src.description);
+  put('evDate', ''); // the date is always chosen afresh
+  const aud = f.querySelector(`[name="evAudience"][value="${src.audience === 'Hidden' ? 'Everyone' : src.audience}"]`) || f.querySelector('[name="evAudience"][value="Everyone"]');
+  aud.checked = true;
+  const key = entryKey(src.date, src.title), url = ownPhoto(src);
+  EVPHOTO = { ...blankEvPhoto(), choice: photoNone(src) ? 'none' : url ? 'own' : 'usual', from: url ? key : '', fromUrl: url };
+  drawEvPhoto(); hideEvSuggest();
+  f.querySelector('#evError').hidden = true;
+  f.querySelector('#evDate').focus();
 }
 
 function eventPosted() {
@@ -700,13 +754,14 @@ const kindName = k => (PHOTO_KINDS.find(x => x[0] === k) || PHOTO_KINDS[4])[1];
 const evPhotos = () => (DATA.range && DATA.range.eventPhotos) || { defaults: {}, events: {} };
 const ownPhoto = ev => evPhotos().events[entryKey(ev.date, ev.title)] || '';
 const kindPhoto = k => evPhotos().defaults[k] || `images/events/${k}.jpg?v=${EV_PHOTO_V}`;
-const eventPhoto = ev => ownPhoto(ev) || kindPhoto(photoKind(ev));
+const photoNone = ev => (evPhotos().none || []).includes(entryKey(ev.date, ev.title)); // v3.8.0: "No photo"
+const eventPhoto = ev => photoNone(ev) ? '' : ownPhoto(ev) || kindPhoto(photoKind(ev));
 const asCard = ev => isCompetition(ev) || !!ownPhoto(ev);
 const kindLabel = ev => { const k = photoKind(ev); return k !== 'other' ? kindName(k) : isCompetition(ev) ? 'Competition' : (String(ev.discipline || '').trim() || 'Event'); };
 /* o.cal: the event's place in the list the calendar button reads; o.link: the whole card opens it (Home); o.entry: the I'm in buttons (Enter a comp) */
 function eventCard(ev, o) {
-  const closed = closedOn(ev.date), status = o.entry ? '' : entryLine(ev);
-  const photo = `<div class="ev-photo"><img src="${esc(eventPhoto(ev))}" alt="" loading="lazy" decoding="async" width="1600" height="900"><span class="ev-fade"></span>
+  const closed = closedOn(ev.date), status = o.entry ? '' : entryLine(ev), src = eventPhoto(ev);
+  const photo = `<div class="ev-photo${src ? '' : ' ev-nophoto'}">${src ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" width="1600" height="900"><span class="ev-fade"></span>` : ''}
       ${closed ? '<span class="badge badge-closed ev-closed">Range closed</span>' : ''}
       <span class="ev-over"><span class="ev-kind">${esc(kindLabel(ev))}</span><span class="ev-name">${esc(ev.title)}</span></span></div>`;
   const body = `<div class="ev-body"><div class="ev-when"><span class="ev-when-text"><b>${joinDot(shortDate(ev.date), timeRange(ev))}</b>${ev.audience ? ' ' + badge(ev.audience) : ''}</span>
@@ -2026,7 +2081,7 @@ function render(quiet) {
     if (page !== 'me/rclass' && page !== 'me/results') SHOOT.rkey = null;
     if (page !== 'committee/entries') ROSTER = { data: null, state: '' };
     if (page !== 'me/licence') LIC.note = '';
-    if (page !== 'committee/event' && page !== 'committee/edit') EVPHOTO = { dataUrl: '', preview: '', clear: false, busy: false, note: '' };
+    if (page !== 'committee/event' && page !== 'committee/edit') EVPHOTO = blankEvPhoto();
     if (page !== 'me/licenceedit') LIC.second = false;
     if (page !== 'events') ENTRY.err = null;
     if (page !== 'committee/oldresults') OLDRES = { data: null, state: '', note: '', filter: '', who: {} };
@@ -2207,7 +2262,19 @@ view.addEventListener('change', e => { if (e.target.id === 'rpSaved' && e.target
 // The event form's Photo section (v3.6.0)
 view.addEventListener('click', e => { const b = e.target.closest('[data-evphoto]'); if (b && !b.disabled) evPhotoTap(b.dataset.evphoto); });
 view.addEventListener('change', e => { if (e.target.id === 'evPhotoFile' && e.target.files[0]) evPhotoChosen(e.target.files[0], e.target.dataset.mode); });
-view.addEventListener('input', e => { if (['evTitle', 'evDisc', 'evDate'].includes(e.target.id) && !EVPHOTO.busy) drawEvPhoto(); });
+view.addEventListener('input', e => { if (['evTitle', 'evDisc', 'evDate'].includes(e.target.id) && !EVPHOTO.busy) drawEvPhoto(); if (e.target.id === 'evTitle') showEvSuggest(); });
+view.addEventListener('change', e => { if (e.target.name === 'evPhotoChoice') { EVPHOTO.choice = e.target.value; EVPHOTO.note = ''; drawEvPhoto(); const r = view.querySelector(`[name="evPhotoChoice"][value="${EVPHOTO.choice}"]`); if (r) r.focus(); } });
+view.addEventListener('focusin', e => { if (e.target.id === 'evTitle') showEvSuggest(); });
+view.addEventListener('focusout', e => { if (e.target.id === 'evTitle' || e.target.closest('#evSuggest')) setTimeout(() => { const a = document.activeElement; if (!a || (a.id !== 'evTitle' && !a.closest('#evSuggest'))) hideEvSuggest(); }, 150); });
+view.addEventListener('click', e => { const b = e.target.closest('[data-ev-suggest]'); if (b) useEvSuggest(Number(b.dataset.evSuggest)); });
+view.addEventListener('keydown', e => {
+  const inList = e.target.closest && e.target.closest('#evSuggest'), items = [...view.querySelectorAll('[data-ev-suggest]')];
+  if (e.target.id === 'evTitle' && e.key === 'ArrowDown' && items.length && !document.getElementById('evSuggest').hidden) { e.preventDefault(); items[0].focus(); }
+  else if (inList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); const i = items.indexOf(e.target) + (e.key === 'ArrowDown' ? 1 : -1); (i < 0 ? document.getElementById('evTitle') : items[Math.min(i, items.length - 1)]).focus(); }
+  else if ((inList || e.target.id === 'evTitle') && e.key === 'Escape') { document.getElementById('evTitle').focus(); hideEvSuggest(); }
+});
+// Tapping a suggestion keeps the Title box focused, so the list doesn't close before the tap lands (iPhones don't focus buttons)
+view.addEventListener('mousedown', e => { if (e.target.closest('#evSuggest')) e.preventDefault(); });
 view.addEventListener('change', e => {
   if (e.target.name !== 'ppPin') return;
   const wrap = document.getElementById('ppPinWrap');
@@ -2764,6 +2831,7 @@ async function postEvent(form) {
   if (ev.end && !ev.start) return fail('Please choose a start time as well as an end time.', 'evStart');
   if (ev.end && ev.end <= ev.start) return fail('The end time must be after the start time.', 'evEnd');
   if (!ev.title) return fail('Please give the event a title.', 'evTitle');
+  if (evPhotoMissing()) return fail('Please choose a photo, or pick "Use the usual photo for this type" or "No photo".');
 
   const newKey = entryKey(ev.date, ev.title);
   if (editing) {
