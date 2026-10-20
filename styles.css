@@ -1134,3 +1134,55 @@ html.embed .splash, html.embed .topbar, html.embed .tabbar { display: none; }
 html.embed .app { max-width: 860px; }
 html.embed .view { padding-bottom: 16px; animation: none; }
 html.embed .faq-page { padding-top: 12px; }
+
+/* Results, Print or save as PDF (v3.10.0): the button under the day, and the A4 pages (#resultsPrint, made by resultsPrint in app.js).
+   The pages are kept off screen and invisible until printed; they use fixed club colours, whatever the phone's setting. */
+.rv-print { display: flex; justify-content: flex-end; margin-top: 10px; }
+#resultsPrint { position: fixed; left: -10000px; top: 0; visibility: hidden; pointer-events: none; color-scheme: light; }
+.rp-page { width: 210mm; height: 296.5mm; overflow: hidden; display: flex; flex-direction: column; background: #fff; color: #2A1A1E; font: 400 10pt/1.35 Poppins, sans-serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.rp-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.rp-band { display: flex; align-items: center; gap: 5mm; padding: 7mm 12mm; background: #5C0F1F; }
+.rp-logo { width: 17mm; height: 17mm; border-radius: 3mm; flex: 0 0 auto; }
+.rp-title { font: 800 20pt/1.1 Montserrat, sans-serif; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
+.rp-title span { text-transform: none; font-weight: 700; letter-spacing: 0; }
+.rp-club { margin-top: 1.5mm; font: 600 10pt Poppins, sans-serif; color: #E9B44C; }
+.rp-band-small { padding: 4mm 12mm; gap: 4mm; }
+.rp-band-small .rp-logo { width: 10mm; height: 10mm; border-radius: 2mm; }
+.rp-band-small .rp-title { font-size: 12pt; }
+.rp-band-small .rp-club { margin-top: .5mm; font-size: 8.5pt; }
+.rp-strip { display: flex; align-items: center; justify-content: space-between; gap: 6mm; padding: 5mm 12mm; background: #F6F2EE; border-bottom: .4mm solid #E9B44C; }
+.rp-date { font: 800 15pt/1.2 Montserrat, sans-serif; color: #5C0F1F; }
+.rp-where { margin-top: 1mm; font-size: 9.5pt; color: #5E4C51; }
+.rp-totals { display: flex; gap: 7mm; text-align: center; flex: 0 0 auto; }
+.rp-totals div { display: flex; flex-direction: column; font-size: 8.5pt; color: #5E4C51; }
+.rp-totals b { font: 800 18pt/1.1 Montserrat, sans-serif; color: #5C0F1F; }
+.rp-body { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 6mm 12mm 0; }
+.rp-comp { margin-bottom: 6mm; }
+.rp-comp-head { display: flex; align-items: center; gap: 3mm; padding-bottom: 2mm; border-bottom: .5mm solid #5C0F1F; }
+.rp-tags { display: flex; gap: 1.5mm; flex: 0 0 auto; }
+.rp-tag { padding: .6mm 2mm; border-radius: 1mm; background: #5C0F1F; color: #fff; font: 700 7pt/1.3 Poppins, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.rp-comp-name { flex: 1 1 auto; min-width: 0; font: 800 12pt/1.25 Montserrat, sans-serif; color: #5C0F1F; }
+.rp-cont { font: 500 9pt Poppins, sans-serif; color: #7A666B; }
+.rp-comp-n { flex: 0 0 auto; font-size: 9pt; color: #5E4C51; }
+.rp-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 10pt; }
+.rp-c-place { width: 18%; } .rp-c-shooter { width: 44%; } .rp-c-class { width: 20%; } .rp-c-score { width: 18%; }
+.rp-table th { padding: 1.8mm 3mm; text-align: left; font: 700 8pt Poppins, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #7A666B; border-bottom: .3mm solid #E2D6D0; }
+.rp-table td { padding: 1.6mm 3mm; border-bottom: .2mm solid #F0E6E1; overflow-wrap: anywhere; }
+.rp-table .rp-num { text-align: right; }
+.rp-table tr.rp-alt td { background: #FAF7F4; }
+.rp-table tr.rp-top td { font-weight: 700; }
+.rp-dot { display: inline-block; width: 2.6mm; height: 2.6mm; border-radius: 50%; margin-right: 2mm; vertical-align: -.2mm; }
+.rp-p1 { background: #E9B44C; } .rp-p2 { background: #A9AEB4; } .rp-p3 { background: #B9783F; }
+.rp-key { display: flex; flex-wrap: wrap; align-items: center; gap: 2mm 5mm; padding-top: 1mm; font-size: 8.5pt; color: #5E4C51; }
+.rp-key .rp-dot { margin-right: 1.2mm; }
+.rp-key-note { margin-left: auto; font-style: italic; }
+.rp-foot { display: flex; justify-content: space-between; gap: 4mm; padding: 3.5mm 12mm; background: #5C0F1F; color: #fff; font-size: 8pt; }
+.rp-foot span:first-child, .rp-foot span:nth-child(2) { color: #E9B44C; font-weight: 600; }
+@media print {
+  html.rp-printing, html.rp-printing body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  html.rp-printing body > *:not(#resultsPrint) { display: none !important; }
+  html.rp-printing #resultsPrint { position: static; visibility: visible; }
+  #resultsPrint .rp-page { break-after: page; page-break-after: always; }
+  #resultsPrint .rp-page:last-child { break-after: auto; page-break-after: auto; }
+}

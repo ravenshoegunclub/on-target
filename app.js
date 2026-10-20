@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.10.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -179,7 +179,7 @@ const RES = (() => {
   return { mode: RES_MODES.some(m => m[0] === saved.mode) ? saved.mode : 'date', type: saved.type || '', day: '', picking: false };
 })();
 /* Re-draws Results for a new view or day: the cards start as that view opens them, not as the last one left them */
-function resRender() { view.querySelectorAll('details.comp').forEach(d => d.remove()); render(true); }
+function resRender() { resultsPrintClear(); view.querySelectorAll('details.comp').forEach(d => d.remove()); render(true); }
 function saveResView() { try { localStorage.setItem('ot:resultsView', JSON.stringify({ mode: RES.mode, type: RES.type })); } catch (e) { /* storage blocked */ } }
 const compWord = n => n + (n === 1 ? ' competition' : ' competitions');
 /* A competition's types: its discipline (Pistol, Rifle or Clay) and, when it is one, Black powder as well.
@@ -246,8 +246,93 @@ function resultsByDate() {
           </button>`).join('')}</div>`).join('')}
       </section>`;
   }
-  return `<section class="section">${bar}</section>
+  return `<section class="section">${bar}
+      <div class="rv-print"><button type="button" class="btn btn-outline" data-rv-print="${d.date}">${ICON.doc}Print or save as PDF</button></div></section>
     <section class="section">${d.competitions.map(c => compCard(c, true)).join('')}</section>`;
+}
+/* Print or save as PDF (v3.10.0): one competition day as club-branded A4 pages, built off screen and printed on their own.
+ * The pages are laid out here, not by the browser, so the footer can say "Page X of Y" on every phone:
+ * each competition is measured, kept on one page when it fits, and split with its heading row repeated when it doesn't.
+ * Names are exactly as the Results screen shows them. The pages stay (hidden) until another screen, day or print. */
+const RP_SITE = 'ravenshoegunclub.com.au', RP_APP = 'ontarget.ravenshoegunclub.com.au';
+const fullDate = iso => { const d = parseDate(iso); return `${DAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`; }; // "Saturday 17 October 2026"
+function resultsPrintClear() {
+  document.documentElement.classList.remove('rp-printing');
+  ['resultsPrint', 'rpPage'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+}
+function resultsPrint(date) {
+  const d = days().find(x => x.date === date);
+  if (!d) return;
+  resultsPrintClear();
+  const names = new Set();
+  d.competitions.forEach(c => c.rows.forEach(r => { const n = String(r.shooter || '').trim().toLowerCase(); if (n) names.add(n); }));
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const band = first => `<div class="rp-band${first ? '' : ' rp-band-small'}"><img src="icons/icon-192.png?v=${APP_VERSION}" alt="" class="rp-logo">
+      <div><div class="rp-title">Competition results${first ? '' : `<span> · ${esc(fullDate(d.date))}</span>`}</div>
+      <div class="rp-club">Ravenshoe &amp; District Sporting Shooters · SSAA Qld Branch Q48</div></div></div>`;
+  const strip = `<div class="rp-strip"><div><div class="rp-date">${esc(fullDate(d.date))}</div><div class="rp-where">Competition day · Ravenshoe range, 311 Cemetery Road</div></div>
+      <div class="rp-totals"><div><b>${d.competitions.length}</b>${d.competitions.length === 1 ? 'competition' : 'competitions'}</div><div><b>${names.size}</b>${names.size === 1 ? 'shooter' : 'shooters'}</div></div></div>`;
+  const page = (first, inner, foot) => `<section class="rp-page">${band(first)}${first ? strip : ''}<div class="rp-body">${inner}</div>
+      <div class="rp-foot"><span>${RP_SITE}</span><span>${RP_APP}</span><span>${foot || ''}</span></div></section>`;
+  // One competition, or part of one: rows are [index, row] so the shading and medals follow the whole list
+  const block = (c, rows, cont) => `<div class="rp-comp"><div class="rp-comp-head">
+      <span class="rp-tags">${compTypes(c).map(t => `<span class="rp-tag">${esc(t)}</span>`).join('')}</span>
+      <span class="rp-comp-name">${esc(c.competition)}${cont ? ' <span class="rp-cont">(continued)</span>' : ''}</span>
+      <span class="rp-comp-n">${plural(c.rows.length, 'shooter')}</span></div>
+    <table class="rp-table"><colgroup><col class="rp-c-place"><col class="rp-c-shooter"><col class="rp-c-class"><col class="rp-c-score"></colgroup>
+      <thead><tr><th scope="col">Place</th><th scope="col">Shooter</th><th scope="col">Class</th><th scope="col" class="rp-num">Score</th></tr></thead>
+      <tbody>${rows.map(([i, r]) => { const p = Number(r.place), top = p >= 1 && p <= 3 ? p : 0;
+        return `<tr class="${i % 2 ? 'rp-alt' : ''}${top ? ' rp-top' : ''}"><td>${top ? `<span class="rp-dot rp-p${top}"></span>` : ''}${placeLabel(r.place)}</td><td>${esc(r.shooter)}</td><td>${esc(r['class'])}</td><td class="rp-num">${esc(r.score)}</td></tr>`; }).join('')}</tbody></table></div>`;
+  const key = `<div class="rp-key"><span><span class="rp-dot rp-p1"></span>1st</span><span><span class="rp-dot rp-p2"></span>2nd</span><span><span class="rp-dot rp-p3"></span>3rd</span>
+      <span class="rp-key-note">Results are as recorded by the club on the day.</span></div>`;
+
+  // Measure: the room on a first and a later page, each competition whole, and each of its rows
+  const root = document.createElement('div');
+  root.id = 'resultsPrint'; root.setAttribute('aria-hidden', 'true');
+  root.innerHTML = page(true, '') + page(false, '') + page(false, d.competitions.map(c => block(c, c.rows.map((r, i) => [i, r]))).join('') + key);
+  document.body.appendChild(root);
+  const bodies = root.querySelectorAll('.rp-body'), hFirst = bodies[0].clientHeight - 4, hLater = bodies[1].clientHeight - 4;
+  const gap = parseFloat(getComputedStyle(root.querySelector('.rp-comp')).marginBottom) || 0;
+  const sizes = [...bodies[2].querySelectorAll('.rp-comp')].map(el => {
+    const rows = [...el.querySelectorAll('tbody tr')].map(tr => tr.getBoundingClientRect().height);
+    const whole = el.getBoundingClientRect().height;
+    return { whole, top: whole - rows.reduce((a, h) => a + h, 0), rows };
+  });
+  const keyH = bodies[2].querySelector('.rp-key').getBoundingClientRect().height;
+
+  // Fill the pages
+  const pages = [[]];
+  let left = hFirst;
+  const newPage = () => { pages.push([]); left = hLater; };
+  const fits = h => h <= left;
+  d.competitions.forEach((c, ci) => {
+    const s = sizes[ci];
+    if (fits(s.whole)) { pages[pages.length - 1].push(block(c, c.rows.map((r, i) => [i, r]))); left -= s.whole + gap; return; }
+    if (s.whole <= hLater) { newPage(); pages[pages.length - 1].push(block(c, c.rows.map((r, i) => [i, r]))); left -= s.whole + gap; return; }
+    // Longer than a page: start it where at least three rows fit, then carry on page by page with the heading row again
+    if (!fits(s.top + s.rows.slice(0, 3).reduce((a, h) => a + h, 0))) newPage();
+    let i = 0;
+    while (i < c.rows.length) {
+      let h = s.top, j = i;
+      while (j < c.rows.length && fits(h + s.rows[j])) h += s.rows[j++];
+      if (j === i) j = i + 1; // never stall on one very tall row
+      pages[pages.length - 1].push(block(c, c.rows.slice(i, j).map((r, k) => [i + k, r]), i > 0));
+      left -= h + gap;
+      i = j;
+      if (i < c.rows.length) newPage();
+    }
+  });
+  if (!fits(keyH)) newPage();
+  pages[pages.length - 1].push(key);
+  const printed = `Printed ${esc(fullDate(todayIso()))}`;
+  root.innerHTML = pages.map((p, i) => page(i === 0, p.join(''), `${printed} · Page ${i + 1} of ${pages.length}`)).join('');
+
+  // A4 portrait with no margin for these pages only (the Participation Card prints landscape)
+  const st = document.createElement('style');
+  st.id = 'rpPage'; st.textContent = '@page { size: A4 portrait; margin: 0; }';
+  document.head.appendChild(st);
+  document.documentElement.classList.add('rp-printing');
+  window.print();
 }
 /* By type: chips for each type, then that type's competitions, newest first, under date headings. */
 function resultsByType() {
@@ -2081,6 +2166,7 @@ function render(quiet) {
   // (the member sign-in box on Me only counts once something has been typed in it)
   if (quiet && page === currentPage && [...view.querySelectorAll('form')].some(f => f.id !== 'meEmailForm' || f.querySelector('input').value)) return refreshSuggestions();
   if (page !== currentPage) {
+    resultsPrintClear();
     posted = false; sameDay = null; clearPicked(); ADDED = []; sharePick = null;
     if (page !== 'committee/edit') editing = null;
     if (page !== 'committee/manage') manageNote = '';
@@ -2153,6 +2239,7 @@ view.addEventListener('click', e => {
   if (t.closest('[data-docs-reload]')) { DOCS = null; docsState = ''; render(true); }
   if (t.closest('[data-rv-mode]')) { RES.mode = t.closest('[data-rv-mode]').dataset.rvMode; RES.picking = false; saveResView(); resRender(); view.querySelector(`[data-rv-mode="${RES.mode}"]`).focus(); }
   if (t.closest('[data-rv-type]')) { RES.type = t.closest('[data-rv-type]').dataset.rvType; saveResView(); resRender(); view.querySelector(`[data-rv-type="${CSS.escape(RES.type)}"]`).focus(); }
+  if (t.closest('[data-rv-print]')) resultsPrint(t.closest('[data-rv-print]').dataset.rvPrint);
   if (t.closest('[data-rv-pick]')) { RES.picking = !RES.picking; resRender(); view.querySelector('[data-rv-pick]').focus(); }
   if (t.closest('[data-rv-day]')) {
     const b = t.closest('[data-rv-day]'), dir = b.dataset.rvDir;
@@ -3870,7 +3957,7 @@ function participationView() {
 view.addEventListener('click', e => {
   const y = e.target.closest('[data-pc-year]');
   if (y && !y.disabled && y.dataset.pcYear) { PCARD_FY = Number(y.dataset.pcYear); render(true); const b = view.querySelector('.pc-year-label'); if (b) b.focus(); }
-  if (e.target.closest('[data-pc-print]')) window.print();
+  if (e.target.closest('[data-pc-print]')) { resultsPrintClear(); window.print(); }
 });
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];
