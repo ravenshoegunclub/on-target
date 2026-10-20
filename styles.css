@@ -1025,6 +1025,13 @@ a.ev-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
 .pc-progress-text { margin: 6px 0 0; font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 .pc-met .pc-progress-text { color: var(--ok-text); }
 .pc-progress-text svg { width: 18px; height: 18px; flex: 0 0 auto; }
+/* v3.12.0: the licence year's dates under it, and each part of the requirement for two or more classes */
+.pc-year-dates { display: block; font: 500 13px Poppins, sans-serif; color: var(--text-2); }
+.pc-parts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14.5px; color: var(--text-2); }
+.pc-parts li { display: inline-flex; align-items: center; gap: 4px; }
+.pc-parts b { color: var(--text); }
+.pc-parts .pc-part-done, .pc-parts .pc-part-done b { color: var(--ok-text); }
+.pc-parts svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .pcard-scroll { margin-top: 12px; overflow-x: auto; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); -webkit-overflow-scrolling: touch; }
 .pcard-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .pcard-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 640px; font-size: 14.5px; }

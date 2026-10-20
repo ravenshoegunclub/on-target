@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.11.0';
+const APP_VERSION = '3.12.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -3830,7 +3830,7 @@ const BADGES = [
   { id: 'champion', name: 'Champion', what: 'Your first win: 1st place in a competition.', hint: 'Win a competition', look: 'gold', glyph: 'star' },
   { id: 'pb', name: 'Personal Best', what: 'The first time you beat your own best score in a competition.', hint: 'Beat your best score in a comp', look: 'silver', glyph: 'up' },
   { id: 'allround', name: 'All-Rounder', what: 'Competed in 3 types of competition (Pistol, Rifle, Clay or Other).', hint: 'Compete in 3 types', look: 'maroon', glyph: 'three', goal: 3 },
-  { id: 'pistol', name: 'Pistol Card Complete', what: 'Met the pistol licence requirement for a licence year (1 July to 30 June), worked out the same way as My licence. Earned again each year you meet it.', hint: "Meet a year's pistol requirement", look: 'maroon', glyph: 'card' },
+  { id: 'pistol', name: 'Pistol Card Complete', what: 'Met the pistol participation requirement for a licence year (1 July to 30 June), worked out the same way as the Participation Card. Earned again each year you meet it.', hint: "Meet a year's pistol requirement", look: 'maroon', glyph: 'card' },
   { id: 'openday2026', name: 'Open Day 2026', what: 'Came along to the club’s 2026 Open Day. Marked by the club.', hint: 'Come to the 2026 Open Day', look: 'gold', glyph: 'flag' }
 ];
 const BADGE_LOOK = { maroon: ['#5C0F1F', '#7A1A2E', '#E9B44C'], gold: ['#A97A22', '#E9B44C', '#5C0F1F'], silver: ['#7D838B', '#C9CDD3', '#3A3F45'], bronze: ['#8A5528', '#CD8B4E', '#3A1E0A'] };
@@ -3879,16 +3879,12 @@ function badgesEarned(lines, d) {
   });
   const types = new Set();
   got.allround = first(comps, l => { types.add(l.type); return types.size >= 3; });
-  // Each licence year: the handgun card's rule (My licence), one shoot a day, against shootsNeeded for the classes held that year
+  // Each licence year (1 July to 30 June) met by the Participation Card's rule (pistolYear)
   const hg = d && d.handgun, pistolYears = [];
   if (hg && hg.classes.length && !hg.noAttend) {
-    const fyOf = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1), byYear = new Map();
-    asc.filter(l => l.pistol).forEach(l => { const y = fyOf(l.date), m = byYear.get(y) || new Map(); m.set(l.date, m.get(l.date) || l.comp); byYear.set(y, m); });
-    [...byYear.keys()].sort().forEach(fy => {
-      const held = hg.classes.map(c => ({ key: c.key, months: classMonths(c, fy) })).filter(c => c.months > 0), need = shootsNeeded(held);
-      if (!held.length || !need.total) return;
-      let done = 0, nComp = 0;
-      for (const [date, comp] of byYear.get(fy)) { done++; if (comp) nComp++; if (done >= need.total && nComp >= need.competitions) { pistolYears.push({ fy, date }); break; } }
+    [...new Set(asc.filter(l => l.pistol).map(l => fyOfDate(l.date)))].sort().forEach(fy => {
+      const y = pistolYear(lines, hg, fy);
+      if (y && y.metOn) pistolYears.push({ fy, date: y.metOn });
     });
     if (pistolYears.length) got.pistol = pistolYears[0].date;
   }
@@ -4000,18 +3996,38 @@ let PCARD_FY = 0;
 const fyOfDate = iso => (iso.slice(5) >= '07-01' ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1);
 const PC_CLASS_KEY = 'Class A: Air Pistol · Class B: Centre Fire up to .38 · Class C: Centre Fire over .38 to .45 · Class D: Rim Fire';
 /* {text, part (0 to 1), met} for the progress bar, or a line with no bar, or null */
+/* The Participation Card's rule for one licence year, 1 July to 30 June (v3.12.0; Range Standing Orders 3.2). The numbers are
+   shootsNeeded's, the police licence rule, pro-rated by the months each class was held. Shoots count one a day.
+   One class: that many competitions. Two or more: each class its own shoots, each on a separate day (a day can count for two
+   classes shot that day), at least need.competitions competitions in all, and Class C's accredited events.
+   Met only when every part is met; metOn is the day that happened (the Pistol Card Complete badge). */
+function pistolYear(lines, hg, fy) {
+  const held = hg.classes.map(c => ({ key: c.key, months: classMonths(c, fy) })).filter(c => c.months > 0), need = shootsNeeded(held);
+  if (!held.length || !need.total) return null;
+  const one = held.length === 1;
+  const parts = (one ? [{ label: 'Competitions', of: need.total, test: l => l.comp }]
+    : [...need.classes.map(c => ({ label: 'Class ' + c.key, cls: true, of: c.shoots, test: l => l.pc === c.key })),
+      { label: 'Competitions', of: need.competitions, test: l => l.comp },
+      ...(need.accredited !== null ? [{ label: 'Class C accredited', of: need.accredited, test: l => l.pc === 'C' && l.accredited }] : [])]).filter(p => p.of > 0);
+  parts.forEach(p => { p.days = new Set(); });
+  let metOn = '';
+  lines.filter(l => l.pistol && fyOfDate(l.date) === fy).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0).forEach(l => {
+    parts.forEach(p => { if (p.test(l)) p.days.add(l.date); });
+    if (!metOn && parts.every(p => p.days.size >= p.of)) metOn = l.date;
+  });
+  parts.forEach(p => { p.n = Math.min(p.days.size, p.of); });
+  return { one, parts, metOn, part: parts.reduce((a, p) => a + p.n, 0) / parts.reduce((a, p) => a + p.of, 0) };
+}
 function pcardProgress(lines, d, fy) {
-  const hg = d.handgun, pistol = lines.filter(l => l.pistol && fyOfDate(l.date) === fy), label = fyLabel(fy);
-  const days = new Map();
-  pistol.forEach(l => days.set(l.date, days.get(l.date) || l.comp));
-  const done = days.size, comps = [...days.values()].filter(Boolean).length;
+  const hg = d.handgun, label = fyLabel(fy);
   if (licHasH(hg) && hg.classes.length) {
-    if (hg.noAttend) return { text: `${done} pistol shoot day${done === 1 ? '' : 's'} in ${label}. No attendance requirement (as confirmed by you).` };
-    const held = hg.classes.map(c => ({ key: c.key, months: classMonths(c, fy) })).filter(c => c.months > 0), need = shootsNeeded(held);
-    if (!held.length || !need.total) return null;
-    const met = done >= need.total && comps >= need.competitions;
-    return { part: Math.min(1, done / need.total), met, label,
-      text: met ? `Requirement met for ${label}` : `${Math.min(done, need.total)} of ${need.total} shoots this year${held.length > 1 ? ` · ${Math.min(comps, need.competitions)} of ${need.competitions} competitions` : ''}` };
+    if (hg.noAttend) { const done = new Set(lines.filter(l => l.pistol && fyOfDate(l.date) === fy).map(l => l.date)).size;
+      return { text: `${done} pistol shoot day${done === 1 ? '' : 's'} in ${label}. No attendance requirement (as confirmed by you).` }; }
+    const y = pistolYear(lines, hg, fy);
+    if (!y) return null;
+    const met = !!y.metOn, c = y.parts[0];
+    return { part: Math.min(1, y.part), met, label, parts: y.one ? null : y.parts,
+      text: met ? `Requirement met for ${label}` : y.one ? `${c.n} of ${c.of} competitions this year` : 'Working towards this year’s requirement' };
   }
   if (d.handgun.towards === 'Yes') { // first-time applicants: 3 pistol competitions in all, as on My licence
     const n = new Set(lines.filter(l => l.pistol && l.comp).map(l => l.date)).size;
@@ -4036,7 +4052,8 @@ function participationView() {
   const step = (to, dir, label) => `<button type="button" class="icon-btn pc-year-btn no-print" data-pc-year="${to || ''}"${to ? '' : ' disabled'} aria-label="${to ? label + ': ' + fyLabel(to) : 'No ' + label.toLowerCase()}">${dir}</button>`;
   const bar = !pr ? '' : pr.part === undefined ? `<p class="muted pc-progress-text">${esc(pr.text)}</p>`
     : `<div class="pc-progress${pr.met ? ' pc-met' : ''}"><div class="pc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pr.part * 100)}" aria-label="${esc(pr.text)}"><span style="width:${Math.round(pr.part * 100)}%"></span></div>
-      <p class="pc-progress-text">${pr.met ? ICON.check : ''}${esc(pr.text)}</p></div>`;
+      <p class="pc-progress-text">${pr.met ? ICON.check : ''}${esc(pr.text)}</p>
+      ${pr.parts ? `<ul class="pc-parts">${pr.parts.map(p => `<li class="${p.n >= p.of ? 'pc-part-done' : ''}">${esc(p.label)}: <b>${p.n} of ${p.of}</b>${p.n >= p.of ? ICON.check : ''}</li>`).join('')}</ul>` : ''}</div>`;
   const match = l => {
     const name = l.comp ? esc(l.name) : 'Practice';
     if (!can) return name;
@@ -4058,7 +4075,7 @@ function participationView() {
           <div class="pcard-line"><span>Licence holder:</span><b>${esc((ME.viewing && ME.viewing.name) || ME.name)}</b></div>
           <div class="pcard-line"><span>SSAA Qld membership no.</span>${ssaa}</div>
           ${classes.length ? `<div class="pcard-line"><span>Classes</span><span class="pcard-classes">${classes.map(k => `<span class="pc-class">${esc(k)}</span>`).join('')}</span></div>` : ''}
-          <div class="pc-year">${step(years[i - 1], '&lsaquo;', 'Earlier year')}<b class="pc-year-label">${esc(fyLabel(fy))}</b>${step(years[i + 1], '&rsaquo;', 'Later year')}</div>
+          <div class="pc-year">${step(years[i - 1], '&lsaquo;', 'Earlier year')}<b class="pc-year-label">${esc(fyLabel(fy))}<span class="pc-year-dates">(1 Jul ${fy} – 30 Jun ${fy + 1})</span></b>${step(years[i + 1], '&rsaquo;', 'Later year')}</div>
           ${bar}
         </div>
       </div>
