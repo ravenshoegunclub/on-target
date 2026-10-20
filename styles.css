@@ -1110,6 +1110,20 @@ a.ev-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
 .faq-item summary .chev { flex: 0 0 20px; width: 20px; height: 20px; color: var(--accent); transform: rotate(90deg); transition: transform .2s; }
 .faq-item[open] summary .chev { transform: rotate(-90deg); }
 .faq-a { margin: 0 0 14px; color: var(--text-2); font-size: 15.5px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+/* Event disciplines (v3.14.0): cards like the Range rules ones, with the summary under the name, and the details as bullet points */
+.disc-group { display: flex; flex-direction: column; gap: 10px; }
+.disc-group[hidden] { display: none; }
+.disc-group .sp-head { margin-top: 8px; }
+.disc-card[hidden] { display: none; }
+.disc-head { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.disc-sum { font-size: 14.5px; line-height: 1.45; color: var(--text-2); }
+.rr-card.disc-card summary { align-items: flex-start; padding-top: 14px; padding-bottom: 14px; }
+.rr-card.disc-card summary .chev { margin-top: 12px; }
+.rr-body.disc-body { padding-left: 20px; } /* the details use the card's full width: they can be long */
+.disc-points, .disc-points ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.disc-points ul { margin-top: 6px; list-style: circle; }
+.disc-points a { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+.disc-details-box { font: 400 15px/1.5 Poppins, sans-serif; white-space: pre-wrap; }
 /* Range rules & safety (v3.13.0): golden-rule tiles and "More detail" cards */
 .rr-intro { color: var(--text); font-size: 16px; line-height: 1.5; }
 .rr-ico { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 12px; background: var(--gold-soft); color: var(--maroon); display: flex; align-items: center; justify-content: center; }
@@ -1167,7 +1181,7 @@ html.embed body { background: #FFFFFF; }
 html.embed .splash, html.embed .topbar, html.embed .tabbar { display: none; }
 html.embed .app { max-width: 860px; }
 html.embed .view { padding-bottom: 16px; animation: none; }
-html.embed .faq-page { padding-top: 12px; }
+html.embed .faq-page, html.embed .disc-page { padding-top: 12px; }
 
 /* Results, Print or save as PDF (v3.10.0): the button under the day, and the A4 pages (#printPages, made by printPages in app.js).
    The pages are kept off screen and invisible until printed; they use fixed club colours, whatever the phone's setting. */

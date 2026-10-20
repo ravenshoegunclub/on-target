@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.13.0';
+const APP_VERSION = '3.14.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -24,10 +24,13 @@ const FEEDS = {
   results: 'feed=results&all=1&n=300',
   photos:  'feed=photos&n=60',
   range:   'feed=range',
-  faqs:    'feed=faqs' // only fetched while FAQs are open (v3.9.0)
+  faqs:    'feed=faqs', // only fetched while FAQs are open (v3.9.0)
+  disciplines: 'feed=disciplines' // only fetched while Event disciplines are open (v3.14.0)
 };
-/* The website's FAQ page embeds #/faq-embed: just the FAQs, with no header, tab bar or sign-in (v3.9.0) */
-const EMBED = location.hash.indexOf('#/faq-embed') === 0;
+/* The website's FAQ page embeds #/faq-embed, and its Event Rules page #/disciplines-embed: just that list, with no header,
+   tab bar or sign-in (v3.9.0, v3.14.0). EMBED_FEED is the one feed such a page reads. */
+const EMBED_FEED = { faq: 'faqs', disciplines: 'disciplines' }[(/^#\/(faq|disciplines)-embed/.exec(location.hash) || [])[1]] || '';
+const EMBED = !!EMBED_FEED;
 if (EMBED) document.documentElement.classList.add('embed');
 const REFRESH_AFTER_MS = 2 * 60 * 1000; // matches the feed's own 2-minute cache
 
@@ -173,7 +176,9 @@ async function refresh(kind, force) {
     loading[kind] = false;
   }
 }
-function refreshAll(force) { Object.keys(FEEDS).filter(k => EMBED ? k === 'faqs' : k !== 'faqs' || /^faq/.test(currentPage)).forEach(k => refresh(k, force)); }
+function refreshAll(force) {
+  Object.keys(FEEDS).filter(k => EMBED ? k === EMBED_FEED : k === 'faqs' ? /^faq/.test(currentPage) : k === 'disciplines' ? currentPage === 'disciplines' : true).forEach(k => refresh(k, force));
+}
 
 const events = () => (DATA.events && DATA.events.events) || [];
 const days = () => (DATA.results && DATA.results.days) || [];
@@ -583,6 +588,8 @@ const VIEWS = {
   contact() { return contactView(); },
   faq() { return faqView(false); },
   'faq-embed'() { return faqView(true); },
+  disciplines() { return discView(false); },
+  'disciplines-embed'() { return discView(true); },
   club() { return clubView(); },
   admin(sub) { return adminView(sub); },
 
@@ -610,6 +617,11 @@ const VIEWS = {
     if (sub === 'faq') {
       if (!faqEdit) { location.replace('#/committee/faqs'); return ''; } // e.g. the page was reloaded
       return faqForm(faqEdit);
+    }
+    if (sub === 'disciplines') return discAdminView();
+    if (sub === 'discipline') {
+      if (!discEdit) { location.replace('#/committee/disciplines'); return ''; } // e.g. the page was reloaded
+      return discForm(discEdit);
     }
     if (sub === 'document') {
       if (!docEdit) { location.replace('#/committee/documents'); return ''; } // e.g. the page was reloaded
@@ -2273,7 +2285,7 @@ let currentPage = '', currentHash = location.hash;
 
 function render(quiet) {
   const [name, sub, arg] = (location.hash.replace('#/', '') || 'home').split('/');
-  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries', 'faqs', 'faq'].includes(sub) ? '/' + sub : '')
+  const page = (VIEWS[name] ? name : 'home') + (name === 'committee' && ['event', 'results', 'photos', 'manage', 'edit', 'messages', 'message', 'reply', 'payments', 'members', 'people', 'person', 'signups', 'emergency', 'documents', 'document', 'range', 'rangestatus', 'walkin', 'reserve', 'requests', 'member', 'import', 'oldresults', 'entries', 'faqs', 'faq', 'disciplines', 'discipline'].includes(sub) ? '/' + sub : '')
     + (name === 'me' && ['results', 'pcard', 'shoot', 'handgun', 'rclass', 'licence', 'licenceedit', 'details', 'email', 'documents', 'book', 'bookings', 'request', 'family'].includes(sub) ? '/' + sub : '')
     + (name === 'admin' && (sub === 'post' || sub === 'posts') ? '/' + sub : '');
   document.body.classList.toggle('signpost', ['home', 'me', 'club', 'admin', 'faq'].includes(page)); // white, list-style screens (v2.6.0)
@@ -2310,6 +2322,10 @@ function render(quiet) {
     if (page !== 'committee/faqs') FAQADMIN.note = '';
     if (page !== 'committee/faq') faqEdit = null;
     if (page !== 'committee/faqs' && page !== 'committee/faq') FAQADMIN = blankFaqAdmin();
+    if (page === 'disciplines') DISCV = { q: '', cat: 'All', open: new Set() };
+    if (page !== 'committee/disciplines') DISCADMIN.note = '';
+    if (page !== 'committee/discipline') discEdit = null;
+    if (page !== 'committee/disciplines' && page !== 'committee/discipline') DISCADMIN = blankDiscAdmin();
     if (page !== 'committee/documents' && page !== 'committee/document') { DOCADMIN.list = null; DOCADMIN.state = ''; }
     if (page.indexOf('me') !== 0) relinking = false;
     if (page !== 'me/documents') { DOCS = null; docsState = ''; }
@@ -2319,10 +2335,12 @@ function render(quiet) {
     else if (currentPage !== 'committee/edit' && Date.now() - manageAt > 30000) { MANAGE = null; manageState = ''; }
   }
   const openComps = quiet ? [...view.querySelectorAll('details.comp')].map(d => d.open) : null;
-  const typing = quiet && document.activeElement && document.activeElement.id === 'faqSearch' ? document.activeElement.selectionStart : null;
+  const searchBox = quiet && document.activeElement && ['faqSearch', 'discSearch'].includes(document.activeElement.id) ? document.activeElement.id : '';
+  const typing = searchBox ? document.activeElement.selectionStart : null;
   view.innerHTML = VIEWS[page.split('/')[0]](sub, arg);
   faqFilter(false);
-  if (typing !== null) { const box = document.getElementById('faqSearch'); box.focus(); box.setSelectionRange(typing, typing); } // fresh data while searching
+  discFilter();
+  if (typing !== null) { const box = document.getElementById(searchBox); if (box) { box.focus(); box.setSelectionRange(typing, typing); } } // fresh data while searching
   if (openComps) view.querySelectorAll('details.comp').forEach((d, i) => { if (i in openComps) d.open = openComps[i]; });
   if (!quiet || page !== currentPage) {
     view.style.animation = 'none'; void view.offsetWidth; view.style.animation = '';
@@ -2337,7 +2355,7 @@ function render(quiet) {
   const once = document.getElementById('pinOnce');
   if (once && !quiet) once.focus();
   document.querySelectorAll('.tabbar a').forEach(a => {
-    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', admin: 'me', comps: 'events', rules: 'home', emergency: 'home', contact: 'home', faq: 'club' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (a.dataset.tab === (page === 'me/documents' ? 'club' : { committee: 'me', more: 'me', calculator: 'club', photos: 'club', disciplines: 'club', admin: 'me', comps: 'events', rules: 'home', emergency: 'home', contact: 'home', faq: 'club' }[page.split('/')[0]] || page.split('/')[0])) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
 }
 
@@ -2477,6 +2495,7 @@ view.addEventListener('submit', e => {
   if (e.target.id === 'emForm') { e.preventDefault(); findEmergency(e.target); }
   if (e.target.id === 'docForm') { e.preventDefault(); saveDoc(e.target); }
   if (e.target.id === 'faqForm') { e.preventDefault(); saveFaq(e.target); }
+  if (e.target.id === 'discForm') { e.preventDefault(); saveDisc(e.target); }
 });
 view.addEventListener('change', e => {
   if (e.target.id !== 'dcFile') return;
@@ -2635,7 +2654,7 @@ async function committeeApi(fn, args) {
 function signOut() {
   session = null; sessionStore.set(null);
   if (!member) { ME = null; meState = ''; meNote = ''; } // the membership their PIN was showing
-  EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; FAQADMIN = blankFaqAdmin(); faqEdit = null; docFile = null; DOCS = null; docsState = '';
+  EMERG = blankEmerg(); DOCADMIN = { list: null, state: '', note: '' }; docEdit = null; FAQADMIN = blankFaqAdmin(); faqEdit = null; DISCADMIN = blankDiscAdmin(); discEdit = null; docFile = null; DOCS = null; docsState = '';
   MEMBERS = null; membersFailed = false; BENCH = blankBench(); if (!member) VIEW_AS = '';
   MANAGE = null; PRIVATE = null; editing = null; manageState = ''; manageNote = ''; sharePick = null; ADDED = [];
   Object.assign(MSG, { view: 'inbox', query: '', items: null, more: false, page: 0, state: '', note: '', at: 0, run: MSG.run + 1 });
@@ -3334,7 +3353,7 @@ view.addEventListener('click', e => {
 /* Club (v2.6.1): the club's own things, the same for everyone. Room is kept at the top for the range status banner (v2.7). */
 function clubView() {
   const signedIn = !!(member || session), pics = photos().slice(0, 4);
-  const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', '#/faq')
+  const club = spRow(ICON.doc, 'Club documents', '#/me/documents') + spRow(ICON.pin, 'Visit the range', VISIT_URL) + spRow(ICON.help, 'FAQs', '#/faq') + spRow(ICON.target, 'Event disciplines', '#/disciplines')
     + spRow(ICON.mail, 'Contact the club', 'mailto:info@ravenshoegunclub.com.au') + spRow(ICON.calc, 'Handgun shoot calculator', '#/calculator') + spRow(ICON.web, 'Club website', SITE_URL);
   return `
     ${rangeBanners()}
@@ -3382,7 +3401,8 @@ function adminView(sub) {
       ${group('Range', row(ICON.alert, 'Range status', '#/committee/rangestatus', '', closures().length ? `Closed ${esc(closureDays(closures()[0]))}${closures().length > 1 ? ' and more' : ''}` : 'Open as normal')
         + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
         + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve') + row(ICON.people, 'Competition entries', '#/committee/entries', '', "Who's said I'm in"))}
-      ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove') + row(ICON.help, 'FAQs', '#/committee/faqs', '', 'Add · edit · reorder'))}
+      ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove') + row(ICON.help, 'FAQs', '#/committee/faqs', '', 'Add · edit · reorder')
+        + row(ICON.target, 'Disciplines', '#/committee/disciplines', '', 'Event disciplines: add · edit · reorder'))}
       ${session.admin ? `${ADMIN.benchNote ? `<p class="notice" role="status">${esc(ADMIN.benchNote)}</p>` : ''}${group('Admin only', benchSwitchRow() + row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
         + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet')
@@ -5749,6 +5769,222 @@ view.addEventListener('click', e => {
     faqChange('faqMove', [kind, key, Number(dir)], `[data-fq-move="${kind}"][data-fq-key="${CSS.escape(key)}"][data-fq-dir="${dir}"]`);
   }
   if ((b = hit('data-fq-restore'))) faqChange('faqRestore', [b.dataset.fqRestore], '[data-fq="new"]');
+});
+
+/* ---------- Event disciplines (v3.14.0) ----------
+   The competition disciplines from the website's Event Rules page, kept like the FAQs: everyone reads them through the
+   public feed (?feed=disciplines), saved on the phone like events. On Target shows the "On Target" and "Both" ones at
+   #/disciplines (Club tab); the website's Event Rules page embeds #/disciplines-embed ("Website" and "Both", no header or
+   tab bar). Any club team PIN can change them in Club admin, Disciplines. Details are one point per line; a line that
+   starts with spaces is a sub-point of the one above. */
+const DISC_CATS = ['Pistol', 'Rifle', 'Black powder', 'Shotgun', 'Multi-gun', 'Juniors', 'Other'];
+const DISC_ICON = { // line icons for each category, drawn like RULE_ICON on the Range rules screen
+  'Pistol': '<path d="M3 7h17v4h-7.5l-1 2.5H9.5L8 19H4.5l2-8H3z"/><path d="M11.5 11v2.5"/>',
+  'Rifle': '<path d="M2 13l3-3h14l3-1v3l-3 1H11l-1.5 2.5H6.5L7 13z"/><path d="M10 10V8h5v2"/>',
+  'Black powder': '<path d="M4 13.5l14-6.5 2 4-14 5.5z"/><circle cx="9" cy="17" r="3"/><path d="M20 9l1.5-.7"/>',
+  'Shotgun': '<path d="M3 12h18l-2.5 3.5h-13z"/><path d="M7.5 12a4.5 2.5 0 0 1 9 0"/>',
+  'Multi-gun': '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2.5M10 3h4M12 3v3"/>',
+  'Juniors': '<circle cx="12" cy="7" r="3.5"/><path d="M5.5 21c.8-4 3.4-6.5 6.5-6.5s5.7 2.5 6.5 6.5"/>',
+  'Other': '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'
+};
+const discIco = c => `<span class="rr-ico"><svg viewBox="0 0 24 24" aria-hidden="true">${DISC_ICON[c] || DISC_ICON.Other}</svg></span>`;
+const discItems = () => (DATA.disciplines && DATA.disciplines.disciplines) || [];
+let DISCV = { q: '', cat: 'All', open: new Set() };
+/* Grouped by category, in the chips' order: [{category, items}] */
+function discGroups(list) {
+  return DISC_CATS.map(c => ({ category: c, items: list.filter(d => (DISC_CATS.includes(d.category) ? d.category : 'Other') === c) })).filter(g => g.items.length);
+}
+/* The details as bullet points: a line starting with spaces (or a tab) is a sub-point; a typed "-" or "•" at the start is dropped.
+   Web addresses become links that open a new tab (faqLinks). */
+function discBullets(text) {
+  let html = '', sub = false;
+  String(text || '').split('\n').forEach(line => {
+    if (!line.trim()) return;
+    const inner = /^\s/.test(line), words = faqLinks(line.trim().replace(/^[-•*]\s+/, ''), true);
+    if (inner && html) { html += (sub ? '' : '<ul>') + `<li>${words}</li>`; sub = true; return; }
+    html += (sub ? '</ul></li>' : html ? '</li>' : '') + `<li>${words}`; sub = false;
+  });
+  return html ? `<ul class="disc-points">${html}${sub ? '</ul>' : ''}</li></ul>` : '';
+}
+function discView(embed) {
+  const want = embed ? 'Website' : 'On Target';
+  if (!FAILED.disciplines) setTimeout(() => refresh('disciplines'), 0); // fetched only when disciplines are opened
+  const body = () => {
+    const groups = discGroups(discItems().filter(d => d.show === 'Both' || d.show === want));
+    if (!groups.length) return empty('No disciplines yet', 'Please contact the club to ask about competitions.');
+    if (DISCV.cat !== 'All' && !groups.some(g => g.category === DISCV.cat)) DISCV.cat = 'All';
+    return `<div class="chips" role="group" aria-label="Category">${['All'].concat(groups.map(g => g.category)).map(c => `
+        <button type="button" class="chip-btn" data-disc-cat="${esc(c)}" aria-pressed="${c === DISCV.cat}">${esc(c)}</button>`).join('')}</div>`
+      + groups.map(g => `
+      <section class="disc-group" data-cat="${esc(g.category)}"><h2 class="sp-head">${esc(g.category)}</h2>${g.items.map(d => `
+        <details class="card rr-card disc-card" data-disc="${esc(d.id)}" data-text="${esc((d.name + ' ' + d.summary + ' ' + d.details).toLowerCase())}"${DISCV.open.has(d.id) ? ' open' : ''}>
+          <summary>${discIco(g.category)}<span class="disc-head"><span class="rr-title">${esc(d.name)}</span><span class="disc-sum">${esc(d.summary)}</span></span>${ICON.chev}</summary>
+          <div class="rr-body disc-body">${discBullets(d.details)}</div>
+        </details>`).join('')}
+      </section>`).join('') + `<p class="muted faq-none" id="discNone" role="status" hidden>No disciplines match that. Try another word.</p>`;
+  };
+  return `
+    ${embed ? '' : `<div class="page-title"><a class="back-link" href="#/club">${ICON.chev}Club</a><h1>Event disciplines</h1>
+      <p class="rr-intro">Here's what each competition involves: distances, firearms, classes and rules.</p></div>`}
+    <section class="section disc-page">
+      <div class="faq-search">${ICON.search}<label class="sr-only" for="discSearch">Search the disciplines</label>
+        <input class="field" type="search" id="discSearch" placeholder="Search the disciplines" autocomplete="off" value="${esc(DISCV.q)}"></div>
+      ${state('disciplines', 5, body)}
+      <p class="rr-foot">Rules can change. Check with a Club Official or the SSAA rule books before competing.</p>
+    </section>`;
+}
+/* Search and category: every word typed must be in the name, summary or details, within the chosen category */
+function discFilter() {
+  if (!document.getElementById('discSearch')) return;
+  const words = DISCV.q.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0;
+  view.querySelectorAll('.disc-group').forEach(sec => {
+    let n = 0;
+    if (DISCV.cat === 'All' || sec.dataset.cat === DISCV.cat) sec.querySelectorAll('.disc-card').forEach(d => {
+      const hit = words.every(w => d.dataset.text.includes(w));
+      d.hidden = !hit; if (hit) n++;
+    });
+    sec.hidden = !n; shown += n;
+  });
+  view.querySelectorAll('[data-disc-cat]').forEach(b => b.setAttribute('aria-pressed', b.dataset.discCat === DISCV.cat));
+  const none = document.getElementById('discNone');
+  if (none) none.hidden = !!shown || !view.querySelector('.disc-group');
+}
+view.addEventListener('input', e => { if (e.target.id === 'discSearch') { DISCV.q = e.target.value; discFilter(); } });
+view.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.classList && d.classList.contains('disc-card')) { if (d.open) DISCV.open.add(d.dataset.disc); else DISCV.open.delete(d.dataset.disc); }
+}, true);
+view.addEventListener('click', e => { const b = e.target.closest('[data-disc-cat]'); if (b) { DISCV.cat = b.dataset.discCat; discFilter(); } });
+
+/* Club admin, Disciplines (any club team PIN): add, edit, reorder, delete and restore, as FAQs */
+const blankDiscAdmin = () => ({ list: null, deleted: [], state: '', note: '', busy: false });
+let DISCADMIN = blankDiscAdmin();
+let discEdit = null; // the discipline being edited ({} for a new one) while that screen is open
+const discEdited = d => d.by === 'Website Event Rules' ? `Copied from the website's Event Rules page, ${niceDate(d.on)}` : `Last edited by ${d.by}, ${niceDate(d.on)}`;
+/* What the server sends back after every change: the club team's list, and the public list everyone sees straight away */
+function discTook(out) {
+  DISCADMIN.list = out.disciplines || []; DISCADMIN.deleted = out.deleted || []; DISCADMIN.state = '';
+  DATA.disciplines = { disciplines: DISCADMIN.list.map(d => ({ id: d.id, name: d.name, category: d.category, summary: d.summary, details: d.details, show: d.show })) }; FAILED.disciplines = false;
+  store.set('disciplines', DATA.disciplines);
+  if (out.message) DISCADMIN.note = out.message;
+}
+async function loadDiscAdmin() {
+  if (DISCADMIN.state === 'loading') return;
+  DISCADMIN.state = 'loading';
+  try { discTook(await committeeApi('discList')); }
+  catch (e) { if (e.signedOut) { DISCADMIN.state = ''; return; } DISCADMIN.state = 'failed'; }
+  if (currentPage === 'committee/disciplines' || currentPage === 'committee/discipline') render(true);
+}
+const discMoveBtn = (id, dir, off, label) => `<button type="button" class="icon-btn faq-move" data-dc-move="${esc(id)}" data-dc-dir="${dir}" aria-label="${esc(label)}"${off || DISCADMIN.busy ? ' disabled' : ''}>${dir < 0 ? ICON.up : ICON.down}</button>`;
+function discAdminView() {
+  if (!DISCADMIN.list && DISCADMIN.state !== 'failed') setTimeout(loadDiscAdmin, 0);
+  const groups = DISCADMIN.list ? discGroups(DISCADMIN.list) : [], del = DISCADMIN.deleted;
+  return `
+    <div class="page-title">${adminBack}<h1>Disciplines</h1><p class="muted">They show in On Target (Club, Event disciplines) and on the club website's Event Rules page. Changes show straight away.</p></div>
+    <section class="section">
+      ${DISCADMIN.note ? `<p class="notice" role="status">${esc(DISCADMIN.note)}</p>` : ''}
+      <p class="muted" role="status">${DISCADMIN.busy ? 'Saving the new order…' : ''}</p>
+      <button type="button" class="btn btn-primary btn-big" data-dc="new">${ICON.plus}Add a discipline</button>
+    </section>
+    ${DISCADMIN.list ? (groups.length ? groups.map(g => `
+      <section class="section">
+        <h2 class="day-head">${esc(g.category)}</h2>
+        <div class="card list">${g.items.map((d, i) => `
+          <div class="faq-adm-row">
+            <button type="button" class="faq-adm-main" data-dc="${esc(d.id)}"><span class="list-title">${esc(d.name)}</span>
+              <span class="badge-row">${faqShowBadge(d.show)}</span><span class="muted">${esc(discEdited(d))}</span></button>
+            <span class="faq-moves">${discMoveBtn(d.id, -1, i === 0, 'Move up: ' + d.name)}${discMoveBtn(d.id, 1, i === g.items.length - 1, 'Move down: ' + d.name)}</span>
+          </div>`).join('')}</div>
+      </section>`).join('') : `<section class="section">${empty('No disciplines yet', 'Tap "Add a discipline" to add the first one.')}</section>`)
+      : `<section class="section">${DISCADMIN.state === 'failed' ? loadFailed('the disciplines', 'data-dc-reload') : skeletonRows(4)}</section>`}
+    ${del.length ? `<section class="section"><details class="card faq-bin"><summary><span class="list-title">Recently deleted (${del.length})</span>${ICON.chev}</summary>
+      <p class="muted faq-bin-note">Deleted disciplines are kept here for 30 days, then removed for good.</p>
+      ${del.map(d => `<div class="faq-adm-row"><span class="faq-adm-main"><span class="list-title">${esc(d.name)}</span>
+          <span class="muted">${esc(`Deleted by ${d.deletedBy}, ${niceDate(d.deletedOn)} · removed for good after ${niceDate(d.until)}`)}</span></span>
+        <button type="button" class="btn btn-outline" data-dc-restore="${esc(d.id)}"${DISCADMIN.busy ? ' disabled' : ''}>Restore</button></div>`).join('')}
+    </details></section>` : ''}`;
+}
+function discForm(d) {
+  const isNew = !d.id;
+  return `
+    <div class="page-title"><a class="back-link" href="#/committee/disciplines">${ICON.chev}Disciplines</a><h1>${isNew ? 'Add a discipline' : 'Edit discipline'}</h1></div>
+    <section class="section"><form class="card form" id="discForm" novalidate>
+      <label class="field-label" for="dcName">Name</label>
+      <input class="field" id="dcName" maxlength="120" autocomplete="off" value="${esc(d.name || '')}">
+      <label class="field-label" for="dcCat">Category</label>
+      <select class="field" id="dcCat">${isNew ? '<option value="">Choose a category…</option>' : ''}${DISC_CATS.map(c => `<option${c === d.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <label class="field-label" for="dcSum">Summary</label>
+      <p class="muted" id="dcSumHint">One line, shown before the card is opened.</p>
+      <input class="field" id="dcSum" maxlength="300" autocomplete="off" aria-describedby="dcSumHint" value="${esc(d.summary || '')}">
+      <label class="field-label" for="dcDetails">Details</label>
+      <p class="muted" id="dcDetailsHint">One point per line. Start a line with two spaces to make it a sub-point of the line above. Web addresses become links by themselves.</p>
+      <textarea class="field disc-details-box" id="dcDetails" rows="12" maxlength="8000" aria-describedby="dcDetailsHint">${esc(d.details || '')}</textarea>
+      <fieldset class="choices choices-row"><legend class="field-label">Show on</legend>${radios('dcShow', FAQ_SHOW, d.show || 'Both')}</fieldset>
+      <p class="form-error" id="dcError" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-big" id="dcSubmit">${isNew ? 'Add discipline' : 'Save changes'}</button>
+      ${isNew ? '' : '<button type="button" class="btn btn-danger btn-big" data-dc-delete>Delete this discipline</button>'}
+    </form></section>`;
+}
+function discDone(out) {
+  discTook(out);
+  const form = document.getElementById('discForm');
+  if (form) form.remove();
+  go('#/committee/disciplines');
+}
+async function saveDisc(form) {
+  const btn = form.querySelector('#dcSubmit'), error = form.querySelector('#dcError');
+  if (btn.disabled) return;
+  const fail = (msg, el) => { error.textContent = msg; error.hidden = false; if (el) el.focus(); };
+  const d = { id: discEdit.id || '', name: form.querySelector('#dcName').value.replace(/\s+/g, ' ').trim(), category: form.querySelector('#dcCat').value,
+    summary: form.querySelector('#dcSum').value.replace(/\s+/g, ' ').trim(), details: form.querySelector('#dcDetails').value.replace(/^\s*\n/, '').replace(/\s+$/, ''),
+    show: (form.querySelector('input[name="dcShow"]:checked') || {}).value || 'Both' };
+  if (!d.name) return fail('Please type the name of the discipline.', form.querySelector('#dcName'));
+  if (!d.category) return fail('Please choose a category.', form.querySelector('#dcCat'));
+  if (!d.summary) return fail('Please type a one-line summary.', form.querySelector('#dcSum'));
+  if (!d.details.trim()) return fail('Please type the details.', form.querySelector('#dcDetails'));
+  error.hidden = true; btn.disabled = true; btn.textContent = 'Saving…';
+  try { discDone(await committeeApi('discSave', [d])); }
+  catch (e) {
+    if (e.signedOut) return;
+    btn.disabled = false; btn.textContent = d.id ? 'Save changes' : 'Add discipline';
+    fail(e.message);
+  }
+}
+function askDeleteDisc() {
+  const d = discEdit;
+  confirmAsk({
+    title: 'Delete this discipline?', text: `"${d.name}" will no longer show in On Target or on the website. It stays in "Recently deleted" for 30 days, where anyone in the club team can bring it back.`,
+    yes: 'Yes, delete it', busy: 'Deleting…',
+    run: () => committeeApi('discDelete', [d.id]), done: discDone
+  });
+}
+/* Moves and restores: one at a time, the buttons wait until the server has the new order */
+async function discChange(fn, args, refocus) {
+  if (DISCADMIN.busy) return;
+  DISCADMIN.busy = true; DISCADMIN.note = ''; render(true);
+  try { discTook(await committeeApi(fn, args)); }
+  catch (e) { if (!e.signedOut) DISCADMIN.note = e.message; }
+  DISCADMIN.busy = false;
+  if (currentPage !== 'committee/disciplines') return;
+  render(true);
+  const again = refocus && view.querySelector(refocus), other = again && again.disabled && view.querySelector(refocus.replace(/data-dc-dir="(-?1)"/, (m, d) => `data-dc-dir="${-d}"`));
+  if (again && !again.disabled) again.focus(); else if (other) other.focus(); // at the top or bottom now: the other arrow
+}
+view.addEventListener('click', e => {
+  const t = e.target, hit = a => { const x = t.closest(`[${a}]`); return x && !x.disabled ? x : null; };
+  let b;
+  if ((b = hit('data-dc')) && (DISCADMIN.list || b.dataset.dc === 'new')) {
+    discEdit = b.dataset.dc === 'new' ? {} : DISCADMIN.list.find(d => d.id === b.dataset.dc);
+    if (discEdit) location.hash = '#/committee/discipline';
+  }
+  if (hit('data-dc-reload')) { DISCADMIN = blankDiscAdmin(); render(true); }
+  if (hit('data-dc-delete') && discEdit) askDeleteDisc();
+  if ((b = hit('data-dc-move'))) {
+    const { dcMove: id, dcDir: dir } = b.dataset;
+    discChange('discMove', [id, Number(dir)], `[data-dc-move="${CSS.escape(id)}"][data-dc-dir="${dir}"]`);
+  }
+  if ((b = hit('data-dc-restore'))) discChange('discRestore', [b.dataset.dcRestore], '[data-dc="new"]');
 });
 
 /* Reserve for a competition: pick the event, then tap the benches it needs */
