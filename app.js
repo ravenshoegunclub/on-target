@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.2.2';
+const APP_VERSION = '3.3.0';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -272,6 +272,10 @@ function rangeBanner(c) {
   return `<div class="range-banner" role="status">${ICON.alert}<div class="range-banner-text"><b>Range closed ${esc(when)} · ${esc(c.reason)}</b>
     ${c.note ? `<span>${esc(c.note)}</span>` : ''}${c.fire ? `<a href="${FIRE_URL}" target="_blank" rel="noopener">Check fire danger ratings<span class="sr-only"> (opens the Queensland Fire Department website)</span> ↗</a>` : ''}</div></div>`;
 }
+/* Bench booking on or off (v3.3.0): the switch comes with the range feed too, and benchInfo says it again when a member opens their bookings */
+const BENCH_PAUSED_TEXT = "Bench booking is paused at the moment because it's not a peak period. Just come along on range days: it's first in, best dressed. We'll switch booking back on when things get busy.";
+const benchOff = () => BENCH.info ? !!BENCH.info.paused : !!(DATA.range && DATA.range.benchOff);
+const benchPausedCard = () => `<div class="card empty"><div class="empty-title">Bench booking is paused</div><p class="muted">${esc(BENCH_PAUSED_TEXT)}</p></div>`;
 /* Home and the Club tab: a banner for each closure that has started or starts within 7 days; nothing on normal days */
 function rangeBanners() {
   const soon = isoAdd(isoOf(new Date()), 7), list = closures().filter(c => c.from <= soon);
@@ -2958,7 +2962,7 @@ function adminView(sub) {
         + row(ICON.check, 'Today at the range', '#/committee/range') + row(ICON.calendar, 'Booking requests', '#/committee/requests', count(BENCH.waiting, 'waiting'))
         + row(ICON.trophy, 'Reserve for a competition', '#/committee/reserve') + row(ICON.people, 'Competition entries', '#/committee/entries', '', "Who's said I'm in"))}
       ${group('Club', row(ICON.doc, 'Manage club documents', '#/committee/documents', '', 'Add · edit · remove'))}
-      ${session.admin ? `${group('Admin only', row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
+      ${session.admin ? `${ADMIN.benchNote ? `<p class="notice" role="status">${esc(ADMIN.benchNote)}</p>` : ''}${group('Admin only', benchSwitchRow() + row(ICON.fees, 'Payments to confirm', '#/committee/payments', count(sum && sum.pending, 'waiting'))
         + row(ICON.people, 'All members &amp; status', '#/committee/members') + row(ICON.join, 'App sign-ups to check', '#/committee/signups', count(signCount, 'waiting'))
         + row(ICON.key, 'People and PINs', '#/committee/people') + row(ICON.doc, 'Import members list', '#/committee/import', '', 'From the club’s spreadsheet')
         + row(ICON.trophy, 'Link old results', '#/committee/oldresults', count(sum && sum.claimFlags, 'to check'), 'Older results to members'))}
@@ -2967,6 +2971,33 @@ function adminView(sub) {
           ${sum.season === 'followup' ? `<a class="admin-count red" href="#/committee/members" data-mem-filter="overdue">Not financial – overdue: <b>${sum.overdue}</b></a>` : ''}
         </div>` : ''}` : ''}
     </section>`;
+}
+
+/* Bench booking on or off (v3.3.0), admins only. Off asks first (it cancels upcoming bookings); On is one tap. */
+let benchOffSeen = null; // what the server last said, for when the range feed couldn't be fetched
+const benchOffNow = () => DATA.range ? !!DATA.range.benchOff : benchOffSeen; // null: not known yet
+const setBenchOff = v => { benchOffSeen = !!v; if (DATA.range) DATA.range.benchOff = !!v; };
+function benchSwitchRow() {
+  const st = benchOffNow(), known = st !== null, off = !!st, busy = ADMIN.benchBusy;
+  return `<button type="button" class="menu-row" role="switch" aria-checked="${known && !off}" data-bench-switch${busy ? ' disabled' : ''}>
+    <span class="tile-ico">${ICON.bench}</span><span class="row-text">Bench booking<span class="muted">${busy ? 'Checking…' : !known ? 'Tap to check' : off ? 'Off: first in, best dressed' : 'On: members can book ahead'}</span></span>
+    <span class="switch${known && !off ? ' switch-on' : ''}" aria-hidden="true"><span class="switch-text">${known ? (off ? 'Off' : 'On') : ''}</span><span class="switch-knob"></span></span></button>`;
+}
+async function tapBenchSwitch() {
+  ADMIN.benchBusy = true; ADMIN.benchNote = ''; render(true);
+  const shown = benchOffNow(), done = out => { setBenchOff(out.off); ADMIN.benchNote = out.message || ''; render(true); };
+  try {
+    const now = await committeeApi('benchSwitchPreview');
+    setBenchOff(now.off);
+    // Not what the screen showed (not known yet, or changed by another admin): just show how it is, and change nothing
+    if (shown === null || shown !== !!now.off) { ADMIN.benchNote = `Bench booking is ${now.off ? 'off' : 'on'} at the moment.`; return; }
+    if (now.off) { done(await committeeApi('benchSwitch', [true])); return; }
+    confirmAsk({ title: 'Switch bench booking off?',
+      text: now.bookings ? `This will cancel ${now.bookings} upcoming bench booking${now.bookings === 1 ? '' : 's'} and let ${now.members === 1 ? 'that member' : 'those members'} know. Continue?`
+        : 'There are no upcoming bench bookings to cancel. Members will see that booking is paused. Continue?',
+      yes: 'Yes, switch it off', busy: 'Switching off…', no: 'No, keep it on', run: () => committeeApi('benchSwitch', [false]), done });
+  } catch (e) { if (!e.signedOut) ADMIN.benchNote = e.message; }
+  finally { ADMIN.benchBusy = false; render(true); }
 }
 
 /* The top of Me: the sign-in box, or the membership card and its quick buttons.
@@ -4252,6 +4283,7 @@ function benchLeave(page) {
   if (page !== 'committee/range' && page !== 'committee/walkin' && page !== 'committee/reserve') { BENCH.day = null; BENCH.dayState = ''; BENCH.dayRun++; }
   if (page !== 'committee/range') BENCH.dayNote = '';
   if (page !== 'committee/reserve') { BENCH.res = null; BENCH.events = null; BENCH.eventsState = ''; BENCH.allEvents = false; }
+  if (page !== 'admin') ADMIN.benchNote = '';
   if (page !== 'committee/requests') { BENCH.reqs = null; BENCH.reqState = ''; BENCH.reqNote = ''; BENCH.answers = {}; }
 }
 
@@ -4264,6 +4296,7 @@ async function loadBenchInfo() {
     const d = await memberApi('benchInfo');
     if (auth !== meAuth()) { BENCH.infoState = ''; return; }
     BENCH.info = d; BENCH.infoState = '';
+    if (d) setBenchOff(d.paused);
   } catch (e) { if (e.signedOut) return; BENCH.infoState = 'failed'; BENCH.infoError = e.message; }
   if (['me/book', 'me/bookings', 'me/request'].includes(currentPage)) render(true);
 }
@@ -4286,6 +4319,7 @@ function benchState(b, session) {
 const BENCH_WORD = { free: 'free', taken: 'taken', competition: 'kept for a competition', mine: 'yours' };
 
 function bookView() {
+  if (benchOff()) return `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Book a bench</h1></div><section class="section">${benchPausedCard()}</section>`;
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
   const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>Book a bench</h1>${viewingOther() ? viewingLine() + `<p class="muted">This booking will be in ${esc(ME.viewing.first)}'s name.</p>` : ''}</div>`;
   if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(3)}</section>`;
@@ -4352,13 +4386,16 @@ const bookingStarted = b => { const now = new Date(), t = time24(b.start) || '00
 function bookingsView() {
   if (!BENCH.info && BENCH.infoState !== 'failed') setTimeout(loadBenchInfo, 0);
   const head = `<div class="page-title"><a class="back-link" href="#/me">${ICON.chev}Me</a><h1>${viewingOther() ? esc(ME.viewing.first) + "'s" : 'My'} bookings</h1>${viewingLine()}</div>`;
-  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? benchFailed() : skeletonRows(2)}</section>` + entriesSection();
+  if (!BENCH.info) return head + `<section class="section">${BENCH.infoState === 'failed' ? (benchOff() ? benchPausedCard() : benchFailed()) : skeletonRows(2)}</section>` + entriesSection();
   const info = BENCH.info, what = x => `${esc(info.sessions[x.session])}${x.start ? ' · ' + esc(sessionTimes([x.start, x.end])) : ''}`;
-  const pill = { Waiting: 'amber', Declined: 'grey' };
+  const pill = { Waiting: 'amber', Declined: 'grey' }, paused = !!info.paused;
+  // v3.3.0: the notice left when bench booking was switched off is shown once, then the server forgets it
+  if (info.notices && !info.noticeSent) { info.noticeSent = true; memberApi('benchNoticeSeen', [info.notices.ids]).catch(() => {}); }
   return `${head}
     <section class="section">
+      ${info.notices ? `<p class="notice" role="status">${esc(info.notices.text)}</p>` : ''}
       ${BENCH.note ? `<p class="notice" role="status">${esc(BENCH.note)}</p>` : ''}
-      ${info.bookings.length ? info.bookings.map((b, i) => `
+      ${paused && !info.bookings.length ? '' : info.bookings.length ? info.bookings.map((b, i) => `
         <article class="card book-card">
           <div class="event-row">${dateBlock(b.date)}
             <div><div class="event-title">Bench ${b.bench} · ${esc(rangeOf(info.ranges, b.range).name)}</div>
@@ -4369,8 +4406,8 @@ function bookingsView() {
             ${bookingStarted(b) ? '' : `<button type="button" class="btn btn-outline" data-bk-cancel="${i}">${ICON.close}Cancel</button>`}
           </div>
         </article>`).join('') : empty('No bookings coming up', 'When you book a bench it appears here.')}
-      <a class="btn btn-primary btn-big" href="#/me/book">${ICON.bench}Book a bench</a>
-      <p class="muted">Please arrive on time: a bench nobody has been ticked in to is given to someone else ${info.noShowMinutes} minutes after the session starts.</p>
+      ${paused ? benchPausedCard() : `<a class="btn btn-primary btn-big" href="#/me/book">${ICON.bench}Book a bench</a>
+      <p class="muted">Please arrive on time: a bench nobody has been ticked in to is given to someone else ${info.noShowMinutes} minutes after the session starts.</p>`}
     </section>
     <section class="section">
       <div class="section-head"><h2>Another day?</h2></div>
@@ -4823,6 +4860,7 @@ async function loadBenchRequests() {
   try {
     const d = await committeeApi('benchRequests') || {};
     BENCH.reqs = { requests: Array.isArray(d.requests) ? d.requests : [], ranges: d.ranges || [], sessions: d.sessions || {} };
+    setBenchOff(d.benchOff);
     const n = BENCH.reqs.requests.filter(r => r.waiting).length;
     if (n !== BENCH.waiting) { BENCH.waiting = n; drawDot(); }
     BENCH.reqState = '';
@@ -4857,6 +4895,8 @@ function benchRequestsView() {
   };
   return `
     <div class="page-title">${adminBack}<h1>Booking requests</h1><p class="muted">Members asking for a bench on a Tuesday, Thursday or Friday.</p></div>
+    ${benchOffNow() ? `<section class="section"><div class="range-banner" role="status">${ICON.alert}<div class="range-banner-text"><b>Bench booking is OFF</b>
+      <span>Members can't book a bench ahead for range days: it's first in, best dressed. Requests for other days still come in here.</span></div></div></section>` : ''}
     <section class="section">
       ${BENCH.reqNote ? `<p class="notice" role="status">${esc(BENCH.reqNote)}</p>` : ''}
       ${BENCH.reqs ? body() : BENCH.reqState === 'failed' ? loadFailed('the requests', 'data-req-reload') : skeletonRows(3)}
@@ -4880,6 +4920,7 @@ view.addEventListener('click', e => {
   const hit = attr => { const x = e.target.closest(`[${attr}]`); if (!x || x.disabled) return null; v = x.getAttribute(attr); return x; };
   // Members
   if (hit('data-bench-reload')) { BENCH.info = null; BENCH.infoState = ''; render(true); }
+  if (hit('data-bench-switch')) tapBenchSwitch();
   if ((el = hit('data-bk-day'))) { Object.assign(BENCH.pick, { date: v, bench: 0 }); BENCH.error = ''; BENCH.map = null; render(true); loadBenchMap(); }
   if ((el = hit('data-bk-range'))) { Object.assign(BENCH.pick, { range: v, bench: 0 }); BENCH.error = ''; render(true); loadBenchMap(); }
   if ((el = hit('data-bk-session'))) { Object.assign(BENCH.pick, { session: v, bench: 0 }); BENCH.error = ''; render(true); const step = view.querySelector('.bench-map'); if (step) step.scrollIntoView({ block: 'center', behavior: 'smooth' }); }

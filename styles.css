@@ -925,3 +925,12 @@ button.log-row { font: inherit; color: inherit; }
 .shoot-lic { margin-bottom: 12px; }
 .fam-row { margin-bottom: 12px; }
 .post-tiles-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* Bench booking on/off switch in Club admin (v3.3.0): a big pill with the word on it, so it reads without colour */
+.menu-row .switch { margin-left: auto; flex: 0 0 auto; position: relative; width: 76px; height: 36px; border-radius: 18px; background: var(--line); color: var(--text-2); }
+.menu-row .switch-on { background: var(--green); color: #fff; }
+.switch-text { position: absolute; top: 0; bottom: 0; right: 12px; display: flex; align-items: center; font: 700 14px Poppins, sans-serif; }
+.switch-on .switch-text { right: auto; left: 12px; }
+.switch-knob { position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
+.switch-on .switch-knob { left: 44px; }
+button.menu-row[disabled] { opacity: .6; cursor: default; }
