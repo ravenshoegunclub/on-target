@@ -4,7 +4,7 @@
    and still works with no signal, then refreshes in the background. */
 'use strict';
 
-const APP_VERSION = '3.14.0';
+const APP_VERSION = '3.14.1';
 const LIVE_URL = 'https://script.google.com/macros/s/AKfycbynN-K_c3FSzsGzaKeh8cGusDD8UEbvX2QvDmq_TJY1epuzPz5phpa2AAVBx5-SytV7ig/exec';
 /* Testing only: a copy of On Target running on a developer's own machine (never the live address) can be pointed at a
    test copy of the club server by opening it once with ?server=<test deployment ID>, and back with ?server=live. */
@@ -344,7 +344,148 @@ function printPages(o) {
   st.id = 'rpPage'; st.textContent = '@page { size: A4 portrait; margin: 0; }';
   document.head.appendChild(st);
   document.documentElement.classList.add('rp-printing');
-  window.print();
+  if (printAsPdf()) pdfFromPrintPages(o.file); else window.print(); // installed: a PDF file (v3.14.1)
+}
+/* ---------- A real PDF when On Target is installed (v3.14.1) ----------
+   Opened from a phone's home screen, an iPhone ignores window.print(), so every "Print or save as PDF" button there makes a
+   PDF on the phone instead (nothing is sent anywhere): each page is drawn by the bundled lib/html2canvas.min.js
+   (html2canvas 1.4.1, Niklas von Hertzen, MIT; loaded only when needed) and put in a PDF by pdfFile. Then the share sheet
+   (Print, Save to Files, Mail, AirDrop), or a download where sharing files isn't possible. In a browser, printing is as before. */
+const printAsPdf = () => isInstalled();
+let h2cLoad = null;
+const loadH2c = () => h2cLoad || (h2cLoad = new Promise((ok, no) => {
+  const s = document.createElement('script');
+  s.src = `lib/html2canvas.min.js?v=${APP_VERSION}`;
+  s.onload = ok; s.onerror = () => { h2cLoad = null; s.remove(); no(new Error("Couldn't load the PDF maker")); };
+  document.head.appendChild(s);
+}));
+/* pages: [{jpeg (bytes), w, h (pixels), pw, ph (the page in points), x, y, iw, ih (where the picture goes, in points)}] */
+function pdfFile(pages) {
+  const enc = new TextEncoder(), parts = [], at = [];
+  let len = 0;
+  const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body) => { at[n] = len; put(`${n} 0 obj\n`); body(); put('\nendobj\n'); };
+  const pt = v => (Math.round(v * 100) / 100).toString();
+  put('%PDF-1.4\n%âãÏÓ\n');
+  obj(1, () => put('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => put(`<< /Type /Pages /Kids [${pages.map((p, i) => `${3 + i * 3} 0 R`).join(' ')}] /Count ${pages.length} >>`));
+  pages.forEach((p, i) => {
+    const n = 3 + i * 3, draw = `q ${pt(p.iw)} 0 0 ${pt(p.ih)} ${pt(p.x)} ${pt(p.y)} cm /P Do Q`;
+    obj(n, () => put(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pt(p.pw)} ${pt(p.ph)}] /Resources << /XObject << /P ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`));
+    obj(n + 1, () => put(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
+    obj(n + 2, () => { put(`<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>\nstream\n`); put(p.jpeg); put('\nendstream'); });
+  });
+  const xref = len, size = 3 + pages.length * 3;
+  put(`xref\n0 ${size}\n0000000000 65535 f \n${at.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+const A4 = { w: 595.28, h: 841.89 }; // points
+const jpegOf = c => new Promise((ok, no) => c.toBlob(b => b ? b.arrayBuffer().then(a => ok(new Uint8Array(a)), no) : no(new Error('No picture')), 'image/jpeg', 0.9));
+/* One element drawn as a picture, about 2 pixels per screen pixel (less for a very big one, which phones can't hold) */
+async function drawEl(el) {
+  await loadH2c();
+  await document.fonts.ready;
+  const r = el.getBoundingClientRect(), scale = Math.min(2, Math.sqrt(14e6 / Math.max(1, r.width * r.height)));
+  return html2canvas(el, { scale, backgroundColor: '#ffffff', logging: false, scrollX: -window.scrollX, scrollY: -window.scrollY });
+}
+/* The PDF pop-up */
+const pdfSheet = document.getElementById('pdfSheet'), pdfStatus = document.getElementById('pdfStatus'), pdfError = document.getElementById('pdfError'), pdfGo = document.getElementById('pdfGo');
+let PDF = null; // {file} once made
+const canShareFile = f => !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] }));
+async function pdfMake(name, build) {
+  PDF = null; pdfError.hidden = true; pdfGo.hidden = true;
+  pdfStatus.textContent = 'Preparing your PDF…';
+  openSheet(pdfSheet, document.getElementById('pdfClose'));
+  const run = PDF_RUN = {};
+  try {
+    const pages = await build();
+    if (run !== PDF_RUN || pdfSheet.hidden) return; // closed while it was being made
+    PDF = { file: new File([pdfFile(pages)], name, { type: 'application/pdf' }) };
+    const share = canShareFile(PDF.file);
+    pdfStatus.textContent = `Your PDF is ready (${plural(pages.length, 'page')}).`;
+    pdfGo.textContent = share ? 'Share or save PDF' : 'Download PDF';
+    pdfGo.hidden = false; pdfGo.focus();
+    if (share) pdfSend(true); // straight to the share sheet; if the phone wants a fresh tap first, the button is there
+  } catch (e) {
+    console.warn('PDF', e);
+    if (run !== PDF_RUN) return;
+    pdfStatus.textContent = '';
+    pdfError.textContent = "Sorry, the PDF couldn't be made on this phone. Please try again, or open On Target in Safari or Chrome and print from there.";
+    pdfError.hidden = false;
+  }
+}
+let PDF_RUN = null;
+function pdfDownload(f) {
+  const url = URL.createObjectURL(f), a = document.createElement('a');
+  a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+async function pdfSend(auto) {
+  if (!PDF) return;
+  const f = PDF.file;
+  if (PDF.noShare || !canShareFile(f)) return pdfDownload(f);
+  try { await navigator.share({ files: [f], title: f.name.replace(/\.pdf$/, '') }); closeSheets(); }
+  catch (e) {
+    // Closed the share sheet, or the phone wants a fresh tap before sharing: the button is there for another go
+    if (e.name === 'AbortError' || auto) return;
+    PDF.noShare = true; pdfGo.textContent = 'Download PDF';
+    pdfError.textContent = "Sharing isn't available here. Tap Download PDF instead."; pdfError.hidden = false;
+  }
+}
+pdfGo.addEventListener('click', () => pdfSend(false));
+document.getElementById('pdfClose').addEventListener('click', () => { PDF_RUN = null; closeSheets(); });
+/* The A4 pages made by printPages, one picture each, filling the page */
+function pdfFromPrintPages(name) {
+  pdfMake(name, async () => {
+    const out = [], root = document.getElementById('printPages');
+    root.style.visibility = 'visible'; // still far off screen; html2canvas copies the QR code's own styles, hidden included
+    for (const el of root.querySelectorAll('.rp-page')) {
+      const c = await drawEl(el);
+      out.push({ jpeg: await jpegOf(c), w: c.width, h: c.height, pw: A4.w, ph: A4.h, x: 0, y: 0, iw: A4.w, ih: A4.h });
+    }
+    return out;
+  });
+}
+/* The Participation Card: the screen as it prints (A4 landscape, 12 mm margins; .pc-pdf in styles.css follows the print styles),
+   cut into pages between table rows */
+function pdfParticipation() {
+  const fy = PCARD_FY;
+  pdfMake(`RDSS-Participation-Card-${fyLabel(fy).replace(/[^\d]+/g, '-')}.pdf`, async () => {
+    const box = document.createElement('div');
+    box.className = 'pc-pdf'; box.setAttribute('aria-hidden', 'true');
+    box.style.visibility = 'visible'; // far off screen
+    box.innerHTML = view.innerHTML;
+    document.body.appendChild(box);
+    try {
+      const W = A4.h - 2 * 34.02, H = A4.w - 2 * 34.02, top = box.getBoundingClientRect().top, rel = el => { const r = el.getBoundingClientRect(); return [r.top - top, r.bottom - top]; };
+      const k = W / box.getBoundingClientRect().width, room = H / k; // points per pixel; the height of one page in pixels
+      // Pages end after a table row (the last one with the table's own border); later pages start with the headings again
+      const rows = [...box.querySelectorAll('.pcard-table tbody tr')], thead = box.querySelector('.pcard-table thead'), table = box.querySelector('.pcard-scroll');
+      const ends = rows.map(tr => rel(tr)[1]), head = thead ? rel(thead) : [0, 0], headH = head[1] - head[0];
+      if (ends.length && table) ends[ends.length - 1] = rel(table)[1];
+      const total = box.getBoundingClientRect().height, cuts = [0];
+      while (total - cuts[cuts.length - 1] > room - (cuts.length > 1 ? headH : 0)) {
+        const from = cuts[cuts.length - 1], fit = ends.filter(e => e > from + 1 && e <= from + room - (cuts.length > 1 ? headH : 0));
+        cuts.push(fit.length ? fit[fit.length - 1] : from + room - headH);
+      }
+      cuts.push(total);
+      const c = await drawEl(box), s = c.width / box.getBoundingClientRect().width;
+      const out = [];
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const y0 = Math.round(cuts[i] * s), y1 = Math.min(c.height, Math.round(cuts[i + 1] * s));
+        const withHead = i > 0 && headH && cuts[i] < (ends[ends.length - 1] || 0), hh = withHead ? Math.round(headH * s) : 0;
+        const part = document.createElement('canvas');
+        part.width = c.width; part.height = Math.max(1, hh + y1 - y0);
+        const g = part.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, part.width, part.height);
+        if (hh) g.drawImage(c, 0, Math.round(head[0] * s), c.width, hh, 0, 0, c.width, hh);
+        g.drawImage(c, 0, y0, c.width, y1 - y0, 0, hh, c.width, y1 - y0);
+        const ih = part.height / s * k;
+        out.push({ jpeg: await jpegOf(part), w: part.width, h: part.height, pw: A4.h, ph: A4.w, x: 34.02, y: A4.w - 34.02 - ih, iw: W, ih });
+      }
+      return out;
+    } finally { box.remove(); }
+  });
 }
 /* One competition day. Names are exactly as the Results screen shows them. */
 function resultsPrint(date) {
@@ -353,7 +494,7 @@ function resultsPrint(date) {
   const names = new Set();
   d.competitions.forEach(c => c.rows.forEach(r => { const n = String(r.shooter || '').trim().toLowerCase(); if (n) names.add(n); }));
   printPages({
-    title: 'Competition results', cont: fullDate(d.date), mid: PRINT_APP, keep: true, min: 3,
+    title: 'Competition results', cont: fullDate(d.date), mid: PRINT_APP, keep: true, min: 3, file: `RDSS-Results-${d.date}.pdf`,
     strip: `<div class="rp-strip"><div><div class="rp-date">${esc(fullDate(d.date))}</div><div class="rp-where">Competition day · Ravenshoe range, 311 Cemetery Road</div></div>
       <div class="rp-totals"><div><b>${d.competitions.length}</b>${d.competitions.length === 1 ? 'competition' : 'competitions'}</div><div><b>${names.size}</b>${names.size === 1 ? 'shooter' : 'shooters'}</div></div></div>`,
     // Shading and medals follow the whole list, so a competition carried onto the next page carries on where it left off
@@ -983,7 +1124,7 @@ const calShort = () => !DATA.events || events().length >= 30;
 /* n = 0 this quarter, 1 next: Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec */
 function quarterOf(n) {
   const t = new Date(), s = new Date(t.getFullYear(), Math.floor(t.getMonth() / 3) * 3 + 3 * n, 1), e = new Date(s.getFullYear(), s.getMonth() + 3, 0);
-  return { from: isoOf(s), to: isoOf(e), label: `${MONTHS_LONG[s.getMonth()]} – ${MONTHS_LONG[e.getMonth()]} ${e.getFullYear()}` };
+  return { from: isoOf(s), to: isoOf(e), label: `${MONTHS_LONG[s.getMonth()]} – ${MONTHS_LONG[e.getMonth()]} ${e.getFullYear()}`, file: `${mon(s)}-${mon(e)}-${e.getFullYear()}` };
 }
 function calChoose() {
   if (calShort()) { CAL.list = null; loadCal(); }
@@ -1017,7 +1158,7 @@ function qrSvg(text) {
   const n = q.getModuleCount();
   let d = '';
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
-  return `<svg viewBox="-4 -4 ${n + 8} ${n + 8}" shape-rendering="crispEdges" aria-hidden="true"><rect x="-4" y="-4" width="${n + 8}" height="${n + 8}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 ${n + 8} ${n + 8}" shape-rendering="crispEdges" aria-hidden="true"><rect x="-4" y="-4" width="${n + 8}" height="${n + 8}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
 }
 function calPrint(n) {
   const q = quarterOf(n), today = todayIso(), from = q.from > today ? q.from : today, inQ = x => x >= from && x <= q.to;
@@ -1044,7 +1185,7 @@ function calPrint(n) {
       <div class="rc-main"><div class="rc-title"><span>${esc(x.title)}</span>${x.members ? '<span class="rc-members">Members only</span>' : ''}</div>${x.note ? `<div class="rc-note">${esc(x.note)}</div>` : ''}</div>
       <span class="rc-tag${x.closed ? ' rc-tag-closed' : ''}">${esc(x.tag)}</span></div>`; };
   printPages({
-    title: 'Events calendar', cont: q.label, mid: CLUB_FROM, keep: false, min: 2, squeeze: true,
+    title: 'Events calendar', cont: q.label, mid: CLUB_FROM, keep: false, min: 2, squeeze: true, file: `RDSS-Events-${q.file}.pdf`,
     strip: `<div class="rp-strip"><div><div class="rp-date">${esc(q.label)}${from > q.from ? `<span class="rc-from">from ${esc(dayMonth(from))}</span>` : ''}</div>
       <div class="rp-where">311 Cemetery Road, Ravenshoe · Visitors welcome</div></div>
       <div class="rc-days"><div class="rc-days-head">Regular range days</div>${RANGE_DAYS.map(r => `<div>${esc(rangeDayText(r) + ' · ' + r.what)}</div>`).join('')}</div></div>`,
@@ -2673,7 +2814,7 @@ function signOut() {
 const sheet = document.getElementById('sheet'), leaveSheet = document.getElementById('leaveSheet');
 const confirmSheet = document.getElementById('confirmSheet'), shareSheet = document.getElementById('shareSheet'), installSheet = document.getElementById('installSheet');
 const pickSheet = document.getElementById('pickSheet');
-const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet, installSheet, pickSheet];
+const SHEETS = [sheet, leaveSheet, confirmSheet, shareSheet, installSheet, pickSheet, document.getElementById('pdfSheet')];
 const pinBox = document.getElementById('pinBox'), signInBtn = document.getElementById('signInBtn');
 const signInError = document.getElementById('signInError'), signInNote = document.getElementById('signInNote');
 let sheetOpener = null;
@@ -4110,7 +4251,7 @@ function participationView() {
 view.addEventListener('click', e => {
   const y = e.target.closest('[data-pc-year]');
   if (y && !y.disabled && y.dataset.pcYear) { PCARD_FY = Number(y.dataset.pcYear); render(true); const b = view.querySelector('.pc-year-label'); if (b) b.focus(); }
-  if (e.target.closest('[data-pc-print]')) { printClear(); window.print(); }
+  if (e.target.closest('[data-pc-print]')) { printClear(); if (printAsPdf()) pdfParticipation(); else window.print(); }
 });
 /* Add or change a shoot elsewhere (#/me/shoot) */
 const SHOOT_TYPES = ['Pistol', 'Rifle', 'Clay', 'Other'];

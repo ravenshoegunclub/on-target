@@ -1183,6 +1183,37 @@ html.embed .app { max-width: 860px; }
 html.embed .view { padding-bottom: 16px; animation: none; }
 html.embed .faq-page, html.embed .disc-page { padding-top: 12px; }
 
+/* Participation Card as a PDF (v3.14.1, pdfParticipation in app.js): a copy of the screen laid out as it prints (the @media print
+   rules above), A4 landscape less 12 mm margins, off screen, in the club's light colours whatever the phone's setting */
+.pc-pdf {
+  position: fixed; left: -10000px; top: 0; width: 273mm; visibility: hidden; pointer-events: none; background: #fff; color: #000;
+  color-scheme: light;
+  --bg: #FFFFFF; --card: #FFFFFF; --tint: #F3E6E2; --line: #E2D6D0; --line-soft: #F0E6E1;
+  --text: #2A1A1E; --text-2: #5E4C51; --text-3: #7A666B; --heading: #5C0F1F; --accent: #9B1B35;
+  --gold-soft: #F7E8C6; --gold-text: #6B4600; --ok-text: #1E7A3C; --ok-soft: #DDF0E3; --red-text: #B3261E;
+  --info-soft: #DDE8F7; --info-text: #1D4C8A; --shadow: none;
+}
+.pc-pdf .back-link, .pc-pdf .no-print, .pc-pdf .viewing-line { display: none !important; }
+.pc-pdf .section, .pc-pdf .page-title { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+.pc-pdf .page-title h1 { font-size: 16pt; color: #5C0F1F; margin: 0 0 2mm; }
+.pc-pdf .page-title p { margin: 0 0 4mm; color: #333; }
+.pc-pdf .card, .pc-pdf .pcard-scroll { box-shadow: none !important; border: 1px solid #999; background: #fff !important; }
+.pc-pdf .pcard-band { background: #5C0F1F !important; padding: 3mm 5mm; }
+.pc-pdf .pcard-band img { width: 12mm; height: 12mm; }
+.pc-pdf .pcard-title { color: #E9B44C !important; }
+.pc-pdf .pcard-branch { color: #fff !important; }
+.pc-pdf .pcard-who { flex-direction: row; flex-wrap: wrap; gap: 2mm 10mm; padding: 3mm 5mm; }
+.pc-pdf .pcard-scroll { overflow: visible; margin-top: 3mm; }
+.pc-pdf .pcard-table { min-width: 0; font-size: 10.5pt; }
+.pc-pdf .pcard-table th, .pc-pdf .pcard-table td { color: #000 !important; padding: 1.6mm 3mm; border-bottom: 1px solid #bbb; }
+.pc-pdf .pc-stick { position: static; box-shadow: none; background: #fff !important; }
+.pc-pdf .pcard-table thead .pc-stick { background: #F3E6E2 !important; }
+.pc-pdf .pc-edit { color: #000 !important; text-decoration: none; min-height: 0; }
+.pc-pdf .pc-key, .pc-pdf .pc-note, .pc-pdf .pc-printed { color: #333 !important; font-size: 9.5pt; }
+.pc-pdf .pc-key, .pc-pdf .pc-note { margin-top: 2mm; }
+.pc-pdf .pc-printed { margin: 1mm 0 0; }
+.pc-pdf .print-only { display: block; }
+
 /* Results, Print or save as PDF (v3.10.0): the button under the day, and the A4 pages (#printPages, made by printPages in app.js).
    The pages are kept off screen and invisible until printed; they use fixed club colours, whatever the phone's setting. */
 .rv-print { display: flex; justify-content: flex-end; margin-top: 10px; }
